@@ -6,3 +6,4 @@ game/
 *.iso
 *.img
 __pycache__/
+decomp/
