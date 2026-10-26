@@ -4,8 +4,8 @@ Derived, not guessed. The rules for Dragon's Keep in `src/` are syntax-checked a
 upstream's own headers:
 
 ```sh
-nix-build /tmp/scp.nix          # upstream builds unmodified from reference/
-g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/dragon_*.cpp
+nix-build build.nix             # upstream builds unmodified from reference/
+g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/*.cpp
 ```
 
 Three of the six files compile clean. Every remaining error is a thing the engine does
