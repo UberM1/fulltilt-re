@@ -122,7 +122,7 @@ equality, not by the flat +10 rule, so nothing here needed revising.
 | Address | Name I give it | Body |
 |---|---|---|
 | `0x423060` | `control::handler` | **calls `MissionControl` FIRST**, then `cmp->Control->ControlFunc`. Upstream does the reverse. This matters: a Dragon mission controller sees `ControlCollision` *before* the component handler, which is why so many component handlers suppress their own default scoring during a quest. |
-| `0x4230a0` | `AddScoreFrom(cmp, scoreIndex)` | `if (lastScorer != cmp) { if (lastScorer) handler(0x4d, lastScorer); lastScorer = cmp; } table->AddScore(cmp->get_scoring(i))`. `lastScorer` = `DAT_00434d20`. |
+| `0x4230a0` | `int AddScoreFrom(cmp, scoreIndex)` | `if (lastScorer != cmp) { if (lastScorer) handler(0x4d, lastScorer); lastScorer = cmp; } return table->AddScore(cmp->get_scoring(i))`. `lastScorer` = `DAT_00434d20`. Returns the credited amount — callers format it into `%ld` strings. |
 | `0x4230f0` | `AddScoreFrom(cmp, literalScore)` | same bookkeeping, explicit amount |
 | `0x423130` | `SpecialAddScore(cmp, score)` | zeroes `BonusScoreFlag`/`JackpotScoreFlag`, sets `ScoreMultiplier = 1`, adds, restores — structurally identical to upstream `SpecialAddScore` |
 | `0x4231e0` | `table_add_extra_ball(time)` | `ExtraBalls = 1` (**assignment, not `++`**), play `tabc21wave`, show string 3011 |
@@ -1268,9 +1268,17 @@ Ordered roughly by how much they would change a reimplementation.
 * **`drainPhase == 2`** is unreachable in the decompiled set.
 * **`TableG + 0x6a`**, **`DAT_00434d2c`**, and the 1-vs-2 meaning of `gameOverPhase`.
 * **The polarity of the "other sink" logic** in `a_sink1`/`a_sink2`/`FUN_00425c30`. The
-  register allocation in those three functions is the worst in the scope.
+  register allocation in those three functions is the worst in the scope, and the
+  `0x427100` listing does not bear on it. **Raw listings for `0x425ea0`, `0x426000` and
+  `0x425c30` would settle it** — these are the three functions in this scope most worth
+  getting assembly for.
 * **`a_sink9`/`a_sink10` omit the plunger relaunch** on the lock path where the other four
   entrances have it. Possibly real (those towers may feed differently), possibly a
-  decompiler omission.
+  decompiler omission. `0x427100` *does* have the relaunch, confirming it belongs in the
+  lock path at least for tower 1; listings for `0x4274d0` and `0x427680` would confirm
+  whether tower 3 really differs.
+* **Whether the `0.0` vs `-1.0` distinction** found in `a_sink18`'s two kickout paths also
+  holds in the other five entrances (the decompilation renders them all as `-1.0`, and it
+  got `a_sink18` wrong).
 * **Sound ids.** I have used `tabcNNwave` → `soundwaveNN` naively; the numbering is
   Dragon's own and does not line up with CADET's.

@@ -7,7 +7,6 @@ game/
 *.img
 __pycache__/
 decomp/
-decomp/
 # generated skeletons; regenerate with analysis/gen_control.py
 src/control_dragon.cpp
 src/control_pirates.cpp
