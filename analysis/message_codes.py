@@ -11,6 +11,20 @@ the constants the binary compares against with the MessageCode names the upstrea
 function tests. Handlers that test exactly one code on each side give an
 unambiguous pair; agreement across many handlers is what makes the mapping
 trustworthy. Disagreement is reported rather than silently resolved.
+
+RESULT, verified twice over ~55 pairs: the offset is PIECEWISE, not constant.
+Reading the dominant +11 as the whole story is wrong -- the small-delta outliers
+this script reports are real signal, not noise.
+
+    TLight codes                          +0
+    TLightGroup / TSoloTarget / TBlocker  +4
+    gate / kickout / sink                 +9
+    Control* block                        +10
+    ControlCollision                      +11   (0x4a; upstream 63)
+    public codes above 1012               +1..+2
+
+Full Tilt also has codes 0x39-0x3d with no upstream counterpart. So a port cannot
+reuse upstream's `enum class MessageCode` as-is for these binaries.
 """
 
 import json
