@@ -1,0 +1,7 @@
+# Copyrighted game data — never publish.
+binaries/
+game/
+*.EXE
+*.DAT
+*.iso
+*.img
