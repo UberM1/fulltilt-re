@@ -72,7 +72,6 @@ inline Msg DragonMsg(int rcId) { return static_cast<Msg>(rcId); }
 constexpr int Str_JackpotGrows = 3006;  // 0xbbe
 constexpr int Str_FireRidge = 3007;     // 0xbbf, "Fire Ridge\n%ld"
 constexpr int Str_WindowLane = 3008;    // 0xbc0
-constexpr int Str_MaidenRescued = 3034; // 0xbda, "Maiden Rescued / Extra Ball Available"
 constexpr int Str_SuperJackpotUp = 3076; // 0xc04, "Super Jackpot Increased\n%ld"
 
 // ---------------------------------------------------------------------------
@@ -83,11 +82,14 @@ void AddScoreFor(TPinballComponent* caller, int index); // 0x4230a0, indexes Sco
 void AddScoreAt(TPinballComponent* caller, int score);  // 0x4230f0, literal, multiplied
 void AddToJackpot(int amount);                          // 0x4238a0, clamp 10,000,000
 void AddToSuperJackpot(int amount);                     // 0x423870, clamp 20,000,000
-void AwardJackpot(bool showGlyph);                      // 0x424490
 void AwardDragonEggs(int count);                        // 0x4232b0
 void AwardExtraBall(float displayTime);                 // 0x4231e0
 void CastRandomSpell();                                 // 0x4237f0
 bool CheckDragonFlurry();                               // 0x4244e0, true when it started it
+
+// The mode-6 arm of this file's 0x427880 handler, extracted into dragon_missions.cpp.
+// See the CONFLICT note at its call site in PrisonWindowTripControl.
+void RescueMaidenAwardWindow(TPinballComponent* caller);
 
 // 0x42c76f -- renders a label (or format string) plus ONE numeric value into `out`. The
 // value is a lost argument at every call site in this file: the 1996 build passes it on
@@ -126,7 +128,6 @@ extern component_tag<TLight> tag_v_lite49;  // watch tower lock bookkeeping
 extern component_tag<TLight> tag_v_lite50;  // gate tower lock bookkeeping
 extern component_tag<TLight> tag_v_lite55;  // right return-lane ball-save light
 extern component_tag<TLight> tag_v_lite56;  // left return-lane ball-save light
-extern component_tag<TLight> tag_v_lite57;  // extra-ball light
 extern component_tag<TLight> tag_v_lite119; // dragon-ramp flasher
 extern component_tag<TLight> tag_v_lite125; // dragon-chute route indicator
 extern component_tag<TLight> tag_v_lite126; // dragon-ramp route indicator
@@ -178,7 +179,6 @@ static TLight*& lite49 = tag_v_lite49.Component;
 static TLight*& lite50 = tag_v_lite50.Component;
 static TLight*& lite55 = tag_v_lite55.Component;
 static TLight*& lite56 = tag_v_lite56.Component;
-static TLight*& lite57 = tag_v_lite57.Component;
 static TLight*& lite67 = tag_v_lite67.Component;
 static TLight*& lite68 = tag_v_lite68.Component;
 static TLight*& lite69 = tag_v_lite69.Component;
@@ -718,35 +718,21 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ModeRescueMaiden:
-		{
-			tabc51wave->Play(caller, "MaidenRescueHit");
-			const int lit = prison_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
-			if (lit == 0)
-			{
-				AddScoreAt(caller, 250000);
-				FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
-				info_text_box->Display(Buffer, 2.0f);
-			}
-			else if (lit == 1)
-			{
-				AddScoreAt(caller, 500000);
-				FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
-				info_text_box->Display(Buffer, 2.0f);
-			}
-			else if (lit == 2)
-			{
-				AwardJackpot(true);
-			}
-			else
-			{
-				lite57->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-				info_text_box->Display(pb::get_rc_string(DragonMsg(Str_MaidenRescued)), 2.0f);
-			}
-			// Lighting the fourth window is what the quest controller watches for, so it
-			// happens on every hit, award or not.
-			prison_windows->Message(MessageCode::TLightGroupResetAndTurnOn, 1.0f);
-			return;
-		}
+		// CONFLICT -- one of these two call sites must be deleted, and the choice is the
+		// coordinator's. The ladder (250,000 / 500,000 / jackpot / extra-ball light, then
+		// light the window) lives at this address in the binary, and that is why it is
+		// called from here. But dragon_missions.cpp has extracted it as
+		// RescueMaidenAwardWindow and *also* calls it from RescueMaidenController's
+		// Collision arm -- and because Dragon's control::handler runs MissionControl
+		// before the component handler, that call has already happened by the time this
+		// line is reached, so as the two files stand today the award fires twice.
+		//
+		// Deleting the call in RescueMaidenController is the faithful fix: the binary's
+		// FUN_00429510 only detects the four-window completion, and analysis/link_impls.py
+		// currently attributes 0x427880 to RescueMaidenAwardWindow and silently shadows
+		// this handler, which is the same disagreement seen from the mapping side.
+		RescueMaidenAwardWindow(caller);
+		return;
 
 	case ModeTowerBarrage:
 		AddScoreAt(caller, 100000); // flat rate while the tower is spitting balls
