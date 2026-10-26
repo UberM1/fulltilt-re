@@ -1714,13 +1714,10 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 		return;
 
 	case ft::Collision:
-		// Windows are won at the trip wire, not here: see
-		// RescueMaidenAwardWindow, which s_trip6Control must call for mode 6.
-		if (caller == tag_s_trip6.Component || caller == tag_s_trip5.Component)
-		{
-			RescueMaidenAwardWindow(caller);
-			return;
-		}
+		// Windows are won at the trip wire, not here. s_trip6Control owns that
+		// call; routing it from this controller too would fire the ladder twice,
+		// because Dragon's handler runs MissionControl before the component's own
+		// ControlFunc. FUN_00429510 only detects the four-window completion below.
 		if (caller != tag_a_sink18.Component)
 			return;
 		// Four windows lit = the maiden is out. Objective-met ends the quest
