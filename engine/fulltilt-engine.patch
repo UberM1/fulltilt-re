@@ -18,6 +18,27 @@ index a42f4e2..b7bd5e5 100644
  	int InitialDuration;
  	int ExtendedDuration;
  	int Timer;
+diff --git a/SpaceCadetPinball/TCollisionComponent.cpp b/SpaceCadetPinball/TCollisionComponent.cpp
+index 822bee1..fdd7473 100644
+--- a/SpaceCadetPinball/TCollisionComponent.cpp
++++ b/SpaceCadetPinball/TCollisionComponent.cpp
+@@ -25,9 +25,15 @@ TCollisionComponent::TCollisionComponent(TPinballTable* table, int groupIndex, b
+ 		loader::query_visual(groupIndex, 0, &visual);
+ 		if (createWall)
+ 		{
++			// Full Tilt's bonus tables have blockers with no wall at all -- Dragon's
++			// a_sword, a_jaw, a_center_post and the two rocks, Skulduggery's a_cannon
++			// and a_bloce. They read as animated props rather than collidable bodies.
++			// Space Cadet has none, so the original code dereferenced the result
++			// unconditionally and crashed here on either bonus table.
+ 			float offset = table->CollisionCompOffset;
+ 			float* floatArr = loader::query_float_attribute(groupIndex, 0, 600);
+-			TEdgeSegment::install_wall(floatArr, this, &ActiveFlag, visual.CollisionGroup, offset, 0);
++			if (floatArr)
++				TEdgeSegment::install_wall(floatArr, this, &ActiveFlag, visual.CollisionGroup, offset, 0);
+ 		}
+ 	}
+ 
 diff --git a/SpaceCadetPinball/TLightGroup.h b/SpaceCadetPinball/TLightGroup.h
 index 17449a0..8cc6693 100644
 --- a/SpaceCadetPinball/TLightGroup.h
@@ -64,10 +85,43 @@ index e0ccd71..2527a9b 100644
  	char ActiveFlag;
  	int MessageField;
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..62189b3 100644
+index aa8551a..3ea177d 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
-@@ -181,6 +181,13 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -178,9 +178,46 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+ 			case 1033:
+ 				new TTextBox(this, groupIndex);
+ 				break;
++
++			// Full Tilt's bonus tables use seven object types 3D Pinball never had, and
++			// no class for them survives in any decompilation. These map each onto the
++			// nearest existing class so the tables load, draw and behave approximately;
++			// they are stand-ins, not reconstructions, and the components carry their
++			// real type code via GetComponentType() so the rules still discriminate
++			// correctly. Recovering the real classes means disassembling their
++			// constructors in DRAGON.EXE and PIRATES.EXE.
++			case 1034: // s_launcher1: Skulduggery's ball launcher. No plunger on that table.
++				Plunger = new TPlunger(this, groupIndex);
++				break;
++			case 1035: // s_rexit*: ramp exits, one ramp wall each.
++				new TRamp(this, groupIndex);
++				break;
++			case 1036: // a_accl*: accelerators, a wall plus a kicker.
++				new TKickout(this, groupIndex, false);
++				break;
++			case 1037: // a point on a collision layer.
++				new TWall(this, groupIndex);
++				break;
++			case 1038: // light_sweeps: light show settings, no physics.
++				new TLightGroup(this, groupIndex);
++				break;
++			case 1042: // s_magnet*: a circle and a field strength.
++				new TKickout(this, groupIndex, false);
++				break;
++			case 1043: // a_dvtr*: diverters.
++				new TBlocker(this, groupIndex);
++				break;
++
  			default:
  				continue;
  			}
@@ -98,6 +152,79 @@ index c407fdc..8c872df 100644
  	int UnknownP71{};
  	int BallCount{};
  	int MaxBallCount;
+diff --git a/SpaceCadetPinball/loader.cpp b/SpaceCadetPinball/loader.cpp
+index 283e983..dc19cfd 100644
+--- a/SpaceCadetPinball/loader.cpp
++++ b/SpaceCadetPinball/loader.cpp
+@@ -43,7 +43,7 @@ int loader::sound_count = 1;
+ int loader::loader_sound_count;
+ DatFile* loader::loader_table;
+ DatFile* loader::sound_record_table;
+-soundListStruct loader::sound_list[65];
++soundListStruct loader::sound_list[129];
+ 
+ int loader::error(int errorCode, int captionCode)
+ {
+@@ -263,6 +263,11 @@ float* loader::query_float_attribute(int groupIndex, int groupIndexOffset, int f
+ 			return floatArr + 1;
+ 	}
+ 
++	// TEMP instrumentation: which group wanted which attribute.
++	fprintf(stderr, "query_float_attribute: group %d (%s) offset %d wants %d\n",
++	        groupIndex, loader_table->field(groupIndex, FieldTypes::String) ?
++	        reinterpret_cast<char*>(loader_table->field(groupIndex, FieldTypes::String)) : "?",
++	        groupIndexOffset, firstValue);
+ 	error(13, 22);
+ 	return nullptr;
+ }
+@@ -405,10 +410,19 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
+ 		case 406:
+ 			kicker->HardHitSoundId = get_sound_id(static_cast<int>(floor(*floatArr)));
+ 			break;
++		case 410:
++			// Full Tilt only. Consume all eight so the walk stays aligned; bailing
++			// out here leaves the whole visual record unparsed.
++			for (auto i = 0; i < 8; i++)
++				kicker->ThrowPath[i] = floatArr[i];
++			kicker->HasThrowPath = true;
++			floatArr += 8;
++			index += 9;
++			break;
+ 		default:
+ 			return error(10, 20);
+ 		}
+-		if (floorVal != 404)
++		if (floorVal != 404 && floorVal != 410)
+ 		{
+ 			floatArr++;
+ 			index += 2;
+diff --git a/SpaceCadetPinball/loader.h b/SpaceCadetPinball/loader.h
+index ea4176c..fd382e5 100644
+--- a/SpaceCadetPinball/loader.h
++++ b/SpaceCadetPinball/loader.h
+@@ -29,6 +29,13 @@ struct visualKickerStruct
+ 	vector3 ThrowBallDirection;
+ 	float ThrowBallAngleMult;
+ 	int HardHitSoundId;
++
++	// Attribute 410, Full Tilt only: eight floats that read as a throw path, two
++	// points of four. 18 kickers in DRAGON.DAT and 14 in PIRATES.DAT carry it.
++	// Parsed and stored so the attribute walk completes; nothing consumes it yet,
++	// and leaving it unparsed is what made TKickout dereference a null FloatArr.
++	bool HasThrowPath;
++	float ThrowPath[8];
+ };
+ 
+ struct SpriteData
+@@ -111,5 +118,7 @@ private:
+ 	static DatFile* sound_record_table;
+ 	static int sound_count;
+ 	static int loader_sound_count;
+-	static soundListStruct sound_list[65];
++	// 65 covers Space Cadet's 48 groups. Dragon's Keep has 51 and Skulduggery 67,
++	// so the bound is per-table in practice; 129 covers every shipped table.
++	static soundListStruct sound_list[129];
+ };
 diff --git a/SpaceCadetPinball/midi.cpp b/SpaceCadetPinball/midi.cpp
 index a90e8d1..b9d8143 100644
 --- a/SpaceCadetPinball/midi.cpp
