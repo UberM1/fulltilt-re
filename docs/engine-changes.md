@@ -8,7 +8,7 @@ nix-build /tmp/scp.nix          # upstream builds unmodified from reference/
 g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/dragon_*.cpp
 ```
 
-Three of the five files compile clean. Every remaining error is a thing the engine does
+Three of the six files compile clean. Every remaining error is a thing the engine does
 not yet have, so the error list *is* the change list.
 
 | file | errors |
@@ -18,6 +18,7 @@ not yet have, so the error list *is* the change list.
 | `dragon_part4.cpp` | 0 |
 | `dragon_part3.cpp` | 1 |
 | `dragon_missions.cpp` | 43 |
+| `pirates_modes.cpp` | 44 |
 
 ## 1. `TPinballComponent::GetComponentType()` — 17 uses
 
@@ -45,12 +46,24 @@ current API does not expose.
 This is the music half of the per-table identity that `src/table_rules.h` describes;
 `MusicPrefix` and `MusicTrackCount` are there for it.
 
-## 3. `TLightGroup::LightAt(index)` — 2 uses
+## 3. Balls in play — 6 uses (Skulduggery only)
+
+Skulduggery's Lava-Ball adds two balls and Jail Break releases whatever the brig holds, so
+its controllers need to read and change the number of balls on the playfield. Upstream has
+`TPinballTable::BallCount` and `ChangeBallCount()`, but `BallCount` is the balls left in
+the *game*, not the balls in *play* — multiball tracks its own `MultiballCount` instead.
+
+A port needs one of: a `BallsInPlay` accessor, or the rules rewritten against
+`ChangeBallCount` plus `MultiballCount`. The second is probably right, since that is how
+Space Cadet's own multiball works; it was left as the literal field name so the gap is
+visible rather than papered over.
+
+## 4. `TLightGroup::LightAt(index)` — 2 uses
 
 The prison-window sweep walks a group by index to override one light at a time. Upstream's
 `TLightGroup` exposes group-wide operations and `List` but no indexed accessor.
 
-## 4. `TBlocker`'s field at `+0x7e` — 1 use
+## 5. `TBlocker`'s field at `+0x7e` — 1 use
 
 Both fire lizard sink handlers read it as a **float** (`fld`, truncated through `__ftol`),
 while `GargoyleRockAControl` compares the same offset against `-1` as an **int**. Both
