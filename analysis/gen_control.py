@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from dump_components import ENTRY, dump, load, mapper  # noqa: E402
+from dump_simple import simple_components  # noqa: E402
 
 HEADER = """// control_{lower}.cpp -- rules for Full Tilt! Pinball's {title} table.
 //
@@ -135,6 +136,15 @@ def main(exe, matches_txt, out_path):
     for name in OrderedDict((n, None) for n, _v, _s in rows):
         L.append(f'component_tag<TPinballComponent> tag_{ident(name)} = {{"{name}"}};')
 
+    # Components bound by name but with no handler of their own. The rules still
+    # need live pointers to them, so make_links walks this array too; a component
+    # in neither array is not bound at all.
+    simple = [nm for _addr, _ptr, nm in simple_components(exe)]
+    seen = {n for n, _v, _s in rows}
+    extra = [n for n in simple if n not in seen]
+    for n in extra:
+        L.append(f'component_tag<TPinballComponent> tag_{ident(n)} = {{"{n}"}};')
+
     L.append(f"\ncomponent_info {lower}_score_components[{len(rows)}]\n{{")
     for name, va, scores in rows:
         fn = f"{lower}::{handlers[va]}Control"
@@ -143,11 +153,17 @@ def main(exe, matches_txt, out_path):
         L.append(f"\tcomponent_info{{tag_{ident(name)}, {{{fn}, {tail}}}}},")
     L.append("};")
 
+    L.append(f"\ncomponent_tag_base* {lower}_simple_components[{len(simple)}]\n{{")
+    for n in simple:
+        L.append(f"\t&tag_{ident(n)},")
+    L.append("};")
+
     Path(out_path).write_text("\n".join(L) + "\n")
     print(f"{exe}: {len(rows)} components, {len(handlers)} handlers, {len(arrays)} score arrays")
     print(f"  -> {out_path}")
     unknown = sum(1 for va in handlers if near.get(va, ("", 0))[1] < 0.55)
     print(f"  {len(handlers) - unknown} stubs have a Space Cadet reference, {unknown} do not")
+    print(f"  simple_components[{len(simple)}], {len(extra)} of them not in the score table")
 
 
 if __name__ == "__main__":

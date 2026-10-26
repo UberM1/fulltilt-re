@@ -1,8 +1,10 @@
 # Skulduggery — mode / collectible system (from `PIRATES.EXE`)
 
-Derived purely from `decomp/pirates/functions/*.c` (Ghidra output, 178 functions, every
-`DAT_` pre-annotated with its component tag name), static tables read out of
-`binaries/win95/PIRATES.EXE`, and the conventions established in
+Derived purely from `decomp/pirates/functions/*.c` (Ghidra output, 178 functions) plus
+`decomp/pirates_rest/functions/*.c` (186 more, 0x42d000–0x435000 — **this is where the
+dispatcher lives**), every `DAT_` pre-annotated with its component tag name; the objdump
+listings in `decomp/pirates/asm/*.txt`; static tables read out of
+`binaries/win95/PIRATES.EXE`; and the conventions established in
 `analysis/dragon-quest-system.md` / `analysis/dragon-scoring-handlers.md`. No Ghidra/rea
 runs. Cross-checked against the Skulduggery section of `docs/dragon-rules-spec.md`
 (the official manual); **the binary is authoritative**.
@@ -19,21 +21,92 @@ Component field offsets `+5` (enable byte), `+6` (`MessageField`), `+0x42/+0x46/
 
 ---
 
-## 0. One important limitation up front
+## 0. The dispatcher, and what reading it changed
 
-**The dispatcher itself, `FUN_0042d850`, is NOT in the decompiled set.** It is the only
-function the rules code calls that has no `decomp/pirates/functions/*.c` file (the other
-two absentees are `FUN_0042dd0b`, the 15-bit RNG, and `FUN_0042dfaf`, the score→string
-formatter). `FUN_0042d850(code, caller)` is Skulduggery's equivalent of Dragon's
-`FUN_0042c020` + `FUN_0042c120` pair — global accrual plus `switch (mode)` dispatch.
+`FUN_0042d850` — Skulduggery's `control::handler` — **has now been read**
+(`decomp/pirates_rest/functions/0x42d850.c`, with the state switch factored out into
+`FUN_0042d900`). An earlier revision of this document reconstructed the state table
+without it, from the mode-register writers, the per-component state gates and two static
+tables in the EXE. **The switch confirms that reconstruction exactly for the eight modes**
+(§1.3) and corrects three of the four states that were only marked **[P]**. Everything
+below is now anchored on the primary source.
 
-Everything below was therefore reconstructed **without** reading the switch: from the
-mode-register writers, from the shape of the per-mode controllers, from the per-component
-state gates, and from two static tables in the EXE that encode the mode↔state mapping
-directly. The reconstruction is over-determined (six independent agreements, §1.3), so
-the state table is **[C]** even though the dispatch table itself was never read.
-`FUN_00423080(code, cmp)` is the "broadcast + invoke that component's own handler"
-wrapper (Dragon's `FUN_00423060`). **[C]**
+```c
+// FUN_0042d850 — control::handler
+void control::handler(int code, TPinballComponent* caller)
+{
+    for (;;) {
+        if (!info_text_box) return;
+
+        if (caller) {                                   // ---- global jackpot accrual
+            switch (caller->GetType()) {
+            case 0x3ee: TargetsDroppedThisBall++;       // 1006 TPopupTarget
+                        /* fallthrough */
+            case 0x3fb: AddToJackpot(20000); break;     // 1019 TSoloTarget
+            case 0x3f9: AddToJackpot(40000); break;     // 1017 TSink
+            }
+        }
+        if (code == MessageCode::ControlTimerExpired     // 0x46 from the text box
+            && caller == info_text_box
+            && info_text_box->field_5e == 0)
+            code = 0x50;                                 // -> ControlMissionStarted
+
+        MissionControl(info_text_box->MessageField, code, caller);   // FUN_0042d900
+
+        if (code != 0x52) return;
+        caller = nullptr; code = 0x4f;                   // teardown -> idle, re-dispatch
+        info_text_box->MessageField = 2;
+    }
+}
+```
+
+Three notes on the shape, all **[C]**:
+
+1. The `0x46`-from-the-text-box → `0x50` remap is verbatim Dragon's
+   (`dragon-quest-system.md` §1 step 3).
+2. **A `0x52` teardown always lands back in state 2**, in the dispatcher rather than in
+   each controller. That is why no Skulduggery controller sets state 2 itself, and why
+   there is no Dragon-style "mode just ended" grace state.
+3. `FUN_0042d900`'s `default:` arm is `FUN_0042d830` = *"set state 2, broadcast `0x4f`"* —
+   the exact analogue of Dragon's `FUN_0042c000` / upstream's
+   `UnselectMissionController`. **[C]**
+
+### 0.1 Vtable slot 0 is a type getter, not the destructor **[C]**
+
+`FUN_0042d850` opens with `iVar1 = (**(code **)*param_2)();` and then switches the result
+against `0x3ee` / `0x3fb` / `0x3f9` — the component **type ids** from `PIRATES.DAT`
+(1006 / 1019 / 1017). The same call appears at the head of every mode controller's `0x46`
+and `0x4a` arms, always compared against type ids (`0x408` `TTimer`, `0x40e`
+`light_sweeps`, `0x3ea` `TLight`, `0x3f7` `TLightRollover`, `0x3fc`). So **vtable `+0x00`
+is `GetType()`**, and `analysis/symbols-cadet.md`'s current claim that slot 0 is the
+destructor is wrong. (Confirmed in the asm too: `0x42a470` and every other handler reach
+it as `mov eax,[ecx]; call [eax+0x00]` with no `this`-deleting epilogue downstream.)
+I have **not** edited `symbols-cadet.md` — that is a shared reference and the correction
+belongs to whoever owns it.
+
+### 0.2 The other two formerly-absent callees **[C]**
+
+* `FUN_0042dd0b` = the **MSVC `rand()` LCG**:
+  `seed = seed*0x343fd + 0x269ec3; return (seed & 0x7fff0000) >> 16;`
+  — which is exactly why every random pick in this corpus has the shape
+  `(rand()*N) >> 15`.
+* `FUN_0042dfaf` = **`sprintf(buf, fmt, ...)`** (its body is the CRT `vsprintf` core,
+  `FUN_0042f08c`, with the varargs taken from `stack0x0000000c`). **This matters:** the
+  formatted values are varargs that Ghidra does not model, so every
+  `sprintf(buf, get_rc_string(id))` call site in this corpus has one or more
+  **unrecovered numeric operands**. It resolves what string 3003 (`0xbbb`) is — a
+  `%ld`-bearing format line, not a name — but the operand itself stays **[U]** at every
+  call site unless read from the listing.
+
+### 0.3 Asm cross-check
+
+`decomp/pirates/asm/*.txt` exists for the 69 named handlers (not for `pirates_rest`).
+I re-read the riskiest body in this document — `Pirates_s_magnet1_Control`, whose Ghidra
+output is almost entirely stack-byte noise — against `asm/0x42a470.txt`, and every claim
+in §5.4 survives, with one refinement: the keg light is extinguished as
+`v_lite560->Message(0x14, 2.0f)` (a 2-second fade, not an immediate off), and the award is
+`push 0x186a0; push caller; call 0x423310` = **`AddScoreAt(caller, 100000)`** —
+100,000 confirmed from the instruction stream. **[C]**
 
 ---
 
@@ -78,8 +151,8 @@ The remaining three states are written inline: `0x10` and `0x11` by
 
 | State | Meaning | Controller | Confidence |
 |---|---|---|---|
-| 0 | Game over / attract (`FUN_0042bfd0`: table `0x400`, music `tabb5`, string **3027**) | `FUN_0042bfd0` | [P] |
-| 1 | Between balls / last ball drained, no-op | — | [P] |
+| 0 | **Inert** — the switch arm is a bare `return`. Set by `FUN_004230c0`'s new-game branch | — (no-op) | [C] |
+| 1 | **Game over** (`FUN_0042bfd0`: table `0x400`, music `tabb5`, string **3027**) | `FUN_0042bfd0` | [C] |
 | 2 | **Idle, no mode running** (`0x50` → string **3076** "Spell Skulduggery to Start Mode") | `FUN_0042ab90` | [C] |
 | 3 | **Skill shot** (rolling award list, `s_launcher1->MessageField` 0…8) | `FUN_0042abf0` | [C] |
 | 4 | Mode **Attack Ship** | `FUN_0042ad70` | [C] |
@@ -90,15 +163,42 @@ The remaining three states are written inline: `0x10` and `0x11` by
 | 9 | Mode **Mutiny** | `FUN_0042ca00` | [C] |
 | 10 | Mode **Sword Fight** | `FUN_0042cc10` | [C] |
 | 0xb | Mode **Peg Leg's Loot** (finale) | `FUN_0042cfc0` | [C] |
-| 0xc | **Lava-Ball** | *none found* | [C] value, [U] controller |
-| 0xd | **Jail Break!** | *none found* | [C] value, [U] controller |
+| 0xc | **Lava-Ball** | `FUN_0042d480` | [C] |
+| 0xd | **Jail Break!** | `FUN_0042d590` | [C] |
 | 0x10 | **Drain bonus** countdown | `FUN_0042b820` | [C] |
-| 0x11 | **End of game** bonus (same controller, fast path) | `FUN_0042b820` | [P] |
+| 0x11 | **End-of-game table lockdown** (transient, not the bonus) | `FUN_0042d730` | [C] |
+| anything else | force state 2 + `0x4f` | `FUN_0042d830` | [C] |
 
 Note the **non-monotonic** mode order: the states are *not* in manual order. That is not
 an inference — it is a table in the binary.
 
-**Six independent agreements pin the assignment [C]:**
+### 1.3.1 The switch, read directly
+
+`FUN_0042d900(state, code, caller)` is a flat `switch (state)` whose eight mode arms are:
+
+| Arm | Controller | Mode |
+|---|---|---|
+| 4 | `FUN_0042ad70` | Attack Ship |
+| 5 | `FUN_0042c070` | Bermuda Triangle |
+| 6 | `FUN_0042c430` | Storm |
+| 7 | `FUN_0042b420` | Tavern |
+| 8 | `FUN_0042b090` | Treasure Hunt |
+| 9 | `FUN_0042ca00` | Mutiny |
+| 10 | `FUN_0042cc10` | Sword Fight |
+| 0xb | `FUN_0042cfc0` | Peg Leg's Loot |
+
+**This is identical, controller for controller, to the permutation reconstructed from
+`DAT_0043d0f0 = {4,8,7,5,6,9,10,11}`.** None of the six independent lines of evidence
+below is contradicted by the primary source; the mode half of the table is therefore
+confirmed twice over, once by the dispatch table and once by the selection table. **[C]**
+
+The dispatcher did, however, correct the four non-mode states that had only been inferred:
+**state 0 is the inert arm and state 1 is the game-over controller** (I had those two the
+wrong way round), **state 0x11 has its own controller** `FUN_0042d730` rather than sharing
+the bonus controller, and **states 0xc / 0xd do have controllers** — they simply live above
+0x42d000. All four were marked **[P]** / **[U]**; none was marked **[C]**.
+
+**Six independent agreements pin the mode assignment [C]:**
 
 1. `DAT_0043d0f0` (static array, read out of the EXE) `= {4, 8, 7, 5, 6, 9, 10, 11}`.
    `FUN_004256d0(i)` indexes it with the *selection index* `i` (0…7) and sets
