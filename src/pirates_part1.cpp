@@ -947,7 +947,7 @@ static void VolcanoBankHitIdle(TPinballComponent* caller)
 //   * the four volcano lights are never swept (the TLightResetTimed/TLightFlasherStartTimed
 //     block below is dead);
 //   * but the *award* still happens, because AwardSpecialTreasureOrNext (FUN_00425550)
-//     runs its own `mode_scratch_counter & 0xf == 0xf` check on the bits the handlers really set.
+//     runs its own `scratch & 0xf == 0xf` check on the bits the handlers really set.
 // So Sword Fight's volcano objective works, by a different route than the code reads, and
 // pays the flat 30,000 on the clearing hit as well.
 //

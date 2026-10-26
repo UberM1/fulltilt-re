@@ -8,7 +8,7 @@ nix-build build.nix             # upstream builds unmodified from reference/
 g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/*.cpp
 ```
 
-Three of the six files compile clean. Every remaining error is a thing the engine does
+Five of the eight files compile clean against unmodified upstream headers. Every remaining error is a thing the engine does
 not yet have, so the error list *is* the change list.
 
 | file | errors |
@@ -16,9 +16,16 @@ not yet have, so the error list *is* the change list.
 | `dragon_part1.cpp` | 0 |
 | `dragon_part2.cpp` | 0 |
 | `dragon_part4.cpp` | 0 |
+| `pirates_part1.cpp` | 0 |
+| `pirates_part2.cpp` | 0 |
 | `dragon_part3.cpp` | 1 |
 | `dragon_missions.cpp` | 43 |
 | `pirates_modes.cpp` | 44 |
+
+The clean files are the ordinary scoring components; the three that do not compile are the
+two mode machines and one sink file. That split is itself informative -- per-component
+rules need nothing from the engine that Space Cadet did not already need, and everything
+below is a consequence of running *more than one table*.
 
 ## 1. `TPinballComponent::GetComponentType()` — 17 uses
 
