@@ -124,8 +124,8 @@ and it is a counter, §4).
 
 ### 1.2 The twelve transition functions
 
-Skulduggery factors the writes into one-line setters, which makes the state space
-enumerable without the dispatcher. Each does *"set the wheel light, set the register,
+Skulduggery factors the writes into one-line setters — which is what made the state space
+enumerable before the dispatcher was available. Each does *"set the wheel light, set the register,
 broadcast `0x4f`"*: **[C]**
 
 | Function | Sets state to | Also |
@@ -365,17 +365,42 @@ disassembly.
   controllers' `0x52` does: `FUN_0042ab40()` (restore the drop banks and GOLD lights from
   their bitmasks), **`v_lite606->MessageField += 1`**, lower `a_bloce`, restore
   `v_lite504`/`v_lite505`.
+* **The dispatcher wraps `0x52` with three more actions** (`FUN_0042d900`'s preamble plus
+  `FUN_0042d850`'s loop) — none of which is visible from the controllers, and all of which
+  the earlier revision of this document had to leave open: **[C]**
+
+  ```c
+  // FUN_0042d900, before the switch
+  if (code == 0x4f) {
+      SetModeLight(state, /*flashing=*/true);        // FUN_004255a0 -> code 7, -1.0
+  } else if (code == 0x52) {
+      if (state > 3 && state < 0xc)
+          AddToJackpot(750000);                      // <-- mode completion bonus
+      SetModeLight(state, /*flashing=*/false);       // code 0x13: solid ON = completed
+      SelectNextMode();                              // FUN_00425850
+  }
+  // ... and FUN_0042d850 then forces state = 2 and re-dispatches 0x4f
+  ```
+
+  So **mode completion is worth +750,000 to the jackpot** ✓✓ exactly the manual (§6.0),
+  the wheel light goes from *flashing* (selected/running) to *solid* (completed) — which is
+  what makes `FUN_00425850` stop offering it — and the next mode is selected immediately.
+  The `state > 3 && state < 0xc` guard means the bonus is paid for all eight modes
+  including Peg Leg's Loot, and **not** for Lava-Ball or Jail Break.
 * **`0x53` = abort** — sent by `Pirates_drain_Control` on drain. Every controller's `0x53`
   cancels `mode_timer` (`0x45, -1.0`) and falls into `0x52`.
 * **Objective met** — the mode's own code broadcasts `0x53` (Storm's hideaway bail-out) or
   runs the payout and lets the timer run down.
 
-> **Same caveat as Dragon, and it is worse here [C].** `v_lite606->MessageField`
-> ("modes completed") is incremented in the **shared `0x52`**, which is reached on timer
-> expiry *and* on drain-abort *and* on success. So a mode counts as "completed" — for the
-> 200,000/mode drain bonus **and** for the 1,000,000/mode Peg Leg's Loot payout — merely
-> by having been started. No success/failure discriminator exists in any of the eight
-> controllers. **[C]** for the mechanism, **[U]** for whether that is intended.
+> **Same caveat as Dragon, and the dispatcher makes it worse, not better [C].**
+> `v_lite606->MessageField` ("modes completed") is incremented in the **shared `0x52`**,
+> which is reached on timer expiry *and* on drain-abort *and* on success — and the
+> dispatcher's own `0x52` arm pays the **+750,000 jackpot bonus** and turns the wheel light
+> **solid** on exactly the same path. So a mode counts as "completed" — for the
+> 200,000/mode drain bonus, the 1,000,000/mode Peg Leg's Loot payout, the +750,000 jackpot
+> *and* the wheel progression — merely by having been started. No success/failure
+> discriminator exists anywhere in the dispatcher or in any of the eight controllers.
+> **[C]** for the mechanism, **[U]** for whether that is intended.
 
 ### 2.5 FT-only message codes in this subsystem
 
@@ -384,9 +409,9 @@ disassembly.
 | `0x4f` | mode changed / start (`ControlMissionComplete` slot) | every setter |
 | `0x50` | tick / mode started (`ControlMissionStarted`) | every controller |
 | `0x52` | **teardown** | ″ |
-| `0x53` | **abort** (drain) | `Pirates_drain_Control` |
+| `0x53` | **abort** (drain); in the two multiballs, "has the ball count fallen back to 1?" | `Pirates_drain_Control`, `FUN_0042d480`, `FUN_0042d590` |
 | `0x56` | ramp traversal complete | `s_rexit8` (ship wire ramp) |
-| `0x4b` / `0x4c` | **magnet / captive device enable, disable** | `s_magnet1`…`6`, `a_kout1`, `a_kout2` |
+| `0x4b` / `0x4c` | **magnet / captive device enable, disable** | `s_magnet1`…`6`, `a_kout1`, `a_kout2`, `a_kick1` (`FUN_0042d480`/`0x42d590`/`0x42d730`) |
 | `0x4d` | sent to the previous scoring component (no-op) | `FUN_004232c0`/`00423310`/`00423350` |
 | `0x1c` | light-group **rotate** | flippers (§6) |
 | `0x2d` | light-group "light the next one" | coin, map-piece groups |
@@ -576,28 +601,87 @@ group** flashing, clears the six wheel-mode lights `v_lite552`…`v_lite557`, re
 next drain blank the coin and special-treasure groups — i.e. **a fresh collection cycle
 starts after the finale**). **[C]**
 
-### States 0xc / 0xd — Lava-Ball and Jail Break **[C] values, [U] behaviour**
+### State 0xc — Lava-Ball (`FUN_0042d480`) **[C]**
 
-* **0xc = Lava-Ball**, set by `FUN_00427540` when the volcano bitmask
-  `a_spot11->MessageField & 0xf == 0xf` (all four volcano targets). ✓ manual.
-* **0xd = Jail Break**, set by `Pirates_a_spot6_Control` (brig target, 3rd hit, state 2)
-  **and** by `FUN_00424210` when the brig count `DAT_00435d3c` reaches **3**.
-  ✓ manual "3 hits … or automatically when three balls are caught in the brig" — but
-  **[C] the binary does not require a ball in the brig for the 3-hit path**; three hits
-  in state 2 start it regardless.
+String **3055** (`0xbef`), displayed persistently on both `0x4f` and `0x50`. Started by
+`FUN_00427540` when the volcano bitmask `a_spot11->MessageField & 0xf == 0xf` (all four
+volcano targets). ✓ manual.
 
-Neither has a controller in the decompiled set. Their only visible effects are per-component
-gates: `s_hole19` (the brig) and `s_oneway7` (the brig release) both **exclude** states
-0xc…0xd, `s_trip2` treats 0xc/0xd like state 2, the drop banks route through
-`FUN_00425e30` in state 0xc (completing SKULDUGGERY there awards a **map piece** instead
-of starting a mode), and `a_sink8`'s sound is suppressed in state 0xc. Ball additions for
-the two multiballs were **not located** — the only writers of `TableG+0x192` are the drain,
-the bonus controller, `FUN_00424210` (brig capture, `-1`) and `s_oneway7` (brig release,
-`+1`). Jail Break is therefore plausibly "release what the brig holds" rather than
-"`balls += n`" **[P]**; Lava-Ball's ball logic is **[U]** and most likely inside the
-missing `FUN_0042d850`.
+`0x4f`: `FUN_0042aad0()` (common setup), **arm `a_kick1`** (`0x4b` — the left-outlane
+kickback), disable `s_oneway12` (the brig release), then the **ball accounting**:
 
----
+```c
+if      (BallsInBrig == 0) { EjectLavaSink(2.0f); EjectLavaSink(1.0f); }  // FUN_00423680
+else if (BallsInBrig == 1) {                      EjectLavaSink(1.0f); }
+TableG->BallsInPlay += 2;
+BallsInBrig = 0;
+```
+
+So **Lava-Ball is a +2-ball multiball** (three balls with the one in play), and the two
+extra balls are sourced from the **lava sink `a_sink8`** and/or **from the brig** —
+`a_sink8` is ejected twice if the brig is empty, once if it holds one, and not at all if it
+holds two or more, with `DAT_00435d3c` zeroed so the brig's balls count toward the same +2.
+**[C]**
+
+`0x53`: **only acts when `TableG->BallsInPlay == 1`** → `FUN_0042ab40()` (restore the
+banks), clear the text box, disarm `a_kick1`, state 2, `FUN_00425310(1)` (relight the four
+volcano lights and clear the volcano mask), broadcast `0x4f`. So it ends when the multiball
+drains back to a single ball, exactly like Dragon's multiball modes. **[C]**
+
+### State 0xd — Jail Break! (`FUN_0042d590`) **[C]**
+
+String **3056** (`0xbf0`). Entered from `Pirates_a_spot6_Control` (brig target, 3rd hit,
+state 2) or from `FUN_00424210` when the brig count reaches 3. ✓ manual.
+
+`0x4f` opens with the check that resolves the manual question:
+
+```c
+if (BallsInBrig == 0) {                 // nothing to break out
+    ResetBrigLights();                  // FUN_00425d50(1)
+    info_text_box->MessageField = 2;
+    handler(0x4f, nullptr);
+    return;                             // mode aborts, costs nothing
+}
+```
+
+**So the "≥1 ball in the brig" requirement does exist** — not in the brig target's handler,
+but one level up, in the mode's own entry. A player who hits the brig target three times
+with an empty brig gets a mode that starts and immediately cancels itself. **[C]**
+
+With at least one ball held: common setup, `FUN_004253a0()` (restore the volcano lights),
+**`TableG->BallsInPlay += BallsInBrig`** then `BallsInBrig = 0` — i.e. **Jail Break
+releases exactly what the brig holds**, between 1 and 3 balls — flash the three brig lights
+`v_lite530/531/532` (`1` then `0x10`), arm `a_kick1`, disable `s_oneway12`, and
+**+100,000**. **[C]**
+
+`0x53`: as Lava-Ball — only at `BallsInPlay == 1`, then restore, disarm `a_kick1`, state 2,
+`FUN_00425d50(0)`, `FUN_00425310(1)`.
+
+> **Suspected mis-decompile or original bug [P].** `0x4f` contains
+> `*(undefined4 *)(v_lite551 + 6) = 0xf;` immediately before `FUN_004253a0()`, but
+> `FUN_004253a0` reads the volcano mask from **`a_spot11->MessageField`**, not from
+> `v_lite551`'s. Writing `0xf` into `a_spot11->MessageField` would mean "light all four
+> volcano lights", which is clearly the intent. Either the tag resolution is off by one
+> slot or the original code names the wrong component. There is **no asm listing for
+> `0x42d590`** (`decomp/pirates/asm/` covers only the 69 named handlers), so this cannot
+> be settled here. **[U]**
+
+### State 0x11 — end-of-game table lockdown (`FUN_0042d730`) **[C]**
+
+Not a bonus state — it pays nothing and displays nothing. Set by `Pirates_drain_Control`
+when the last ball of the last player drains (and by `FUN_004230c0` on code `0x3f3`), and
+the drain handler then immediately sets state `0x10` so the bonus still runs; `0x11` is a
+transient that exists only to lock the table down.
+
+`0x4f`: clear `_DAT_0043aba0`, disable `a_kick2` and `s_bwal610`, **arm `a_kick1`**,
+disable `s_oneway12`, send `0x4c` to **all six `s_magnet*` plus `a_kout1` and `a_kout2`**
+(so nothing can hold the ball during the game-over sequence), and **release the brig**
+(`BallsInPlay += BallsInBrig; BallsInBrig = 0`).
+`0x53`: disarm `a_kick1` once only one ball is left.
+
+This closes the ball-accounting loop: every ball the brig ever swallowed is returned to the
+count by one of exactly three paths — `s_oneway7` (normal release), Lava-Ball / Jail Break
+(`0x4f`), or end of game (`0x11`). **[C]**
 
 ## 4. Collectibles — how they are stored
 
@@ -648,10 +732,13 @@ The three hideaways set bits 1, 2, 4 (`a_sink17`→1, `a_sink15`→2, `a_sink14`
 `FUN_004239a0` fires when `mask & 0xf == 0xf`: reset the GOLD lights (`FUN_00423870(1)`)
 and award a **coin** (`FUN_00423720`). ✓ manual.
 
-> **[U]** Nothing I found sets **bit 8** (`v_lite527`, the "D"). Only three hideaways exist
-> and only three bits are ever OR-ed in. Either a fourth source is in the missing
-> dispatcher, or `v_lite527` is lit by a path I did not locate — in which case GOLD can
-> never be spelled by hideaways alone. Flagged as the single most suspicious loose end.
+**Bit 8 (`v_lite527`, the "D") is the right orbit, not a hideaway — RESOLVED [C].**
+`Pirates_s_trip8_Control` in state 2 lights `v_lite527`, ORs bit 8 into
+`v_lite524->MessageField`, and then runs the completion check itself. So GOLD is
+*three hideaways plus one orbit pass*, which is why it cannot be spelled by hideaways
+alone. (`v_lite527` is bound as a handler-less component — it appears in
+`simple_components[]` at `0x0043c9c8`, per `analysis/dump_simple.py` — which is why it has
+no entry in the score table and why the earlier search for its writer came up empty.)
 
 ### 4.3 Coin awards — `FUN_00423720` **[C]**
 
@@ -857,6 +944,29 @@ that Dragon does in `Dragon_s_plunger1_Control` are split here between `s_launch
   **1,000,000** at new game (`FUN_004230c0` case `0x3f6`). ✓ manual. **[C]**
   There is **no super jackpot** in Skulduggery — nothing writes `TableG+0x17a`, unlike
   Dragon. **[C]**
+
+### 6.0 Jackpot contributions — the complete table **[C]**
+
+Read directly out of `FUN_0042d850` and `FUN_0042d900` (§0), so this is now closed:
+
+| Source | Contribution | Where |
+|---|---|---|
+| Any collision with a **type-1006 `TPopupTarget`** (the 11 drop targets) | **+20,000** (and `TargetsDroppedThisBall++`) | `FUN_0042d850` |
+| Any collision with a **type-1019 `TSoloTarget`** (`a_spot*`) | **+20,000** | `FUN_0042d850` |
+| Any collision with a **type-1017 `TSink`** (ship sink, hideaways, tavern sinks) | **+40,000** | `FUN_0042d850` |
+| **Mode teardown** while `3 < state < 0xc` | **+750,000** | `FUN_0042d900` |
+| Storm, per type-`0x3fc` collision | +50,000 | `FUN_0042c430` |
+| Treasure Hunt, per type-`0x3fc` collision | +20,000 | `FUN_0042b090` |
+
+✓✓ **Exactly** the manual's "Targets **+20,000**, sinks and hideaways **+40,000**, mode
+completion **+750,000**". Disagreement #8 of the earlier revision is withdrawn: the manual
+was right and the contributions were simply all in the one function I could not read. The
+two mode-local `0x3fc` accruals are extra and not in the manual. **[C]**
+
+Note that the accrual in `FUN_0042d850` happens on **every** broadcast with a non-null
+caller, before any dispatch and regardless of mode — so a drop target pays its +20,000 into
+the jackpot even in a mode that suppresses its score, and the same collision can also pay
+its mode-local accrual on top. **[C]**
 * `FUN_00424700(t)` = award the jackpot (adds `TableG+0x172`; never resets it ✓ manual),
   display glyph `DAT_0043ab04`, play `tabb85wave` when `t >= 0`.
 * `TableG+0x15e` = `ScoreMultiplier`, written **only** by `FUN_00424350`
@@ -942,10 +1052,10 @@ Its first three lines also contain a mode-register read: in state 0x10 with
 | 2 | Ship wire ramp "maxes" the multiplier; shipwreck mystery gives "Max Multiplier" | Both **increment** it by one fathom light (`ScoreMultiplier = fathoms + 1`) | [C] |
 | 3 | Treasure Hunt: "5th X = jackpot" | The jackpot depends on **which** sink the X is on (`a_sink17` only); there is no 5-counter | [P] |
 | 4 | Sword Fight group clear "awards one of" four things | **Cyclic in a fixed order** (treasure → coin → map piece → extra ball → extra ball …), not a choice | [C] |
-| 5 | Jail Break needs "3 hits with ≥1 ball in the brig" | Three brig-target hits in state 2 start it with **no ball-in-brig check** | [C] |
+| 5 | ~~Jail Break needs "3 hits with ≥1 ball in the brig"~~ | **Withdrawn.** The check exists, one level up: `Pirates_a_spot6_Control` does not test the brig, but `FUN_0042d590`'s `0x4f` aborts straight back to state 2 if `BallsInBrig == 0`. Manual correct | [C] |
 | 6 | "7 mode lights … plus Peg Leg's Loot" | 8 lights `v_lite552`…`v_lite559`; the first **seven** are the random-selection pool, the 8th is reachable only via all six map pieces | [C] |
 | 7 | Six wind lanes | **Eight** wind light groups are enumerated by the engine; "Tradewinds" covers two, and the orphan string 3006 "Port O' Call" is plausibly the eighth | [P] |
-| 8 | Jackpot "+20,000 per target, +40,000 per sink, +750,000 per mode completion" | Only two jackpot contributions are visible in the rules code: **+50,000** (Storm, type 1017) and **+20,000** (Treasure Hunt, type 1017). The rest must be in the missing `FUN_0042d850` | [U] |
+| 8 | ~~Jackpot "+20,000 per target, +40,000 per sink, +750,000 per mode completion"~~ | **Withdrawn.** All three are in `FUN_0042d850` / `FUN_0042d900` verbatim (§6.0). Manual correct | [C] |
 | 9 | Tavern/ship "+50,000 / +25,000 jackpot per target" | Those amounts exist as **scores on bank completion**, not as jackpot contributions | [P] |
 | 10 | Plunger "15 s re-launch" | The rules code serves with a **0.96 s** delay; no 15 s constant | [P] |
 | 11 | (nothing) | **Mode completion is not checked** — `v_lite606->MessageField` is bumped by the shared `0x52`, so timing out or draining counts as completing, for both the 200,000/mode bonus and the 1,000,000/mode finale | [C] |
@@ -954,8 +1064,12 @@ Its first three lines also contain a mode-register read: in state 0x10 with
 | 14 | "hint strings 3060–3067" | Storm's hint is **3067**, not 3064 — the hint block is *not* parallel to the mode-selected block 3068–3075 | [C] |
 | 15 | Magnets "active during Storm, Bermuda Triangle and Tavern" | Only Tavern uses the type-1042 `s_magnet*`; Bermuda's and Storm's magnets are the kickouts `a_kout1`/`a_kout2`, and they pay **1,000,000** against the keg magnets' 100,000 | [C] |
 
+Two of the fifteen (#5, #8) were **withdrawn once the dispatcher was readable** — both were
+cases where the manual was right and the relevant code was simply in the one function
+outside the original decompile range. The other thirteen stand.
+
 Structural differences from Dragon's Keep worth noting for a port: **no restart window and
-no `0x51` code**; **no super jackpot**; **no plunger**; drop-target banks and letter sets
+no `0x51` code** (the dispatcher returns to state 2 itself after every `0x52`); **no super jackpot**; **no plunger**; drop-target banks and letter sets
 stored as **bitmasks** rather than as lit lights; a **per-mode** start bonus; and the mode
 order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
 
@@ -963,29 +1077,56 @@ order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
 
 ## 9. Open items
 
-1. **`FUN_0042d850` is not decompiled.** It is the dispatcher and the global accrual
-   point. Everything about the jackpot contribution table (manual: +20,000/target,
-   +40,000/sink, +750,000/mode) and the ball handling of **Lava-Ball** and **Jail Break**
-   most likely lives there. This is the single highest-value thing to decompile next.
-   **[U]**
-2. **No controller for states 0xc / 0xd.** See §3. Their per-component gates are mapped;
-   their ball accounting is not. **[U]**
-3. **GOLD bit 8 (`v_lite527`) has no writer** that I could find. §4.2. **[U]**
-4. **Four of eight mode time limits lost** to the Ghidra float-argument artifact
-   (Attack Ship, Mutiny, Sword Fight, Peg Leg's Loot), along with their light-sweep ids.
-   Recoverable by hand disassembly. **[U]**
-5. `Pirates_a_sink4_Control` (0x4283f0) decompiles into stack-byte noise in three of its
-   five arms (the same class of failure as Dragon's `a_sink18`). The ship-sink constants in
-   states 9 and 0xb should be re-read before being trusted. **[P]**
-6. `DAT_00435d04` is shared by three different cursors — the Treasure Hunt "X" selector
-   (`FUN_00424580`), the Bermuda indicated-wind selector (`FUN_00425110`/`FUN_00425230`),
-   and the Sword Fight award selector (`FUN_00425440`) — and `FUN_0042aad0` zeroes it at
-   every mode start. Whether that aliasing is intentional (one "wheel position" concept) or
-   a bug is **[U]**.
-7. String 3003 (`0xbbb`) is displayed by the magnets, the ship sink, the ship wire ramp,
-   the coin award and Peg Leg's Loot alike — it is almost certainly a score/format line
-   rather than a name, consumed by the unlocated `FUN_0042dfaf`. **[P]**
-8. `a_kout2` is armed by Storm and `a_kout1` by Bermuda, but both share one handler that
-   checks neither the mode nor which kickout fired. A ball caught by the *other* one
-   outside its mode would still pay 1,000,000 — assuming it can be caught while disarmed,
-   which depends on `0x4b`/`0x4c` semantics inside the component. **[U]**
+**Closed by reading `FUN_0042d850` / `FUN_0042d900` and the `pirates_rest` corpus:**
+
+* ~~the dispatcher itself~~ → §0. The mode half of the state table is confirmed by the
+  primary source and agrees exactly with the `DAT_0043d0f0` reconstruction; four non-mode
+  states were corrected (§1.3.1).
+* ~~the jackpot contribution table~~ → §6.0. +20,000 / +20,000 / +40,000 / +750,000,
+  matching the manual exactly.
+* ~~Lava-Ball and Jail Break ball accounting~~ → §3. Lava-Ball `+2` sourced from the lava
+  sink and/or the brig; Jail Break `+= BallsInBrig`; both end at `BallsInPlay == 1`;
+  end-of-game (`0x11`) returns anything the brig still holds.
+* ~~GOLD bit 8 has no writer~~ → §4.2. It is `s_trip8`, the right orbit.
+* ~~what string 3003 (`0xbbb`) is~~ → §0.2. `FUN_0042dfaf` is `sprintf`, so 3003 is a
+  format line; the *operand* at each call site remains unrecovered (below).
+
+**Still open:**
+
+1. **Four of eight mode time limits** are still lost to the Ghidra float-argument artifact
+   (Attack Ship, Mutiny, Sword Fight, Peg Leg's Loot), along with their light-sweep ids
+   (§2.3). These are in handlers that *do* have objdump listings
+   (`decomp/pirates/asm/0x42ad70.txt`, `0x42ca00.txt`, `0x42cc10.txt`, `0x42cfc0.txt`),
+   so they are mechanically recoverable — I have not read them. **[U]**
+2. **Every `sprintf` call site has unrecovered numeric varargs.** `FUN_0042dfaf` takes
+   `(buf, fmt, ...)` and Ghidra models only the two fixed parameters, so each displayed
+   value in this document that comes from a `get_rc_string` + `sprintf` pair is
+   un-verified as to *what number* is shown (the scores themselves are separate
+   `AddScore` calls and are confirmed). Recoverable from the listings — the magnet
+   spot-check in §0.3 shows the pattern. **[U]**
+3. **`FUN_0042d590`'s `v_lite551->MessageField = 0xf`** (§3, Jail Break) — almost certainly
+   meant to be `a_spot11->MessageField`. No asm listing exists for `pirates_rest`
+   addresses, so this cannot be settled from what is on disk. **[U]**
+4. `Pirates_a_sink4_Control` (`0x4283f0`) decompiles into stack-byte noise in three of its
+   five arms. Its listing `decomp/pirates/asm/0x4283f0.txt` exists; the state-9 and
+   state-0xb constants should be re-read from it before being trusted. **[P]**
+5. `DAT_00435d04` is shared by three different cursors — the Treasure Hunt "X" selector
+   (`FUN_00424580`), the Bermuda indicated-wind selector (`FUN_00425110` /
+   `FUN_00425230`), and the Sword Fight award selector (`FUN_00425440`) — and
+   `FUN_0042aad0` zeroes it at every mode start. The dispatcher does not touch it, so
+   whether the aliasing is a deliberate single "wheel position" concept or a bug is
+   **[U]**.
+6. `a_kout2` is armed by Storm and `a_kout1` by Bermuda, but both route to one handler that
+   checks neither the mode nor which kickout fired, and `FUN_0042d730` disarms both at end
+   of game. Whether a disarmed kickout can still capture — i.e. whether the flat 1,000,000
+   is reachable outside its mode — depends on `0x4b`/`0x4c` semantics inside the component
+   class, which is engine code and not in this corpus. **[U]**
+7. **The eighth wind group.** `FUN_00425110` enumerates eight groups for six manual wind
+   names; the orphan engine string 3006 "Port O' Call" is the obvious candidate for the
+   extra one, but nothing in the rules code names a group. Settling it needs the
+   playfield diagram from `FULLTILT.HLP`. **[P]**
+8. **`simple_components[]` has 192 entries** against the score table's 74, so ~118
+   components are bound with no handler of their own. I used it only to resolve
+   `v_lite527`; a full sweep of it against the lights referenced in this document has not
+   been done, and would be the cheapest way to find any remaining "who writes this light"
+   gap. **[U]**

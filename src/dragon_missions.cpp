@@ -291,6 +291,13 @@ component_tag<TPinballComponent> tag_a_sink18 = {"a_sink18"};  // prison tower
 component_tag<TLightGroup> tag_prison_window_light_group = {"prison_window_light_group"};
 component_tag<TLightGroup> tag_watch_window_light_group = {"watch_window_light_group"};
 component_tag<TLightGroup> tag_gate_window_light_group = {"gate_window_light_group"};
+// The prison-window trip wires. s_trip6 and s_trip5 share one handler and are
+// the pair that reads v_lite48 and drives prison_window_light_group; the other
+// two pairs (s_trip3/4, s_trip8/9) read v_lite49 and v_lite50 against the
+// watch and gate window groups, 1:1.
+component_tag<TPinballComponent> tag_s_trip6 = {"s_trip6"};
+component_tag<TPinballComponent> tag_s_trip5 = {"s_trip5"};
+component_tag<TSound> tag_tabc51wave = {"tabc51wave"};  // window won
 component_tag<TLight> tag_v_lite47 = {"v_lite47"};
 component_tag<TLight> tag_v_lite125 = {"v_lite125"};
 component_tag<TLight> tag_v_lite126 = {"v_lite126"};
@@ -419,7 +426,16 @@ const char* GetRcString(int id);
 void Display(TTextBox* box, const char* text, float time);     // 0x41de40 with font 0
 void DisplayGlyph(TTextBox* box, const char* glyph, float time); // 0x41de40 with font 1 (symbol)
 void ClearText(TTextBox* box);                                 // 0x41d930
-void FormatRemainingTime(char* out, const char* fmt);           // 0x42c76f
+// 0x42c76f -- renders a label (or format string) plus ONE numeric value into
+// `out`. The value is a lost argument in every decompile of every caller: the
+// 1996 build passes it on the x87 stack, which Ghidra drops.
+//
+// UNVERIFIED layout. It cannot be a plain sprintf(out, fmt, value): string
+// 3008 is a bare "%ld" while 3019 is a bare "Dragon Hoard" with no specifier
+// at all, and both are passed in this same slot. So it either concatenates
+// label and value itself, or there are two call shapes the decompile has
+// flattened into one. Settled by disassembling 0x42c76f.
+void FormatWithValue(char* out, const char* labelOrFormat);
 void PlayMusic(midi_track* track);                             // 0x40eb50
 midi_track* CurrentMusic();                                    // 0x40e9b0
 void ComponentHandler(MessageCode code, TPinballComponent* caller);  // 0x423060
@@ -462,6 +478,7 @@ extern const char* EggGlyphs[9];
 // String ids, as resource numbers. Only the ones this file displays.
 enum
 {
+	STR_BARE_NUMBER = 3008,        // "%ld" -- the award on its own
 	STR_IDLE_HINT = 3001,          // "Hit Fire Lizards To Begin Quest"
 	STR_HOARD_NAME = 3019,
 	STR_HOARD_HINT = 3020,         // "Steal Gems From Dragon"
@@ -478,6 +495,7 @@ enum
 	STR_LIZARDS_HINT = 3031,
 	STR_MAIDEN_NAME = 3032,
 	STR_MAIDEN_HINT = 3033,        // "Put ball in Prison Tower"
+	STR_MAIDEN_RESCUED = 3034,
 	STR_PASS_NAME = 3035,
 	STR_PASS_HINT = 3036,
 	STR_FURY_NAME = 3037,
@@ -648,7 +666,7 @@ void DisplayTimeRemaining(int nameStringId)
 		return;
 
 	char buffer[128];
-	FormatRemainingTime(buffer, GetRcString(nameStringId));
+	FormatWithValue(buffer, GetRcString(nameStringId));
 	Display(tag_info_text_box.Component, buffer, 0.5f);
 }
 
@@ -1306,7 +1324,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		gem.light->Message(ft::LightFlashTimedThenStayOn, 1.0f);
 		AddScore(caller, gem.score);
 		char buffer[128];
-		FormatRemainingTime(buffer, GetRcString(gem.stringId));
+		FormatWithValue(buffer, GetRcString(gem.stringId));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		CollectGem(gem.bit);
 	};
@@ -1555,11 +1573,70 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 // completes *successfully* mid-flight, skipping the restart window entirely.
 // ---------------------------------------------------------------------------
 
-// The 0x47 notify-timer sweep. Walks a cursor around the four prison windows
-// every 0.2 s and inverts whichever window it is on: a dark window is
-// overridden ON, an already-won window is overridden OFF. That inversion is
-// what makes the sweep readable against the windows already collected, and it
-// is the evidence that fixes the three FT light-override codes.
+// Rescue Maiden's per-hit award ladder.
+//
+// This is the `mode == 6` arm of Dragon_s_trip6_Control @0x427880 -- the
+// PRISON-WINDOW TRIP WIRE, not the tower sink. s_trip6/s_trip5 share that
+// handler and own prison_window_light_group; the other two trip pairs
+// (s_trip3/4, s_trip8/9) read v_lite49/v_lite50 against the watch and gate
+// window groups instead. It lives here rather than in s_trip6Control because
+// the rule belongs to the quest: the handler is a bare mode switch, and its
+// other arms (idle, restart window, Tower Barrage, and the generic
+// bank-completion flourish in its tail) have nothing to do with this ladder.
+//
+// The award is keyed on the on-count BEFORE the window is lit, so the ladder
+// is per-window-won, and the window is lit last. This is the manual's ladder
+// in full, which is worth stating plainly: it was previously written off as
+// unrecoverable on the assumption that it lived in a_sink18's handler, which
+// Ghidra renders as stack-byte noise. It does not live there and it is legible.
+void RescueMaidenAwardWindow(TPinballComponent* caller)
+{
+	auto* windows = tag_prison_window_light_group.Component;
+	Play(tag_tabc51wave.Component);
+
+	// GetOnCount reads the lights' REAL state, which the sweep's overrides do
+	// not disturb -- that is precisely why 0x18/0x19/0x1a have to be a
+	// separate display layer and not plain turn-on/turn-off. The ladder keying
+	// on this count is independent corroboration of those three names.
+	char buffer[128];
+	switch (windows->Message(ft::GroupGetOnCount, 0.0f))
+	{
+	case 0:
+		AddScore(caller, 250000);
+		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
+		Display(tag_info_text_box.Component, buffer, 2.0f);
+		break;
+	case 1:
+		AddScore(caller, 500000);
+		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
+		Display(tag_info_text_box.Component, buffer, 2.0f);
+		break;
+	case 2:
+		AwardJackpot(true);
+		break;
+	default:
+		// The fourth window: the extra-ball light, and the only site that says
+		// so out loud.
+		tag_v_lite57.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
+		Display(tag_info_text_box.Component, GetRcString(STR_MAIDEN_RESCUED), 2.0f);
+		break;
+	}
+
+	// Light the window last, so the next hit sees the incremented count.
+	windows->Message(ft::GroupTurnOnNext, 1.0f);
+
+	// NOTE: lighting the fourth window here does not itself end the quest.
+	// RescueMaidenController's Collision arm does, on the next a_sink18 entry
+	// with all four lit -- so the ladder and the completion test are two ends
+	// of the same objective, reached through different components.
+}
+
+// The 0x47 notify-timer sweep -- the same mechanism as the ladder above, seen
+// from the other end. It walks a cursor around the four prison windows every
+// 0.2 s and inverts whichever window it is on: a dark window is overridden ON,
+// an already-won window is overridden OFF. That inversion is what keeps the
+// travelling marker readable against the windows already won, and it is the
+// evidence that fixes the three FT light-override codes.
 void SweepPrisonWindows()
 {
 	auto* group = tag_prison_window_light_group.Component;
@@ -1637,6 +1714,13 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 		return;
 
 	case ft::Collision:
+		// Windows are won at the trip wire, not here: see
+		// RescueMaidenAwardWindow, which s_trip6Control must call for mode 6.
+		if (caller == tag_s_trip6.Component || caller == tag_s_trip5.Component)
+		{
+			RescueMaidenAwardWindow(caller);
+			return;
+		}
 		if (caller != tag_a_sink18.Component)
 			return;
 		// Four windows lit = the maiden is out. Objective-met ends the quest
@@ -1732,12 +1816,10 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 		tag_a_dvtrdb.Component->Message(ft::GateDisable, 0.0f);
 	}
 
-	// UNVERIFIED: the per-hit awards for prison-tower entries 1..3 (the manual
-	// says 250,000 / 500,000 / jackpot / extra-ball light) are NOT here -- they
-	// live in Dragon_a_sink18_Control @0x427100, which Ghidra renders as
-	// stack-byte noise because it loses the float arguments. This controller
-	// only detects the four-light completion. Settled by hand-disassembling
-	// 0x427100.
+	// The per-hit ladder (250,000 / 500,000 / jackpot / extra-ball light) is in
+	// RescueMaidenAwardWindow above, driven by the prison-window trip wire.
+	// This controller owns only the clock, the window sweep and the four-light
+	// completion test.
 }
 
 // ---------------------------------------------------------------------------
@@ -2034,7 +2116,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	pb::MainTable->LightGroup->Message(ft::LightClearOverride, 0.0f);
 	SpecialAddScore(caller, pb::MainTable->SuperJackpotScore);  // the whole super jackpot
 	char buffer[128];
-	FormatRemainingTime(buffer, GetRcString(STR_DRAGON_SLAIN));
+	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN));
 	Display(tag_info_text_box.Component, buffer, Forever);
 	AddScore(caller, 1500000);
 	AwardJackpot(false);

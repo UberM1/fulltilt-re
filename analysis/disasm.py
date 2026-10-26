@@ -56,15 +56,33 @@ def disassemble(blob, vma):
     return lines
 
 
+def ranges_from_decomp(decomp_dir):
+    """Function extents taken from a decompile-all output directory.
+
+    Useful for regions with no seeded handlers -- the unnamed engine and
+    dispatcher functions, which are exactly where the analysis tends to stall.
+    """
+    out = []
+    for f in sorted((Path(decomp_dir) / "functions").glob("*.c")):
+        try:
+            out.append((int(f.stem, 16), f.stem))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
 def main(exe, seeds_tsv, out_dir):
     _d, text_va, blob = text_section(exe)
     listing = disassemble(blob, text_va)
 
-    seeds = []
-    for line in Path(seeds_tsv).read_text().splitlines():
-        addr, _kind, name = line.split("\t")
-        seeds.append((int(addr, 16), name))
-    seeds.sort()
+    if Path(seeds_tsv).is_dir():
+        seeds = ranges_from_decomp(seeds_tsv)
+    else:
+        seeds = []
+        for line in Path(seeds_tsv).read_text().splitlines():
+            addr, _kind, name = line.split("\t")
+            seeds.append((int(addr, 16), name))
+        seeds.sort()
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -86,5 +104,7 @@ def main(exe, seeds_tsv, out_dir):
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        raise SystemExit(f"usage: {sys.argv[0]} TABLE.EXE seeds.tsv OUT_DIR")
+        raise SystemExit(
+            f"usage: {sys.argv[0]} TABLE.EXE (seeds.tsv | DECOMP_DIR) OUT_DIR"
+        )
     main(*sys.argv[1:])
