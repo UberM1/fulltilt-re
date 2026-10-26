@@ -134,6 +134,9 @@ equality, not by the flat +10 rule, so nothing here needed revising.
 | `0x4238a0` | `AddJackpot(n)` | `+0x172 += n`, clamp 10,000,000 |
 | `0x423b80` | `DisableTowerLocks()` | all three lock lights `TLightFtTmpOverrideOff`, `a_sink18/17->ActiveFlag = 0`, all three `MessageField = 0` |
 | `0x423be0` | `ArmNextTowerLock()` | `TLightFtResetOverride` on all three; arm exactly the first *flashing* one (`MessageField = 1`, matching sink `ActiveFlag = 1`); if none flashing and **all three are solid-on**, set quest = `0xd` and `MissionControl(ControlMissionComplete)` |
+| `0x423e50` | `ClearSelectedQuest()` | if `a_kout2->MessageField != 0`, turn off `questLightTable[a_rockb->MessageField]` and zero the field |
+| `0x423e90` | `int SelectNextQuest()` | returns `-1` if `DAT_00439b14` is set; else `ClearSelectedQuest()`, pick the next un-lit quest light, write the quest id (4–8) to `a_kout2->MessageField`, flash the light, return the id |
+| `0x424000` | `OnQuestCompleted()` | `AddJackpot(500000)` — the spec's *"quest completion: +500,000 to the jackpot"* — `v_lite28->MessageField++` (the completed-quest counter), light the quest light solidly, clear the selected quest, tail-call `SelectNextQuest()` |
 | `0x424210` | `TryStartSelectedQuest()` | `if (a_kout2->MessageField) { quest = a_kout2->MessageField; v_lite46->Message(TLightResetAndTurnOff); a_rockb->Message(TBlockerEnable, 2.0); MissionControl(ControlMissionComplete, nullptr); return 1 } return 0` |
 | `0x424490` | `CollectJackpot(ret, showText)` | `tabc43wave`, `AddScoreFrom(nullptr, table->JackpotScore)`, optional text |
 | `0x4244e0` | `DragonSpelled()` | if **all six** of `v_lite22..v_lite27` are on → quest = `0xf`, `MissionControl(ControlMissionComplete)`, return 1 |
@@ -268,12 +271,41 @@ a_sink2->MessageField = n;
 
 100,000 × n capped at 1,000,000, jackpot on every 4th hit — the manual's numbers exactly.
 
-**Surprise, flagged.** In every branch the sink that is *kicked out* is the **other** one
-(`if (caller != a_sink1) a_sink1->…; else a_sink2->…`), and the light flashed is the other
-sink's light. This is consistent across all three branches of `FUN_00425c30` and the two
-handlers, so it is not a one-off decompiler slip — but I cannot explain the design, and
-the register allocation in these two functions is visibly broken (`piVar3 = (int*)0x14`,
-`unaff_retaddr`), so treat the *polarity* of the comparison as only medium confidence.
+**The "other sink" polarity is REAL — settled against the raw listings.**
+`0x425ea0.txt`, `0x426000.txt` and the `0x425c30` range of `0x425b10.txt` confirm it at
+the instruction level. The decisive sequence occurs three times in `FUN_00425c30`
+(at `0x425c64`, `0x425d48`, `0x425d88`), always in this shape:
+
+```
+425c64:  cmp  DWORD PTR ds:0x43a3c4, ecx   ; a_sink1  vs  caller
+425c6a:  jne  0x425c92
+;  equal -> caller IS a_sink1:
+425c6c:  mov  eax, ds:0x43a3d4             ;   a_sink2 ->Message(TSinkResetTimer, -1.0)
+425c7d:  mov  ecx, ds:0x43a434             ;   v_lite65->Message(FlasherStartTimed, 1.0)
+425c92: ;  not equal -> caller IS a_sink2:
+425c92:  mov  eax, ds:0x43a3c4             ;   a_sink1 ->Message(TSinkResetTimer, -1.0)
+425ca3:  mov  ecx, ds:0x43a41c             ;   v_lite66->Message(FlasherStartTimed, 1.0)
+```
+
+So the ball genuinely reappears at the fire lizard sink the player did **not** shoot into,
+and the light flashed is that same other sink's secondary light. objdump and Ghidra agree
+exactly; this is the real behaviour, not a decompiler artefact, and it should be ported
+as-is. (It is presumably a deliberate "the lizards pass the ball between themselves"
+effect — the two sinks sit side by side in front of the lower bumpers.)
+
+Two refinements the listings also give:
+
+* The `caller` pointer reaches `AddScoreFrom` and `FUN_00425c30` correctly in all branches
+  (`mov esi,[esp+0x10]` / `push esi`); the decompilation's `piVar3 = (int*)0x14` and
+  `unaff_retaddr` were pure noise. `FUN_00425c30` is `__stdcall(caller)` (`RET 0x4`).
+* The **mode 3** branch and the **count == 2** branch do *not* use the other-sink rule.
+  Mode 3 kicks `caller` itself (`esi = [esp+0x14]`); the count == 2 path kicks
+  `a_sink1` unconditionally (`ds:0x43a3c4` at `0x425d19`). Only the three
+  "nothing special happened" paths swap sinks.
+* The flash duration in the handlers is `(float)(int)(X->floatAt+0x7e)` where `X` is the
+  unannotated component global `0x43a99c` — a float truncated to int and back
+  (`fld` / `__ftol` at `0x42c7c8` / `fild` / `fstp`). Probably a DAT-supplied timer value;
+  **unidentified**.
 
 ```cpp
 // a_sink1 / a_sink2 — Fire Lizard Sinks. 5,000 each.
@@ -530,7 +562,11 @@ Per-handler differences:
   `a_dvtrdb->TGateDisable`. `a_sink10`'s block is **character-for-character the same** as
   `a_ramp103`'s, so it is a shared "set the diverter to route X" idiom.
 * `a_sink9`/`a_sink10` additionally omit the `s_plunger1` relaunch in the lock path — they
-  only decrement `MultiballCount` and score. Possibly a decompiler omission; **flagged**.
+  only decrement `MultiballCount` and score. **Confirmed real against the listings, not
+  decompiler loss:** `0x4274d0.txt` and `0x427680.txt` contain no `0x3fb` and no reference
+  to `ds:0x439d44` (`s_plunger1`) anywhere, while `0x426f90`, `0x427100`, `0x427290` and
+  `0x4273d0` each contain exactly one of each. All six do `dec DWORD PTR [ecx+0x192]`.
+  See §3.3.2.
 
 ```cpp
 // a_sink15 / a_sink18 / a_sink13 / a_sink17 / a_sink9 / a_sink10 — tower lock sinks.
@@ -660,11 +696,36 @@ trustworthy even where the `abStack_NN[...]` noise appears, and that only the *a
 values* in those functions need treating as suspect. The six tower-lock handlers all show
 the same noise pattern, so §3.3's shared shape stands.
 
-It does **not** resolve the one genuinely odd thing in this scope: the "kick the *other*
-sink" polarity in `a_sink1`/`a_sink2`/`FUN_00425c30` (§3.1). `a_sink18`'s mode-6 branch is
-a *different* mechanism (random choice between the two fire lizard sinks, not "the other
-one"), so it neither confirms nor refutes it. Raw listings for `0x425ea0`, `0x426000` and
-`0x425c30` would settle that.
+`a_sink18`'s mode-6 branch is a *different* mechanism from §3.1's "other sink" rule — a
+random choice between the two fire lizard sinks — so it does not bear on that question;
+§3.1 settles it separately against its own listings.
+
+#### 3.3.2 Tower 3 really does swallow the ball
+
+`a_sink9` (0x4274d0) and `a_sink10` (0x427680) are the two entrances to the 300,000 lock,
+`a_sink16`. Their lock path, from `0x4274d0.txt`:
+
+```cpp
+soundwave10->Play();                                  // tabc10wave, 0x43abac
+TableG->MultiballCount--;                             // dec [ecx+0x192]
+lite50->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
+int added = AddScoreFrom(caller, 0);                  // 300,000
+snprintf(Buffer, sizeof Buffer, pb::get_rc_string(Msg::STRING3010), added);
+info_text_box->Display(Buffer, 2.0f, 0, 0);
+ArmNextTowerLock();                                   // all three on -> mode 0xd
+// ...and that is the whole branch. No plunger relaunch, no TSinkResetTimer.
+```
+
+The other four entrances all insert
+`TableG->Plunger->Message(PlungerRelaunchBall, 0.96f)` between the `MultiballCount--` and
+the scoring. Towers 1 and 2 therefore hand the player a replacement ball; **tower 3
+consumes the ball outright**, dropping the live-ball count to zero.
+
+That is coherent rather than a bug: locking the third ball is exactly the condition under
+which `ArmNextTowerLock()` sets mode `0xd` (Tower Barrage) and dispatches
+`ControlMissionComplete`, so the three-ball mode's own controller (`0x42b0e0`) is
+responsible for putting balls back into play. A port must not "helpfully" add the relaunch
+to towers 1 and 2's twin here, or Tower Barrage will start with a spare ball loose.
 
 ### 3.4 The dragon's mouth — `a_sink19` (0x427f10)
 
@@ -810,12 +871,52 @@ Two things to flag here.
   branch awards **nothing**; its only effect is the `0x4d` notification to the previous
   scorer. That is consistent with the spec's `[GAP]` on the gargoyle kickout's point value
   (its reward is a mode, not points).
-* `a_kout2->MessageField` is **also** the "selected quest" slot that
-  `TryStartSelectedQuest()` reads and `SelectNextQuest` (`0x423e90`) writes with 4–8.
-  The default branch here increments it with a `< 3` guard, so the two uses can only
-  coexist because the guard never fires once a quest is selected. This is either a genuine
-  (ugly) union in the original, or Ghidra attributing the increment to the wrong object.
-  **Unresolved** — worth re-checking by hand on the disassembly.
+* `a_kout2->MessageField` is **also** the "selected quest" slot. **Resolved against the
+  listings: the dual use is real.** `0x426e40.txt` shows the increment is on
+  `[esp+0x8]` — the `caller` argument — and the kickout restart on the global
+  `ds:0x43a874`; since this handler is bound to exactly one component, those are the same
+  object, so the counter genuinely is `a_kout2->MessageField`:
+
+  ```
+  426e73:  mov  ecx, DWORD PTR [esp+0x8]     ; caller == a_kout2
+  426e77:  mov  eax, DWORD PTR [ecx+0x6]     ; MessageField
+  426e7a:  cmp  eax,0x3
+  426e7d:  jge  0x426e83
+  426e7f:  inc  eax
+  426e80:  mov  DWORD PTR [ecx+0x6],eax
+  426e83:  mov  eax, DWORD PTR [ecx+0x6]
+  426e86:  push eax                          ; score index
+  426e87:  push ecx                          ; caller
+  426e88:  call 0x4230a0                     ; AddScoreFrom
+  ```
+
+  And `ds:0x43a874 + 6` is unambiguously the quest slot: `0x423e90` (`SelectNextQuest`)
+  writes it from a quest-id table based at 4, `0x424210` (`TryStartSelectedQuest`) reads it
+  as the mode to enter, and `0x423e50` and `0x424000` clear it to 0.
+
+  **Why they do not actually collide.** The increment lives in the branch reached only when
+  the quest is neither 2 nor 7, i.e. only while some *other* quest is already running —
+  and `TryStartSelectedQuest()` is only ever called when no quest is running. `0x423e90`
+  additionally calls `0x423e50` first, which zeroes the field if it is non-zero before
+  choosing a new quest. So the two tenants never hold the field at the same time.
+
+  **What the increment is for: nothing.** `a_kout2` declares zero scores, and
+  `get_scoring` returns 0 for `index >= ScoreCount`, so `AddScoreFrom(caller, 1..3)`
+  credits 0 points on every path. The field is cleared before the next read by the quest
+  machinery. The increment is therefore **vestigial** — most likely a score ladder whose
+  score array was dropped before release. I am stating that rather than inventing a
+  purpose for it.
+
+  **One real latent hazard for the port.** If `TryStartSelectedQuest()` were ever reached
+  with a stale 1–3 in the field, it would enter mode 1, 2 or 3 instead of a quest. I could
+  not reach that state from the handlers in this scope, but the mode controllers are out of
+  scope, so I cannot rule it out. A port that stores the selected quest in its own variable
+  avoids the question entirely, at the cost of not being bug-compatible.
+
+  This "park unrelated state on whatever component global is handy" habit is pervasive in
+  Dragon, which is what makes the dual use credible rather than suspicious: the same
+  functions use `a_rockb->MessageField` as an index into a quest-light tag table at
+  `0x43bb58`, and `v_lite28->MessageField` as the completed-quest counter.
 
 ### 4.4 `a_kout3` (0x427ef0) — Dragon Blood magnet
 
@@ -1259,8 +1360,9 @@ Ordered roughly by how much they would change a reimplementation.
   `0x56`.** All are real codes with no Space Cadet counterpart, so CADET cannot pin them.
   My readings (`THole` hold, "no longer active scorer", "mission restarted", "ball
   drained", "ramp exit", "ramp traversed") come from call-site behaviour only.
-* **`a_kout2->MessageField` serving as both a hit counter and the selected-quest slot.**
-  Needs a hand check against the disassembly.
+* The float field at **`(*0x43a99c) + 0x7e`** used as the fire-lizard light flash duration.
+  `0x43a99c` is an unannotated component global sitting between `a_sink17` and `a_sink16`.
+  Unidentified.
 * **Which physical tower each lock sink is** (gate / watch / prison). The binary gives
   score and arming order but not geometry; that needs the DAT visual positions.
 * **Modes 10 (`0x4285f0`), `0xc` (`0x42ac80`) and `0xf` (`0x42b510`).** Named here only by

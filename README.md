@@ -132,8 +132,11 @@ they were how the rules region was first located, and their 10 named exports
 - [x] Decompile every handler: 159 CADET, 159 Dragon, 178 Skulduggery functions
 - [x] Classify each handler against its nearest named Space Cadet equivalent
 - [x] Generate `src/control_dragon.cpp` / `src/control_pirates.cpp` skeletons
-- [ ] Fill in the handler bodies (50/64 Dragon and 51/69 Skulduggery have a template)
-- [ ] The quest system -- it lives in unnamed functions, not in the component table
+- [x] Resolve component names everywhere (4,240 references annotated)
+- [x] The quest system: 6 quests, no ranks, mode register in `info_text_box->MessageField`
+- [x] Dragon's Keep scoring handlers implemented (`src/dragon_part1.cpp`)
+- [ ] The remaining Dragon handler bodies
+- [ ] Skulduggery's rules (analysis in progress)
 - [ ] A per-table interface upstream does not have yet
 - [ ] The 7 object types the engine does not implement (1034-1038, 1042, 1043)
 
@@ -147,6 +150,12 @@ rea decompile-all    seeded, headless, ~160 functions per binary
 match_handlers.py    nearest named Space Cadet handler, by normalised token stream
 message_codes.py     Full Tilt's MessageCode numbering, by alignment with control.cpp
 gen_control.py       -> src/control_<table>.cpp: tables exact, bodies TODO
+dump_tags.py         resolves every DAT_<addr> to its component name, and
+                     annotates the decompiled corpus in place
+disasm.py            objdump listings for every handler -- the decompiler
+                     mis-models some stack frames, and the listing wins
+dump_strings.py      RT_STRING resources: the rules identify messages by id,
+                     so this is the binaries' own documentation
 ```
 
 Everything regenerates from `binaries/` plus the scripts, which is why `decomp/`

@@ -1,0 +1,193 @@
+1001	This program requires an 80386 or later CPU.
+1002	80386 Required
+1003	Error:
+1004	Unable to find other tables.
+1005	Not enough memory to run Full Tilt!.
+1006	Warning:
+1007	WAVEMIX.INF is missing - it must be in the pinball directory!
+1008	One or more of the player controls is set to the same key,
+for best performance use unique keys for each control.
+1009	Clear High Scores?
+1010	Confirm
+1011	1 UseBitmapFont
+1012	90 Left Flipper Key
+1013	191 Right Flipper Key
+1014	32 Plunger Key
+1015	88 Bump Left Key
+1016	190 Bump Right Key
+1017	38 Bump Bottom Key
+1018	Software\Cinematronics\Pinball
+1019	Shift Keys do not work correctly on all systems
+1020	FullTilt! requires at least 256 color (8-bit)
+2001	F2 Starts New Game
+2002	Game Over
+2003	Game Paused
+F3 to Resume
+2004	Continue Play
+2005	Careful...
+2006	TILT!
+2007	Player 1
+2008	Player 2
+2009	Player 3
+2010	Player 4
+2011	Player 1 Shoot Again
+2012	Player 2 Shoot Again
+2013	Player 3 Shoot Again
+2014	Player 4 Shoot Again
+2015	Demo
+Player 1
+2016	Demo
+Player 2
+2017	Demo
+Player 3
+2018	Demo
+Player 4
+2019	Full Tilt! - Skulduggery
+2020	Skulduggery
+2021	Skulduggery
+2022	First Pinball CD
+2023	255 255 255   (R G B default font color)
+2024	pirates.mid
+2025	pirates.dat
+2026	fulltilt.hlp
+2029	About Full Tilt!
+2030	Use &Maximum Resolution (640 x 480)
+2031	Use &Maximum Resolution (800 x 600)
+2032	Use &Maximum Resolution (1024 x 768)
+2033	Joystick driver is not available.
+ Make sure you have a joystick driver installed.
+2034	Joystick 1 not found
+2035	Joystick 1 is not responding, make sure it is properly installed.
+2036	Music: On
+Game Paused
+F3 to Resume
+2037	Music: Off
+Game Paused
+F3 to Resume
+2038	Sound Effects: On
+Game Paused
+F3 to Resume
+2039	Sound Effects: Off
+Game Paused
+F3 to Resume
+3001	Crew Added
+Bumpers Now
+%ld
+3002	Secret Hideaway
+%ld
+3003	%ld
+3004	Island Breeze
+%ld
+3005	Nor'Easter
+%ld
+3006	Port O' Call
+%ld
+3007	In The Brig
+3008	Tradewind Loop
+%ld
+3009	Shipwreck Mystery
+%ld
+3010	Sou'Eastern
+%ld
+3011	Easterly
+%ld
+3012	Westerly
+%ld
+3013	WINDS
+%ld
+3014	Extra Ball
+3015	One Million
+3016	Attack Ship
+%ld
+3017	Ship Sunk
+3018	Ship Captured
+3019	Gold Ingots
+3020	Silver Chalice
+3021	Signet Ring
+3022	The Frantz Ruby
+3023	Shapiro's Sceptre
+3024	Crown of Sandige
+3025	Tavern
+%ld
+3026	Shoot Again
+3027	HIGH SCORE
+3028	Target Bonus
+%ld
+3029	Mode Bonus
+%ld
+3030	Map Piece Bonus
+%ld
+3031	Special Treasures
+%ld
+3032	Ship's Hold
+%ld
+3033	Total Bonus
+%ld
+3034	Gold Ingots
+Buried
+3035	Silver Chalice
+Buried
+3036	Signet Ring
+Buried
+3037	The Frantz Ruby
+Buried
+3038	Shapiro's Sceptre
+Buried
+3039	Crown of Sandige
+Buried
+3040	Coins
+Buried
+3041	Bonus
+Buried
+3042	Jackpot
+Buried
+3043	Extra Ball
+Buried
+3044	Max Crew
+Bumpers Now
+%ld
+3045	Bermuda Triangle
+%ld
+3046	Squall!
+%ld
+3047	Tropical Storm!
+%ld
+3048	Monsoon!
+%ld
+3049	Hurricane!
+%ld
+3050	Shipwrecked
+3051	Mutiny!
+%ld
+3052	Sword Fight
+%ld
+3053	Treasure Hunt
+%ld
+3054	Pegleg's Loot
+%ld
+3055	Lava-Ball
+3056	Jail Break!
+3057	Bonus
+%ld
+3058	Jackpot
+%ld
+3059	Shipwreck Mystery
+Available
+3060	Hit ship to sink.
+Wire ramp to capture.
+3061	Hit the X to find treasure
+3062	Hit the Tavern
+3063	Follow the Winds
+3064	Hit Bumpers to supress rebellion
+3065	Hit Parrot and Volcano targets
+3066	Hit X to find Peg Leg's Loot
+3067	Hit targets to bail water
+3068	Attack Mode Selected
+3069	Treasure Hunt Mode Selected
+3070	Tavern Mode Selected
+3071	Bermuda Mode Selected
+3072	Storm Mode Selected
+3073	Mutiny Mode Selected
+3074	Swordfight Mode Selected
+3075	Pegleg's Loot Mode Selected
+3076	Spell Skulduggery to Start Mode

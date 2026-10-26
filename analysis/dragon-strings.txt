@@ -1,0 +1,210 @@
+1001	This program requires an 80386 or later CPU.
+1002	80386 Required
+1003	Error:
+1004	Unable to find other tables.
+1005	Not enough memory to run Full Tilt!.
+1006	Warning:
+1007	WAVEMIX.INF is missing - it must be in the pinball directory!
+1008	One or more of the player controls is set to the same key,
+for best performance use unique keys for each control.
+1009	Clear High Scores?
+1010	Confirm
+1011	1 UseBitmapFont
+1012	90 Left Flipper Key
+1013	191 Right Flipper Key
+1014	32 Plunger Key
+1015	88 Bump Left Key
+1016	190 Bump Right Key
+1017	38 Bump Bottom Key
+1018	Software\Cinematronics\Pinball
+1019	Shift Keys do not work correctly on all systems
+1020	FullTilt! requires at least 256 color (8-bit)
+2001	F2 Starts New Game
+2002	Game Over
+2003	Game Paused
+F3 to Resume
+2004	Continue Play
+2005	Careful...
+2006	TILT!
+2007	Player 1
+2008	Player 2
+2009	Player 3
+2010	Player 4
+2011	Player 1 Shoot Again
+2012	Player 2 Shoot Again
+2013	Player 3 Shoot Again
+2014	Player 4 Shoot Again
+2015	Demo
+Player 1
+2016	Demo
+Player 2
+2017	Demo
+Player 3
+2018	Demo
+Player 4
+2019	Full Tilt! - Dragon's Keep
+2020	Dragon's Keep
+2021	DragonsKeep
+2022	First Pinball CD
+2023	255 255 255   (R G B default font color)
+2024	dragon.mid
+2025	dragon.dat
+2026	fulltilt.hlp
+2029	About Full Tilt!
+2030	Use &Maximum Resolution (640 x 480)
+2031	Use &Maximum Resolution (800 x 600)
+2032	Use &Maximum Resolution (1024 x 768)
+2033	Joystick driver is not available.
+ Make sure you have a joystick driver installed.
+2034	Joystick 1 not found
+2035	Joystick 1 is not responding, make sure it is properly installed.
+2036	Music: On
+Game Paused
+F3 to Resume
+2037	Music: Off
+Game Paused
+F3 to Resume
+2038	Sound Effects: On
+Game Paused
+F3 to Resume
+2039	Sound Effects: Off
+Game Paused
+F3 to Resume
+3001	Hit Fire Lizards To Begin Quest
+3002	Extra Ball Light
+3003	Tower Lock Enabled
+3004	Pass Clear
+3005	Shoot Again
+3006	Jackpot Grows
+3007	Fire Ridge
+%ld
+3008	%ld
+3009	Ball Saved
+3010	Ball Trapped
+%ld
+3011	Extra Ball
+3012	Target Bonus
+%ld
+3013	Quest Bonus
+%ld
+3014	Armor Bonus
+%ld
+3015	Spell Bonus
+%ld
+3016	Bonus Hold
+%ld
+3017	Total Bonus
+%ld
+3018	Jackpot
+%ld
+3019	Dragon Hoard
+%ld
+3020	Steal Gems From Dragon
+3021	Gold
+%ld
+3022	Diamond
+%ld
+3023	Pearl
+%ld
+3024	Ruby
+%ld
+3025	Emerald
+%ld
+3026	Sapphire
+%ld
+3027	Amethyst
+%ld
+3028	Opal
+%ld
+3029	Fire Lizard Slain
+%ld
+3030	Fire Lizards
+%ld
+3031	Put ball in Fire Lizard Sinks
+3032	Rescue Maiden
+%ld
+3033	Put ball in Prison Tower
+3034	Maiden Rescued
+Extra Ball Available
+3035	Dragon Pass
+%ld
+3036	Put ball in Armor and Gargoyle Kickouts
+3037	Wizard's Fury
+%ld
+3038	Put ball in Well and hit Spell Targets
+3039	Mystery Bonus set to:
+Extra Ball
+3040	Mystery Bonus set to:
+Max Weapons
+3041	Mystery Bonus set to:
+Max Armor
+3042	Mystery Bonus set to:
+Jackpot
+3043	Mystery Bonus set to:
+One Million
+3044	Max Armor
+3045	Max Weapons
+3046	One Million
+3047	Slay Dragon
+%ld
+3048	Put ball in Dragon's Mouth
+3049	Slay Dragon
+Hits Left: %ld
+3050	Super Jackpot
+%ld
+3051	Tower Barrage
+3052	Purchase Extra Ball?
+Yes [Left]
+No [Right]
+3053	Purchase Extra Ball Light?
+Yes [Left]
+No [Right]
+3054	Purchase Armor?
+Yes [Left]
+No [Right]
+3055	Purchase Weapon?
+Yes [Left]
+No [Right]
+3056	Purchase Spell?
+Yes [Left]
+No [Right]
+3057	Dragon Hoard?
+Yes [Left]
+No [Right]
+3058	Fire Lizards?
+Yes [Left]
+No [Right]
+3059	Rescue Maiden?
+Yes [Left]
+No [Right]
+3060	Dragon Pass?
+Yes [Left]
+No [Right]
+3061	Wizard's Fury?
+Yes [Left]
+No [Right]
+3062	Gargoyle Gaggle-Ball
+3063	Dragon Flurry
+3064	Dragon Loop
+%ld Added to Jackpot
+3065	HIGH SCORE
+3066	Launch Ball
+3067	Restart Quest
+%ld
+3068	No Dragon Eggs
+3069	Dragon Egg Bonus
+%ld
+3070	Weapon Bonus
+%ld
+3071	Dragon Hoard
+Quest Selected
+3072	Fire Lizards
+Quest Selected
+3073	Rescue Maiden
+Quest Selected
+3074	Dragon Pass
+Quest Selected
+3075	Wizard's Fury
+Quest Selected
+3076	Super Jackpot Increased
+%ld
