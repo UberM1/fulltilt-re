@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # `// 0x00424bc0 ...` or `... (0x424bc0)` on a comment line above a definition.
-ADDR_COMMENT = re.compile(r"//.*?0x0?0?(4[0-9a-f]{5})")
+ADDR_COMMENT = re.compile(r"//.*?0x0{0,2}(4[0-9a-f]{5})\b")
 DEFN = re.compile(r"^(?:static\s+)?(?:void|int|float|bool)\s+([A-Za-z_][\w:]*)\s*\(")
 
 

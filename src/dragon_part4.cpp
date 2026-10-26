@@ -230,9 +230,9 @@ int shoot_again_flag = 0;
 // DAT_00439b1c -- 0 while a ball is in play, 1 when the last ball drained untilted and 2
 // when it drained tilted. Set here and cleared by mode 0xb's controller (0x0042b7c0) and by
 // the table's new-game message (0x00424260 case 0x3f6).
-// UNVERIFIED: the 1-vs-2 distinction is consumed only by 0x0042b7c0, which uses it to skip
-// the bonus display when the game ended on a tilt; reading that controller in full would
-// confirm nothing else depends on it.
+// The 1-vs-2 distinction is consumed by 0x0042b7c0's mode-start branch, which skips the
+// whole bonus count-up (`step = 8`) when the table is tilt-locked and the phase is not 1 --
+// so phase 1 still pays the bonus for a clean last ball and phase 2 does not.
 int game_over_phase = 0;
 
 // DAT_0043bb6c -- which plunger action the drain's own timer should take: 1 = none,

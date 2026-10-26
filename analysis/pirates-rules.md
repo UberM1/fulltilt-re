@@ -374,6 +374,25 @@ piece completes the set; `FUN_004255a0(2, …)`.
 So, exactly as in Dragon, **selection is random, not cyclic**, and the "next mode" is
 *displayed* but the player cannot choose which. **[C]**
 
+#### 2.1.1 The captive ball — `Pirates_a_spot102_Control` **[C]**
+
+One handler, three behaviours keyed on the mode register, and it is the component the
+manual describes most precisely:
+
+* **state 2** → `FUN_00425850()` (re-select), print `3068 + index` ("<Mode> Mode Selected"),
+  score `scoring[0]` = **50,000**, flash `v_lite607` (the Mode Change light) for 1.0 s.
+  ✓ manual "the next available mode is changed by hitting the captive ball … + 50,000
+  outside a mode".
+* **state 4…0xb** (any mode running) → query `mode_timer` (`0x48`) and, if it is still
+  running, re-arm it at **`remaining/1000 + 10.0` seconds** — i.e. **the captive ball
+  extends the running mode by exactly +10.0 s**, with no cap and no limit on how often.
+  ✓ manual "hitting it *during* a mode extends the mode timer", and this is the amount the
+  spec listed as unknown. Confirmed in the listing — `fild [esp]; fdiv ds:0x438920;
+  fadd ds:0x438914` with the two constants reading **1000.0** and **10.0** out of the
+  float pool. **[C]**
+* **anything else** (0, 1, 2 handled above, 0xc, 0xd, 0x10, 0x11) → just the light and the
+  50,000.
+
 ### 2.2 Starting **[C]**
 
 Two entry points:
@@ -398,7 +417,7 @@ As in Dragon the **timer is not started until the light sweep finishes**: the `0
 branch with caller type `0x40e` (1038 `light_sweeps`) arms `mode_timer` and broadcasts
 `0x50`.
 
-### 2.3 Start bonus and time limit **[C]** for the values present
+### 2.3 Start bonus and time limit **[C]**
 
 All eight are now read from the instruction stream (`push <float>; push 0x45` immediately
 before the `mode_timer->Message` call) — the four that Ghidra dropped as lost float
@@ -428,10 +447,12 @@ of waiting for the sweep to finish.
 > 200,000 points**". The binary pays a **different amount per mode** — 100,000 (Mutiny)
 > through 1,000,000 (Peg Leg's Loot) — and only three of the eight actually pay 200,000.
 
-> **Resolves a manual gap [C].** "Mode time limits and the captive-ball extension amount"
-> was listed as unknown. The extension is **+10.0 s** (§3.1) and four of the eight limits
-> are now known; the odd values (31.14, 30.68, 27.40, 24.14) look like voice-wave lengths,
-> same as Dragon. **[S]** for the *reason*.
+> **Closes a manual gap entirely [C].** "Mode time limits and the captive-ball extension
+> amount" was listed as unknown in the spec. The extension is **+10.0 s** (§2.1.1) and
+> **all eight** limits are now read from the instruction stream. The odd values
+> (29.38, 31.14, 24.14, 27.40, 30.68, 48.28) look like voice-wave lengths, same as Dragon
+> — **[S]** for the *reason*, **[C]** for the values. Note that only four distinct values
+> are used across the eight modes, which is itself mild support for the wave-length theory.
 
 ### 2.4 Ending **[C]**
 
@@ -1187,7 +1208,7 @@ Its first three lines also contain a mode-register read: in state 0x10 with
 | 4 | Sword Fight group clear "awards one of" four things | **Cyclic in a fixed order** (treasure → coin → map piece → extra ball → extra ball …), not a choice | [C] |
 | 5 | ~~Jail Break needs "3 hits with ≥1 ball in the brig"~~ | **Withdrawn.** The check exists, one level up: `Pirates_a_spot6_Control` does not test the brig, but `FUN_0042d590`'s `0x4f` aborts straight back to state 2 if `BallsInBrig == 0`. Manual correct | [C] |
 | 6 | "7 mode lights … plus Peg Leg's Loot" | 8 lights `v_lite552`…`v_lite559`; the first **seven** are the random-selection pool, the 8th is reachable only via all six map pieces | [C] |
-| 7 | Six wind lanes | **Eight** wind light groups are enumerated by the engine; "Tradewinds" covers two, and the orphan string 3006 "Port O' Call" is plausibly the eighth | [P] |
+| 7 | ~~Six wind lanes~~ | **Withdrawn.** Eight light groups, but only six *names*: Tradewind Loop and Easterly each cover two lanes, and string 3006 "Port O' Call" is the cannon wire ramp, not a wind. Manual correct (§4.6) | [C] |
 | 8 | ~~Jackpot "+20,000 per target, +40,000 per sink, +750,000 per mode completion"~~ | **Withdrawn.** All three are in `FUN_0042d850` / `FUN_0042d900` verbatim (§6.0). Manual correct | [C] |
 | 9 | Tavern/ship "+50,000 / +25,000 jackpot per target" | Those amounts exist as **scores on bank completion**, not as jackpot contributions | [P] |
 | 10 | Plunger "15 s re-launch" | The rules code serves with a **0.96 s** delay; no 15 s constant | [P] |
@@ -1197,9 +1218,11 @@ Its first three lines also contain a mode-register read: in state 0x10 with
 | 14 | "hint strings 3060–3067" | Storm's hint is **3067**, not 3064 — the hint block is *not* parallel to the mode-selected block 3068–3075 | [C] |
 | 15 | Magnets "active during Storm, Bermuda Triangle and Tavern" | Only Tavern uses the type-1042 `s_magnet*`; Bermuda's and Storm's magnets are the kickouts `a_kout1`/`a_kout2`, and they pay **1,000,000** against the keg magnets' 100,000 | [C] |
 
-Two of the fifteen (#5, #8) were **withdrawn once the dispatcher was readable** — both were
-cases where the manual was right and the relevant code was simply in the one function
-outside the original decompile range. The other thirteen stand.
+Three of the fifteen were **withdrawn as the evidence improved** — #5 and #8 once the
+dispatcher was readable, #7 once the `sprintf` operands were recovered. All three were
+cases where the manual was right and the relevant code was simply somewhere I could not yet
+read. The other twelve stand, and #1, #2, #4, #11, #12, #13 are all now **[C]** against
+either the dispatcher or the instruction stream.
 
 Structural differences from Dragon's Keep worth noting for a port: **no restart window and
 no `0x51` code** (the dispatcher returns to state 2 itself after every `0x52`); **no super jackpot**; **no plunger**; drop-target banks and letter sets

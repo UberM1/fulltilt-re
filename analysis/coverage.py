@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ADDR_RE = re.compile(r"0x00(4[0-9a-f]{5})")
+ADDR_RE = re.compile(r"0x0{0,2}(4[0-9a-f]{5})\b")  # both 0x427f10 and 0x00427f10 occur
 
 
 def seeds(table):
