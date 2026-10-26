@@ -1599,7 +1599,7 @@ void RescueMaidenAwardWindow(TPinballComponent* caller)
 	// separate display layer and not plain turn-on/turn-off. The ladder keying
 	// on this count is independent corroboration of those three names.
 	char buffer[128];
-	switch (windows->Message(ft::GroupGetOnCount, 0.0f))
+	switch (static_cast<int>(windows->Message(ft::GroupGetOnCount, 0.0f)))
 	{
 	case 0:
 		AddScore(caller, 250000);
