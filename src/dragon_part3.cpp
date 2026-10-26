@@ -160,15 +160,15 @@ int AddScoreFor(TPinballComponent* caller, int index); // 0x004230a0
 int AddScoreAt(TPinballComponent* caller, int score);  // 0x004230f0
 void AwardExtraBall(float time);                       // 0x004231e0
 
-void AwardShieldArmor();                                // 0x00423240
+void ApplyShield();                                // 0x00423240
 void CastRandomSpell();                                 // 0x004237f0
-void DisableTowerLocks();                               // 0x00423b80
-void ArmNextTowerLock();                                // 0x00423be0
-bool TryStartSelectedQuest();                           // 0x00424210
+void SuspendTowerLocks();                               // 0x00423b80
+void CheckTowerLocks();                                // 0x00423be0
+bool StartSelectedQuest();                           // 0x00424210
 float CollectJackpot(float unused, bool showText);       // 0x00424490
 bool CheckDragonFlurry();                               // 0x004244e0
-void BroadcastMessage(MessageCode code, TPinballComponent* cmp); // 0x0042c020
-int DragonRand();                                       // 0x0042c4cb
+void MissionHandler(MessageCode code, TPinballComponent* cmp); // 0x0042c020
+int RandBelow();                                       // 0x0042c4cb
 
 // Handlers in other slices that this one calls directly rather than through
 // control::handler -- a_sink4's Max Armor award enables both armor blockers by invoking
@@ -185,7 +185,7 @@ extern int quest_start_pending;
 // helper; every call site below matched the same instruction pattern.
 static int RandBelow(int n)
 {
-	return (DragonRand() * n) >> 15;
+	return (RandBelow() * n) >> 15;
 }
 
 // ===========================================================================
@@ -249,7 +249,7 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 		if (CheckDragonFlurry())
 			return; // D-R-A-G-O-N completed: mode 0xf owns the ball now
 		quest_start_pending = 0;
-		if (TryStartSelectedQuest())
+		if (StartSelectedQuest())
 			return;
 
 		// No quest was selected, so nothing took the ball: hand it back. a_sink1
@@ -317,7 +317,7 @@ void FireLizardSink1Control(MessageCode code, TPinballComponent* caller)
 		lite64->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 
 		info_text_box->MessageField = mode_timer->MessageField;
-		BroadcastMessage(FtMessageCode::QuestRestarted, nullptr);
+		MissionHandler(FtMessageCode::QuestRestarted, nullptr);
 		mode_timer->MessageField = -1;
 
 		// The other special path: this one ejects from the sink that was hit.
@@ -353,7 +353,7 @@ void FireLizardSink2Control(MessageCode code, TPinballComponent* caller)
 		lite63->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		lite64->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		info_text_box->MessageField = mode_timer->MessageField;
-		BroadcastMessage(FtMessageCode::QuestRestarted, nullptr);
+		MissionHandler(FtMessageCode::QuestRestarted, nullptr);
 		mode_timer->MessageField = -1;
 		caller->Message(MessageCode::TSinkResetTimer, -1.0f);
 		return;
@@ -422,7 +422,7 @@ void WellSinkControl(MessageCode code, TPinballComponent* caller)
 		if (RandBelow(4) == 1)
 		{
 			quest_start_pending = 1;
-			if (!TryStartSelectedQuest())
+			if (!StartSelectedQuest())
 			{
 				// Nothing to start, so the offer never appears and the ball comes
 				// straight back. The kickout below then fires a second time on the same
@@ -479,7 +479,7 @@ void WellSinkControl(MessageCode code, TPinballComponent* caller)
 		// Max Armor is "all three armor awards at once", and the two blocker armors are
 		// granted by calling their own handlers directly -- the handler *is* the armor's
 		// state machine (see part2), so going through it is what starts their timers.
-		AwardShieldArmor();
+		ApplyShield();
 		tabc24wave->Play(nullptr, "WellSinkMaxArmor");
 		CenterPostControl(MessageCode::TBlockerEnable, a_center_post);
 		RightOutlaneBlockerControl(MessageCode::TBlockerEnable, a_bloce);
@@ -579,7 +579,7 @@ void TowerLock1EntranceControl(MessageCode code, TPinballComponent* caller)
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_BallTrapped)), addedScore);
 		info_text_box->Display(Buffer, 2.0);
 
-		ArmNextTowerLock(); // all three solid -> Tower Barrage
+		CheckTowerLocks(); // all three solid -> Tower Barrage
 		return;
 	}
 
@@ -623,7 +623,7 @@ void TowerLock1SinkControl(MessageCode code, TPinballComponent* caller)
 		}
 		// Both branches re-arm, so a ball through a dead tower still advances the ladder
 		// if the tower target bank has lit a different one in the meantime.
-		ArmNextTowerLock();
+		CheckTowerLocks();
 		return;
 
 	case ModeRescueMaiden:
@@ -646,7 +646,7 @@ void TowerLock1SinkControl(MessageCode code, TPinballComponent* caller)
 		// Any other mode: give the ball back on the configured delay and tear the locks
 		// down, since a quest owns the towers now.
 		a_sink18->Message(MessageCode::TSinkResetTimer, -1.0f);
-		DisableTowerLocks();
+		SuspendTowerLocks();
 		return;
 	}
 }
@@ -678,7 +678,7 @@ void TowerLock2EntranceControl(MessageCode code, TPinballComponent* caller)
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_BallTrapped)), addedScore);
 			info_text_box->Display(Buffer, 2.0);
 
-			ArmNextTowerLock();
+			CheckTowerLocks();
 			return;
 		}
 
@@ -711,7 +711,7 @@ void TowerLock2SinkControl(MessageCode code, TPinballComponent* caller)
 	if (info_text_box->MessageField != ModeNormal)
 	{
 		a_sink17->Message(MessageCode::TSinkResetTimer, 0.0f);
-		DisableTowerLocks();
+		SuspendTowerLocks();
 		return;
 	}
 
@@ -726,12 +726,12 @@ void TowerLock2SinkControl(MessageCode code, TPinballComponent* caller)
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_BallTrapped)), addedScore);
 		info_text_box->Display(Buffer, 2.0);
 
-		ArmNextTowerLock();
+		CheckTowerLocks();
 		return;
 	}
 
 	a_sink17->Message(MessageCode::TSinkResetTimer, 0.0f);
-	ArmNextTowerLock();
+	CheckTowerLocks();
 }
 
 // 0x004274d0 -- a_sink9, the first entrance to tower lock 3 (skeleton: a_sink9Control)
@@ -767,7 +767,7 @@ void TowerLock3EntranceAControl(MessageCode code, TPinballComponent* caller)
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_BallTrapped)), addedScore);
 			info_text_box->Display(Buffer, 2.0);
 
-			ArmNextTowerLock();
+			CheckTowerLocks();
 			return;
 		}
 
@@ -826,7 +826,7 @@ void TowerLock3EntranceBControl(MessageCode code, TPinballComponent* caller)
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_BallTrapped)), addedScore);
 			info_text_box->Display(Buffer, 2.0);
 
-			ArmNextTowerLock();
+			CheckTowerLocks();
 			return;
 		}
 

@@ -57,29 +57,29 @@ namespace pirates {
 // `extern TLight* lite1;`-style pointers rather than defining a second tag, exactly as
 // dragon_part3.cpp does.
 
-component_tag<TTextBox> tag_info_text_box = {"info_text_box"};
+extern component_tag<TTextBox> tag_info_text_box;
 
 // SKULDUGGERY letter lights. v_lite1 doubles as the 11-bit letter mask
 // (v_lite1->MessageField), and v_lite1..v_lite11 are its eleven display lights, in the
 // bank order tavern(0..2) / ship(3..7) / parrot(8..10).
-component_tag<TLight> tag_v_lite1 = {"v_lite1"};
-component_tag<TLight> tag_v_lite2 = {"v_lite2"};
-component_tag<TLight> tag_v_lite3 = {"v_lite3"};
-component_tag<TLight> tag_v_lite4 = {"v_lite4"};
-component_tag<TLight> tag_v_lite5 = {"v_lite5"};
-component_tag<TLight> tag_v_lite6 = {"v_lite6"};
-component_tag<TLight> tag_v_lite7 = {"v_lite7"};
-component_tag<TLight> tag_v_lite8 = {"v_lite8"};
-component_tag<TLight> tag_v_lite9 = {"v_lite9"};
-component_tag<TLight> tag_v_lite10 = {"v_lite10"};
-component_tag<TLight> tag_v_lite11 = {"v_lite11"};
+extern component_tag<TLight> tag_v_lite1;
+extern component_tag<TLight> tag_v_lite2;
+extern component_tag<TLight> tag_v_lite3;
+extern component_tag<TLight> tag_v_lite4;
+extern component_tag<TLight> tag_v_lite5;
+extern component_tag<TLight> tag_v_lite6;
+extern component_tag<TLight> tag_v_lite7;
+extern component_tag<TLight> tag_v_lite8;
+extern component_tag<TLight> tag_v_lite9;
+extern component_tag<TLight> tag_v_lite10;
+extern component_tag<TLight> tag_v_lite11;
 
 component_tag<TLight> tag_v_lite84 = {"v_lite84"};  // left rebounder
 component_tag<TLight> tag_v_lite85 = {"v_lite85"};  // right rebounder
 
 // The pair of route indicators every drop-bank completion swaps.
-component_tag<TLight> tag_v_lite504 = {"v_lite504"};
-component_tag<TLight> tag_v_lite505 = {"v_lite505"};
+extern component_tag<TLight> tag_v_lite504;
+extern component_tag<TLight> tag_v_lite505;
 
 // a_spot4/a_spot5's two-target bank. v_lite522 holds the 2-bit mask as well as being
 // a_spot4's own light; v_lite779 is a_spot5's.
@@ -87,9 +87,9 @@ component_tag<TLight> tag_v_lite522 = {"v_lite522"};
 component_tag<TLight> tag_v_lite779 = {"v_lite779"};
 
 // Brig lights, stepped by the brig target (a_spot6).
-component_tag<TLight> tag_v_lite530 = {"v_lite530"};
-component_tag<TLight> tag_v_lite531 = {"v_lite531"};
-component_tag<TLight> tag_v_lite532 = {"v_lite532"};
+extern component_tag<TLight> tag_v_lite530;
+extern component_tag<TLight> tag_v_lite531;
+extern component_tag<TLight> tag_v_lite532;
 
 // W-I-N-D-S letters. Only I/N/D/S are lit from this slice's rollovers; the W
 // (v_lite533) belongs to s_trip11, which is another slice's handler.
@@ -109,12 +109,12 @@ component_tag<TLight> tag_v_lite543 = {"v_lite543"};
 component_tag<TLight> tag_v_lite544 = {"v_lite544"}; // lit with a_kick2's re-arm
 
 // Volcano bank display lights. The mask lives in a_spot11->MessageField, not here.
-component_tag<TLight> tag_v_lite548 = {"v_lite548"};
-component_tag<TLight> tag_v_lite549 = {"v_lite549"};
-component_tag<TLight> tag_v_lite550 = {"v_lite550"};
-component_tag<TLight> tag_v_lite551 = {"v_lite551"};
+extern component_tag<TLight> tag_v_lite548;
+extern component_tag<TLight> tag_v_lite549;
+extern component_tag<TLight> tag_v_lite550;
+extern component_tag<TLight> tag_v_lite551;
 
-component_tag<TLight> tag_v_lite607 = {"v_lite607"}; // Mode Change light
+extern component_tag<TLight> tag_v_lite607; // Mode Change light
 
 // Wind-lane indicator pairs. The *first* light of each pair is the one Bermuda Triangle
 // flashes to mark the indicated lane, so its FlasherOnFlag is the lane's "indicated" test.
@@ -127,13 +127,13 @@ component_tag<TLight> tag_v_lite622 = {"v_lite622"}; // south wind indicator
 component_tag<TLight> tag_v_lite623 = {"v_lite623"}; // west wind indicator
 component_tag<TLight> tag_v_lite624 = {"v_lite624"};
 
-component_tag<TLightGroup> tag_south_wind_light_group = {"south_wind_light_group"};
-component_tag<TLightGroup> tag_east_wind_1_light_group = {"east_wind_1_light_group"};
-component_tag<TLightGroup> tag_east_wind_2_light_group = {"east_wind_2_light_group"};
-component_tag<TLightGroup> tag_west_wind_light_group = {"west_wind_light_group"};
+extern component_tag<TLightGroup> tag_south_wind_light_group;
+extern component_tag<TLightGroup> tag_east_wind_1_light_group;
+extern component_tag<TLightGroup> tag_east_wind_2_light_group;
+extern component_tag<TLightGroup> tag_west_wind_light_group;
 component_tag<TLightGroup> tag_island_lane_top_light_group = {"island_lane_top_light_group"};
 component_tag<TLightGroup> tag_island_lane_bottom_light_group = {"island_lane_bottom_light_group"};
-component_tag<TLightGroup> tag_fathom_light_group = {"fathom_light_group"};
+extern component_tag<TLightGroup> tag_fathom_light_group;
 
 // The four blockers every drop-bank completion drives. They route the ball out of the
 // bank; each bank passes a different set of values (see DropBankCompleted*).
@@ -142,8 +142,8 @@ component_tag<TBlocker> tag_a_bloce = {"a_bloce"};
 component_tag<TBlocker> tag_a_blocf = {"a_blocf"};
 component_tag<TBlocker> tag_a_blocg = {"a_blocg"};
 
-component_tag<TPinballComponent> tag_mode_timer = {"mode_timer"};
-component_tag<TPinballComponent> tag_s_bwal610 = {"s_bwal610"};
+extern component_tag<TPinballComponent> tag_mode_timer;
+extern component_tag<TPinballComponent> tag_s_bwal610;
 
 component_tag<TSound> tag_tabb02wave = {"tabb02wave"};
 component_tag<TSound> tag_tabb07wave = {"tabb07wave"};

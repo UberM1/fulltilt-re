@@ -431,13 +431,13 @@ component_tag<TSound> tag_tabc58wave = {"tabc58wave"};  // dragon fire sweep
 // written yet. Each maps to one Ghidra routine; the comment is the address.
 // ---------------------------------------------------------------------------
 
-int AddScore(TPinballComponent* source, int score);            // 0x4230f0 -- multiplied
-int SpecialAddScore(TPinballComponent* source, int score);     // 0x423130 -- unmultiplied
+int AddScoreAt(TPinballComponent* source, int score);            // 0x4230f0 -- multiplied
+int DragonSpecialAddScore(TPinballComponent* source, int score);     // 0x423130 -- unmultiplied
 void AddToJackpot(int amount);                                 // 0x4238a0 -- clamp 10,000,000
 void AddToSuperJackpot(int amount);                            // 0x423870 -- clamp 20,000,000
 void AwardJackpot(bool showGlyph);                             // 0x424490
 void AwardExtraBall(float displayTime);                        // 0x4231e0
-int Rnd(int n);                                                // 0x42c4cb, 15-bit LCG -> [0,n)
+int RandBelow(int n);                                                // 0x42c4cb, 15-bit LCG -> [0,n)
 const char* GetRcString(int id);
 void Display(TTextBox* box, const char* text, float time);     // 0x41de40 with font 0
 void DisplayGlyph(TTextBox* box, const char* glyph, float time); // 0x41de40 with font 1 (symbol)
@@ -459,9 +459,9 @@ void Play(TSound* sound);  // vtable +0x18; the original returns the clip length
 // directly, bypassing the message bus. The binary really does call these as
 // plain functions with a forged caller, which is how a single award can apply
 // a blocker effect without the blocker having been hit.
-void a_center_postControl(MessageCode code, TPinballComponent* caller);  // 0x425910
-void a_bloceControl(MessageCode code, TPinballComponent* caller);        // 0x425a10
-void a_blocfControl(MessageCode code, TPinballComponent* caller);        // 0x425b10
+void CenterPostControl(MessageCode code, TPinballComponent* caller);  // 0x425910
+void RightOutlaneBlockerControl(MessageCode code, TPinballComponent* caller);        // 0x425a10
+void MoatBlockerControl(MessageCode code, TPinballComponent* caller);        // 0x425b10
 
 // `caller->GetComponentType()` stands for vtable slot 0, which in Full Tilt
 // returns the component's type id (1005 bumper, 1017 sink, ...). Upstream has
@@ -717,7 +717,7 @@ void AwardWeapon()
 		WeaponLights[slot]->Message(ft::LightFlashTimedThenStayOn, 1.0f);
 		pb::MainTable->ScoreMultiplier = multipliers[slot];
 		// Unmultiplied: the award must not be scaled by the multiplier it just set.
-		SpecialAddScore(nullptr, scores[slot]);
+		DragonSpecialAddScore(nullptr, scores[slot]);
 		DisplayGlyph(tag_info_text_box.Component, GlyphWeapon[slot], 2.0f);
 		break;
 	}
@@ -740,25 +740,25 @@ void AwardArmor()
 	if (count == 0)
 		return;
 
-	switch (candidates[Rnd(count)])
+	switch (candidates[RandBelow(count)])
 	{
 	case 0:  // Shield -- enable the kickback
 		ApplyShield();
-		AddScore(nullptr, 25000);
+		AddScoreAt(nullptr, 25000);
 		break;
 	case 1:  // Helm of Terror -- raise the centre post
 		Play(tag_tabc40wave.Component);
-		a_center_postControl(ft::BlockerEnable, tag_a_center_post.Component);
+		CenterPostControl(ft::BlockerEnable, tag_a_center_post.Component);
 		DisplayGlyph(tag_info_text_box.Component, GlyphArmor[1], 2.0f);
 		Play(tag_tabc40wave.Component);
-		AddScore(nullptr, 50000);
+		AddScoreAt(nullptr, 50000);
 		break;
 	default:  // Chain mail -- close the right outlane
 		Play(tag_tabc42wave.Component);
-		a_bloceControl(ft::BlockerEnable, tag_a_bloce.Component);
+		RightOutlaneBlockerControl(ft::BlockerEnable, tag_a_bloce.Component);
 		DisplayGlyph(tag_info_text_box.Component, GlyphArmor[2], 2.0f);
 		Play(tag_tabc42wave.Component);
-		AddScore(nullptr, 100000);
+		AddScoreAt(nullptr, 100000);
 		break;
 	}
 
@@ -779,7 +779,7 @@ int SelectUnownedSpell()
 		if (!Owned(SpellLights[slot]))
 			candidates[count++] = slot;
 
-	return count ? candidates[Rnd(count)] : -1;
+	return count ? candidates[RandBelow(count)] : -1;
 }
 
 // 0x4236b0 -- CastSpell. The offensive/defensive split is slots {0,1} vs
@@ -813,11 +813,11 @@ void CastSpell(int slot)
 	default:
 		// Disables the a_blocf blocker for its configured time. a_blocf's own
 		// handler drives v_lite32, which is why this branch lights nothing.
-		a_blocfControl(ft::BlockerDisable, tag_a_blocf.Component);
+		MoatBlockerControl(ft::BlockerDisable, tag_a_blocf.Component);
 		break;
 	}
 
-	AddScore(nullptr, 120000);
+	AddScoreAt(nullptr, 120000);
 	Play(tag_tabc35wave.Component);
 	DisplayGlyph(tag_info_text_box.Component, GlyphSpell, 2.0f);
 
@@ -836,7 +836,7 @@ void ClearSpells()
 	tag_v_lite30.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 	tag_a_kout3.Component->Message(ft::Reset, 0.0f);
 	tag_v_lite31.Component->Message(ft::LightResetAndTurnOff, 0.0f);
-	a_blocfControl(ft::BlockerEnable, tag_a_blocf.Component);
+	MoatBlockerControl(ft::BlockerEnable, tag_a_blocf.Component);
 }
 
 // 0x4232b0 -- light `count` more dragon eggs, then score the *total*. The
@@ -851,7 +851,7 @@ void AwardDragonEggs(int count)
 
 	int lit = tag_dragon_egg_light_group.Component->Message(ft::GroupGetOnCount, 0.0f);
 	DisplayGlyph(tag_info_text_box.Component, EggGlyphs[lit], 2.0f);
-	AddScore(nullptr, lit * 100000);
+	AddScoreAt(nullptr, lit * 100000);
 }
 
 // 0x428a20 -- record one gem in the bitmask. All nine (0x1ff) awards an extra
@@ -1056,7 +1056,7 @@ int SelectNextQuest()
 		return static_cast<int>(Mode::SlayDragon);
 	}
 
-	int pick = Rnd(count);
+	int pick = RandBelow(count);
 	SetSelectedQuestLightIndex(lightIndex[pick]);
 	SetSelectedQuest(quest[pick]);
 	// Flash indefinitely: the light stays flashing until the quest is started,
@@ -1313,7 +1313,7 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 	// Anything else the ball can legally touch first is worth 15,000, but only
 	// if the table is not tilt-locked.
 	if (consolation && !pb::MainTable->TiltLockFlag)
-		AddScore(nullptr, 15000);
+		AddScoreAt(nullptr, 15000);
 
 	SetMode(Mode::Idle);
 	MissionHandler(ft::MissionComplete, nullptr);
@@ -1336,7 +1336,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 	auto collect = [&](const Gem& gem)
 	{
 		gem.light->Message(ft::LightFlashTimedThenStayOn, 1.0f);
-		AddScore(caller, gem.score);
+		AddScoreAt(caller, gem.score);
 		char buffer[128];
 		FormatWithValue(buffer, GetRcString(gem.stringId));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
@@ -1440,7 +1440,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		tag_a_dvtrbb.Component->Message(ft::GateDisable, 0.0f);
 		tag_a_dvtrca.Component->Message(ft::GateEnable, 0.0f);
 		tag_a_dvtrcb.Component->Message(ft::GateDisable, 0.0f);
-		AddScore(nullptr, 100000);  // +100,000 just for starting a quest
+		AddScoreAt(nullptr, 100000);  // +100,000 just for starting a quest
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HOARD_HINT), Forever);
 		SetGemMask(0);
@@ -1533,7 +1533,7 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 		// handler); a_sink2's field is the 0..3 jackpot sub-counter.
 		tag_v_lite91.Component->MessageField = 0;
 		tag_a_sink2.Component->MessageField = 0;
-		AddScore(nullptr, 100000);
+		AddScoreAt(nullptr, 100000);
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_LIZARDS_HINT), Forever);
 		tag_v_lite63.Component->Message(ft::LightFlasherStartTimed, Forever);
@@ -1616,12 +1616,12 @@ void RescueMaidenAwardWindow(TPinballComponent* caller)
 	switch (static_cast<int>(windows->Message(ft::GroupGetOnCount, 0.0f)))
 	{
 	case 0:
-		AddScore(caller, 250000);
+		AddScoreAt(caller, 250000);
 		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 1:
-		AddScore(caller, 500000);
+		AddScoreAt(caller, 500000);
 		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
@@ -1764,7 +1764,7 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite126.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_a_dvtrda.Component->Message(ft::GateDisable, 0.0f);
 		tag_a_dvtrdb.Component->Message(ft::GateEnable, 0.0f);
-		AddScore(nullptr, 100000);
+		AddScoreAt(nullptr, 100000);
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_MAIDEN_HINT), Forever);
 		Play(tag_tabc50wave.Component);
@@ -1887,7 +1887,7 @@ void DragonPassController(MessageCode code, TPinballComponent* caller)
 		tag_a_rocka.Component->Message(ft::BlockerDisable, 0.0f);
 		tag_a_spot10.Component->Message(ft::SoloTargetDisable, 0.0f);
 
-		AddScore(nullptr, 100000);
+		AddScoreAt(nullptr, 100000);
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_PASS_HINT), Forever);
 		tag_v_lite46.Component->Message(ft::LightFlasherStartTimed, Forever);
@@ -1976,7 +1976,7 @@ void WizardsFuryController(MessageCode code, TPinballComponent* caller)
 
 	case ft::MissionComplete:
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, 4.0f);
-		AddScore(nullptr, 100000);
+		AddScoreAt(nullptr, 100000);
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_FURY_HINT), Forever);
 		tag_well_light_group.Component->Message(ft::LightFlasherStartTimed, Forever);
@@ -2125,11 +2125,11 @@ void AnimateDragonDeath(TPinballComponent* caller)
 
 	// The dragon is dead. Everything the table has to give, at once.
 	pb::MainTable->LightGroup->Message(ft::LightClearOverride, 0.0f);
-	SpecialAddScore(caller, pb::MainTable->SuperJackpotScore);  // the whole super jackpot
+	DragonSpecialAddScore(caller, pb::MainTable->SuperJackpotScore);  // the whole super jackpot
 	char buffer[128];
 	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN));
 	Display(tag_info_text_box.Component, buffer, Forever);
-	AddScore(caller, 1500000);
+	AddScoreAt(caller, 1500000);
 	AwardJackpot(false);
 
 	// All four weapons and the top multiplier.
@@ -2139,8 +2139,8 @@ void AnimateDragonDeath(TPinballComponent* caller)
 
 	// All three armor effects.
 	ApplyShield();
-	a_center_postControl(ft::BlockerEnable, tag_a_center_post.Component);
-	a_bloceControl(ft::BlockerEnable, tag_a_bloce.Component);
+	CenterPostControl(ft::BlockerEnable, tag_a_center_post.Component);
+	RightOutlaneBlockerControl(ft::BlockerEnable, tag_a_bloce.Component);
 
 	// All four spells, applied directly rather than through CastSpell so the
 	// 120,000-per-spell score and the spells-cast counter are not touched.
@@ -2149,7 +2149,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	tag_v_lite30.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
 	tag_a_kout3.Component->ActiveFlag = 1;
 	tag_v_lite31.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
-	a_blocfControl(ft::BlockerDisable, tag_a_blocf.Component);
+	MoatBlockerControl(ft::BlockerDisable, tag_a_blocf.Component);
 
 	// Tear this mode down, release the locked ball, light every letter, and
 	// hand over to Dragon Flurry.
@@ -2190,12 +2190,12 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 		if (Owned(tag_v_lite38.Component))
 		{
 			SlayDragonTimeLimit += 5;
-			a_center_postControl(ft::BlockerEnable, tag_a_center_post.Component);
+			CenterPostControl(ft::BlockerEnable, tag_a_center_post.Component);
 		}
 		if (Owned(tag_v_lite39.Component))
 		{
 			SlayDragonTimeLimit += 5;
-			a_bloceControl(ft::BlockerEnable, tag_a_bloce.Component);
+			RightOutlaneBlockerControl(ft::BlockerEnable, tag_a_bloce.Component);
 		}
 		if (Owned(tag_v_lite31.Component))
 			SlayDragonTimeLimit += 5;
@@ -2235,7 +2235,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 		}
 
 		// 500,000 to start, five times an ordinary quest's 100,000.
-		AddScore(nullptr, 500000);
+		AddScoreAt(nullptr, 500000);
 		Display(tag_info_text_box.Component, GetRcString(STR_SLAY_HINT), Forever);
 		// Spell slot 1 is granted outright for the finale.
 		tag_v_lite29.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
@@ -2481,7 +2481,7 @@ void EggExchangeController(MessageCode code, TPinballComponent* caller)
 		else
 		{
 			// No -- 25,000 consolation, eggs kept.
-			AddScore(nullptr, 25000);
+			AddScoreAt(nullptr, 25000);
 			tag_s_hole118.Component->MessageField = 0;
 		}
 
@@ -2546,7 +2546,7 @@ void EggExchangeController(MessageCode code, TPinballComponent* caller)
 	case 0:
 		// No eggs at all: pay 25,000 and let the ball go, no prompt.
 		Play(tag_tabc32wave.Component);
-		AddScore(nullptr, 25000);
+		AddScoreAt(nullptr, 25000);
 		tag_s_hole118.Component->MessageField = 0;
 		Display(tag_info_text_box.Component, GetRcString(STR_NO_DRAGON_EGGS), 2.0f);
 		tag_s_hole118.Component->Message(ft::HoleReleaseBall, 2.0f);

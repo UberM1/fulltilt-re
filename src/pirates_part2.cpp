@@ -354,7 +354,7 @@ int AddScoreUnmultiplied(TPinballComponent* caller, int score); // 0x00423350
 
 // Skulduggery's control::handler. Unlike Dragon there is no separate broadcast helper --
 // the dispatcher is called directly, and it is also what re-dispatches 0x52 as 0x4f.
-void BroadcastMessage(MessageCode code, TPinballComponent* cmp); // 0x0042d850
+void Handler(MessageCode code, TPinballComponent* cmp); // 0x0042d850
 
 void SetModeJailBreak();            // 0x00423630, one of the twelve one-line mode setters
 void EjectLavaSink(float delay);    // 0x00423680, a_sink8->Message(TSinkResetTimer, delay)
@@ -458,7 +458,7 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 
 	if (code == MessageCode::PlungerFeedBall) // binary 0x3f8
 	{
-		BroadcastMessage(FtMessageCode::ModeTick, nullptr);
+		Handler(FtMessageCode::ModeTick, nullptr);
 
 		// Each arm re-applies the lamp state its phase calls for, and only if the lamp is
 		// not already in it -- so repeated feeds do not restart the timers. Anything above
@@ -498,7 +498,7 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 	{
 		last_scoring_component = 0;
 		info_text_box->MessageField = ModeSkillShot;
-		BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+		Handler(FtMessageCode::ModeStarted, nullptr);
 
 		// Keg magnets do not survive the ball (pirates-rules.md §5.4).
 		ClearKegMagnets();
@@ -602,7 +602,7 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	// which, per pirates-rules.md §2.4, still books the mode as completed and still pays
 	// the +750,000 jackpot bonus. Draining out of a mode is indistinguishable from
 	// finishing it.
-	BroadcastMessage(FtMessageCode::BallDrained, caller);
+	Handler(FtMessageCode::BallDrained, caller);
 
 	// Last ball of the last player with nothing held back. BallCount is still 1 because
 	// the bonus controller is what decrements it.
@@ -629,7 +629,7 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 		// down, disarm every magnet and kickout and hand the brig's balls back. The bonus
 		// state is set a few lines below, so the lockdown is a transient.
 		info_text_box->MessageField = ModeTableLockdown;
-		BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+		Handler(FtMessageCode::ModeStarted, nullptr);
 	}
 
 	// Other balls are still live, so this is a lost multiball and nothing else. The
@@ -656,7 +656,7 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	if (info_text_box->MessageField == ModeDrainBonus || info_text_box->MessageField == ModeGameOver)
 		return;
 	info_text_box->MessageField = ModeDrainBonus;
-	BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+	Handler(FtMessageCode::ModeStarted, nullptr);
 }
 
 // ---------------------------------------------------------------------------

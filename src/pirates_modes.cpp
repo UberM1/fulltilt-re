@@ -60,6 +60,7 @@
 #include "TPinballTable.h"
 #include "midi.h"
 #include "TPinballComponent.h"
+#include "TBlocker.h"
 
 // component_tag<T> instantiates std::is_base_of<TPinballComponent, T>, which needs
 // T complete -- a forward declaration is not enough.
@@ -419,10 +420,10 @@ component_tag<TPinballComponent> tag_a_spot11 = {"a_spot11"};  // holds the volc
 
 // Blockers. Every mode sets all four at start; the shared teardown releases
 // a_bloce only, which is why a mode's blocker state leaks into Idle.
-component_tag<TPinballComponent> tag_a_blocc = {"a_blocc"};
-component_tag<TPinballComponent> tag_a_bloce = {"a_bloce"};
-component_tag<TPinballComponent> tag_a_blocf = {"a_blocf"};
-component_tag<TPinballComponent> tag_a_blocg = {"a_blocg"};
+extern component_tag<TBlocker> tag_a_blocc;
+extern component_tag<TBlocker> tag_a_bloce;
+extern component_tag<TBlocker> tag_a_blocf;
+extern component_tag<TBlocker> tag_a_blocg;
 
 // The pair of lights the common setup swaps. UNVERIFIED what they show: 504 is
 // lit and 505 cleared for the duration of every mode and the swap is reversed

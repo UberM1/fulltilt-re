@@ -23,6 +23,7 @@
 
 #include "pb.h"
 #include "TLight.h"
+#include "TLightGroup.h"
 #include "TPinballTable.h"
 #include "TSound.h"
 #include "TTextBox.h"
@@ -37,7 +38,7 @@ TPinballTable*& TableG = control::TableG;
 // ---------------------------------------------------------------------------
 
 // Tags the generated skeleton does not declare (it lists only scoring components).
-component_tag<TTextBox> tag_info_text_box = {"info_text_box"};
+extern component_tag<TTextBox> tag_info_text_box;
 component_tag<TLight> tag_v_lite3 = {"v_lite3"};
 component_tag<TLight> tag_v_lite4 = {"v_lite4"};
 component_tag<TLight> tag_v_lite5 = {"v_lite5"};
@@ -49,37 +50,37 @@ component_tag<TLight> tag_v_lite10 = {"v_lite10"};
 component_tag<TLight> tag_v_lite11 = {"v_lite11"};
 component_tag<TLight> tag_v_lite12 = {"v_lite12"};
 component_tag<TLight> tag_v_lite13 = {"v_lite13"};
-component_tag<TLight> tag_v_lite14 = {"v_lite14"};
-component_tag<TLight> tag_v_lite16 = {"v_lite16"};
-component_tag<TLight> tag_v_lite17 = {"v_lite17"};
-component_tag<TLight> tag_v_lite18 = {"v_lite18"};
+extern component_tag<TLight> tag_v_lite14;
+extern component_tag<TLight> tag_v_lite16;
+extern component_tag<TLight> tag_v_lite17;
+extern component_tag<TLight> tag_v_lite18;
 component_tag<TLight> tag_v_lite19 = {"v_lite19"};
 component_tag<TLight> tag_v_lite20 = {"v_lite20"};
 component_tag<TLight> tag_v_lite21 = {"v_lite21"};
-component_tag<TLight> tag_v_lite23 = {"v_lite23"};
-component_tag<TLight> tag_v_lite25 = {"v_lite25"};
-component_tag<TLight> tag_v_lite27 = {"v_lite27"};
-component_tag<TLight> tag_v_lite45 = {"v_lite45"};
-component_tag<TLight> tag_v_lite46 = {"v_lite46"};
+extern component_tag<TLight> tag_v_lite23;
+extern component_tag<TLight> tag_v_lite25;
+extern component_tag<TLight> tag_v_lite27;
+extern component_tag<TLight> tag_v_lite45;
+extern component_tag<TLight> tag_v_lite46;
 component_tag<TLight> tag_v_lite55 = {"v_lite55"};
 component_tag<TLight> tag_v_lite56 = {"v_lite56"};
-component_tag<TLight> tag_v_lite57 = {"v_lite57"};
-component_tag<TLight> tag_v_lite65 = {"v_lite65"};
-component_tag<TLight> tag_v_lite66 = {"v_lite66"};
-component_tag<TLight> tag_v_lite76 = {"v_lite76"};
+extern component_tag<TLight> tag_v_lite57;
+extern component_tag<TLight> tag_v_lite65;
+extern component_tag<TLight> tag_v_lite66;
+extern component_tag<TLight> tag_v_lite76;
 component_tag<TLight> tag_v_lite120 = {"v_lite120"};
 component_tag<TLight> tag_v_lite121 = {"v_lite121"};
-component_tag<TPinballComponent> tag_dragon_fire_light_group = {"dragon_fire_light_group"};
-component_tag<TPinballComponent> tag_a_dvtrba = {"a_dvtrba"};
-component_tag<TPinballComponent> tag_a_dvtrbb = {"a_dvtrbb"};
-component_tag<TPinballComponent> tag_a_dvtrca = {"a_dvtrca"};
-component_tag<TPinballComponent> tag_a_dvtrcb = {"a_dvtrcb"};
+extern component_tag<TLightGroup> tag_dragon_fire_light_group;
+extern component_tag<TPinballComponent> tag_a_dvtrba;
+extern component_tag<TPinballComponent> tag_a_dvtrbb;
+extern component_tag<TPinballComponent> tag_a_dvtrca;
+extern component_tag<TPinballComponent> tag_a_dvtrcb;
 component_tag<TSound> tag_tabc03wave = {"tabc03wave"};
 component_tag<TSound> tag_tabc05wave = {"tabc05wave"};
 component_tag<TSound> tag_tabc06wave = {"tabc06wave"};
 component_tag<TSound> tag_tabc07wave = {"tabc07wave"};
 component_tag<TSound> tag_tabc08wave = {"tabc08wave"};
-component_tag<TSound> tag_tabc21wave = {"tabc21wave"};
+extern component_tag<TSound> tag_tabc21wave;
 component_tag<TSound> tag_tabc96wave = {"tabc96wave"};
 
 // Scoring components: tags live in control_dragon.cpp.
@@ -124,7 +125,7 @@ TLight*& lite66 = tag_v_lite66.Component;
 TLight*& lite76 = tag_v_lite76.Component;
 TLight*& lite120 = tag_v_lite120.Component;
 TLight*& lite121 = tag_v_lite121.Component;
-TPinballComponent*& dragon_fire_lights = tag_dragon_fire_light_group.Component;
+TLightGroup*& dragon_fire_lights = tag_dragon_fire_light_group.Component;
 TPinballComponent*& dvtrBA = tag_a_dvtrba.Component;
 TPinballComponent*& dvtrBB = tag_a_dvtrbb.Component;
 TPinballComponent*& dvtrCA = tag_a_dvtrca.Component;
@@ -184,15 +185,15 @@ constexpr int Str_QuestName4 = 3071;       // 0xbff, +0..4 for quest ids 4..8
 // Helpers owned by other slices
 // ---------------------------------------------------------------------------
 
-void AwardNextWeapon();            // 0x00423330
+void AwardWeapon();            // 0x00423330
 bool CheckDragonFlurry();          // 0x004244e0, true when it started Dragon Flurry
 void CastRandomSpell();            // 0x004237f0
 void EnableTowerLock();            // 0x00423d50
 int SelectNextQuest();             // 0x00423e90, 4..8, or 9 when none are left
-void ClearSelectedQuestLight();    // 0x00423e50
+void UnlightSelectedQuest();    // 0x00423e50
 void SetSwordStage(int stage);     // 0x004238d0
 void SendToComponentAndHandler(MessageCode code, TPinballComponent* cmp); // 0x00423060
-void BroadcastMessage(MessageCode code, TPinballComponent* cmp);          // 0x0042c020
+void MissionHandler(MessageCode code, TPinballComponent* cmp);          // 0x0042c020
 
 // ---------------------------------------------------------------------------
 // Scoring plumbing
@@ -302,7 +303,7 @@ void ForestBumperControl(MessageCode code, TPinballComponent* caller)
 	if (++bump1->MessageField == 10)
 	{
 		bump1->MessageField = 0;
-		AwardNextWeapon();
+		AwardWeapon();
 	}
 }
 
@@ -754,10 +755,10 @@ void SwordTargetControl3(MessageCode code, TPinballComponent* caller)
 	// Dragon, which is why a_spot28 has no scoring table.
 	info_text_box->Display("!", 2.0f);
 	SetSwordStage(-1);
-	ClearSelectedQuestLight();
+	UnlightSelectedQuest();
 	lite76->Message(MessageCode::TLightFlasherStartTimed, -1.0f);
 	info_text_box->MessageField = ModeSlayDragon;
-	BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+	MissionHandler(FtMessageCode::ModeStarted, nullptr);
 }
 
 // ---------------------------------------------------------------------------

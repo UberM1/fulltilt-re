@@ -152,7 +152,7 @@ extern component_tag<TSound> tag_tabc24wave;
 extern component_tag<TSound> tag_tabc51wave;
 
 // Declared nowhere else: the four combo lights, the Shoot Again lamp and five waves.
-component_tag<TLight> tag_v_lite26 = {"v_lite26"};  // D-R-A-G-O-N letter, tower ramp
+extern component_tag<TLight> tag_v_lite26;  // D-R-A-G-O-N letter, tower ramp
 component_tag<TLight> tag_v_lite40 = {"v_lite40"};  // "Shoot Again" / ball-save lamp
 component_tag<TLight> tag_v_lite67 = {"v_lite67"};  // dragon-ramp combo ladder
 component_tag<TLight> tag_v_lite68 = {"v_lite68"};  // dragon-chute combo ladder
@@ -217,8 +217,9 @@ static TSound*& tabc51wave = tag_tabc51wave.Component;
 
 // DAT_00434d2c -- the ball-save countdown phase, the structural twin of upstream's
 // control::extraball_light_flag. Set to 3 by s_plunger1 on every new ball and by NewGame,
-// cleared by the drain handler on a tilt.
-int shoot_again_flag = 3;
+// cleared by the drain handler on a tilt. Owned by dragon_part4.cpp, which holds both
+// the plunger that arms it and the drain that clears it.
+extern int shoot_again_flag;
 
 // ===========================================================================
 // Lights

@@ -33,6 +33,7 @@
 
 #include "pb.h"
 #include "TLight.h"
+#include "TLightGroup.h"
 #include "TPinballTable.h"
 #include "TSound.h"
 #include "TTextBox.h"
@@ -62,30 +63,30 @@ extern TPinballComponent*& dvtrCB;
 
 // Tags this slice needs and no other part declares. Lights are typed TLight here for
 // light_on(); the generated skeleton types every tag TPinballComponent.
-component_tag<TLight> tag_v_lite33 = {"v_lite33"};
-component_tag<TLight> tag_v_lite34 = {"v_lite34"};
-component_tag<TLight> tag_v_lite35 = {"v_lite35"};
-component_tag<TLight> tag_v_lite36 = {"v_lite36"};
-component_tag<TLight> tag_v_lite37 = {"v_lite37"};
-component_tag<TLight> tag_v_lite40 = {"v_lite40"};
-component_tag<TLight> tag_v_lite47 = {"v_lite47"};
-component_tag<TLight> tag_v_lite48 = {"v_lite48"};
-component_tag<TLight> tag_v_lite49 = {"v_lite49"};
-component_tag<TLight> tag_v_lite50 = {"v_lite50"};
-component_tag<TLight> tag_v_lite67 = {"v_lite67"};
-component_tag<TLight> tag_v_lite68 = {"v_lite68"};
-component_tag<TLight> tag_v_lite69 = {"v_lite69"};
-component_tag<TLight> tag_v_lite70 = {"v_lite70"};
-component_tag<TLight> tag_v_lite125 = {"v_lite125"};
-component_tag<TLight> tag_v_lite126 = {"v_lite126"};
-component_tag<TPinballComponent> tag_outlane_kicker_light_group = {"outlane_kicker_light_group"};
-component_tag<TPinballComponent> tag_gargoyle_spot_light_group = {"gargoyle_spot_light_group"};
-component_tag<TPinballComponent> tag_spell_spot_light_group = {"spell_spot_light_group"};
-component_tag<TPinballComponent> tag_a_dvtraa = {"a_dvtraa"};
-component_tag<TPinballComponent> tag_a_dvtrab = {"a_dvtrab"};
-component_tag<TPinballComponent> tag_a_dvtrda = {"a_dvtrda"};
-component_tag<TPinballComponent> tag_a_dvtrdb = {"a_dvtrdb"};
-component_tag<TSound> tag_tabc32wave = {"tabc32wave"};
+extern component_tag<TLight> tag_v_lite33;
+extern component_tag<TLight> tag_v_lite34;
+extern component_tag<TLight> tag_v_lite35;
+extern component_tag<TLight> tag_v_lite36;
+extern component_tag<TLight> tag_v_lite37;
+extern component_tag<TLight> tag_v_lite40;
+extern component_tag<TLight> tag_v_lite47;
+extern component_tag<TLight> tag_v_lite48;
+extern component_tag<TLight> tag_v_lite49;
+extern component_tag<TLight> tag_v_lite50;
+extern component_tag<TLight> tag_v_lite67;
+extern component_tag<TLight> tag_v_lite68;
+extern component_tag<TLight> tag_v_lite69;
+extern component_tag<TLight> tag_v_lite70;
+extern component_tag<TLight> tag_v_lite125;
+extern component_tag<TLight> tag_v_lite126;
+extern component_tag<TLightGroup> tag_outlane_kicker_light_group;
+extern component_tag<TLightGroup> tag_gargoyle_spot_light_group;
+extern component_tag<TLightGroup> tag_spell_spot_light_group;
+extern component_tag<TPinballComponent> tag_a_dvtraa;
+extern component_tag<TPinballComponent> tag_a_dvtrab;
+extern component_tag<TPinballComponent> tag_a_dvtrda;
+extern component_tag<TPinballComponent> tag_a_dvtrdb;
+extern component_tag<TSound> tag_tabc32wave;
 component_tag<TSound> tag_tabc34wave = {"tabc34wave"};
 
 // Scoring components: tags live in control_dragon.cpp.
@@ -119,9 +120,9 @@ TLight*& lite69 = tag_v_lite69.Component;  // fire-ridge combo light, MessageFie
 TLight*& lite70 = tag_v_lite70.Component;  // tower-ramp combo light
 TLight*& lite125 = tag_v_lite125.Component; // dragon-chute route indicator
 TLight*& lite126 = tag_v_lite126.Component; // dragon-ramp route indicator
-TPinballComponent*& outlane_kicker_lights = tag_outlane_kicker_light_group.Component;
-TPinballComponent*& gargoyle_spot_lights = tag_gargoyle_spot_light_group.Component;
-TPinballComponent*& spell_spot_lights = tag_spell_spot_light_group.Component;
+TLightGroup*& outlane_kicker_lights = tag_outlane_kicker_light_group.Component;
+TLightGroup*& gargoyle_spot_lights = tag_gargoyle_spot_light_group.Component;
+TLightGroup*& spell_spot_lights = tag_spell_spot_light_group.Component;
 TPinballComponent*& dvtrAA = tag_a_dvtraa.Component;
 TPinballComponent*& dvtrAB = tag_a_dvtrab.Component;
 TPinballComponent*& dvtrDA = tag_a_dvtrda.Component;
@@ -198,7 +199,7 @@ constexpr int Str_BallSaved = 3009; // 0xbc1
 
 // part1 (0x004230a0 / 0x0042c020 / 0x004238d0 / 0x00423e90).
 void AddScoreFor(TPinballComponent* caller, int index);
-void BroadcastMessage(MessageCode code, TPinballComponent* cmp);
+void MissionHandler(MessageCode code, TPinballComponent* cmp);
 void SetSwordStage(int stage);
 int SelectNextQuest();
 
@@ -207,12 +208,12 @@ int SelectNextQuest();
 void CenterPostControl(MessageCode code, TPinballComponent* caller);
 void RightOutlaneBlockerControl(MessageCode code, TPinballComponent* caller);
 
-void ClearAllSpells();        // 0x00423780, spell lights off + a_kout3 reset + moat blocker back
-void AwardNextArmor();        // 0x004234b0, random among the un-owned pieces, not in order
-void ArmNextTowerLock();      // 0x00423be0
+void ClearSpells();        // 0x00423780, spell lights off + a_kout3 reset + moat blocker back
+void AwardArmor();        // 0x004234b0, random among the un-owned pieces, not in order
+void CheckTowerLocks();      // 0x00423be0
 void AwardDragonEggs(int n);  // 0x004232b0
 int CollectJackpot(float unused, bool showText); // 0x00424490
-void ResetDragonArea(int restoreLightOverrides); // 0x00424050, the dragon's head and jaw
+void DisarmDragon(int restoreLightOverrides); // 0x00424050, the dragon's head and jaw
 
 // part1 keeps LastScoringComp (DAT_00434d20) file-static, so the plunger's reset of it
 // needs a setter from that slice.
@@ -271,7 +272,7 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::PlungerFeedBall) // binary 0x3f8
 	{
-		BroadcastMessage(FtMessageCode::MissionStarted, nullptr);
+		MissionHandler(FtMessageCode::MissionStarted, nullptr);
 		return;
 	}
 	if (code != MessageCode::PlungerStartFeedTimer) // binary 0x3f9
@@ -281,9 +282,9 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 	unknown_439b04 = 0;
 
 	// Spells, the dragon's head and the tower locks are all per-ball.
-	ClearAllSpells();
-	ArmNextTowerLock();
-	ResetDragonArea(1);
+	ClearSpells();
+	CheckTowerLocks();
+	DisarmDragon(1);
 
 	// Both armor blockers retract. The two handlers are called directly, so the mode
 	// controller does not see the TBlockerDisable -- the same shortcut part2 documents on
@@ -367,7 +368,7 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 	if (SelectNextQuest() != ModeSlayDragon)
 	{
 		info_text_box->MessageField = ModeSkillShot;
-		BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+		MissionHandler(FtMessageCode::ModeStarted, nullptr);
 	}
 
 	// The ball save: lamp on solid and untimed, countdown parked at phase 3 until the ball
@@ -456,7 +457,7 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	}
 
 	// Every mode controller's handler for this forces mode 2 and tears the quest down.
-	BroadcastMessage(FtMessageCode::BallDrained, caller);
+	MissionHandler(FtMessageCode::BallDrained, caller);
 
 	// Last ball of the last player with nothing held back: start the game-over sequence.
 	// BallCount == 1 because mode 0xb is what decrements it.
@@ -508,7 +509,7 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	if (info_text_box->MessageField == ModeEndOfBall || info_text_box->MessageField == 0)
 		return;
 	info_text_box->MessageField = ModeEndOfBall;
-	BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+	MissionHandler(FtMessageCode::ModeStarted, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +567,7 @@ void ArmorKickoutControl(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	AwardNextArmor();
+	AwardArmor();
 	lite14->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
 	lite13->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
 	lite12->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
@@ -612,7 +613,7 @@ void GargoyleKickoutControl(MessageCode code, TPinballComponent* caller)
 	if (mode == ModeNormal)
 	{
 		info_text_box->MessageField = ModeGargoyleGaggle;
-		BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+		MissionHandler(FtMessageCode::ModeStarted, nullptr);
 		return;
 	}
 
@@ -687,7 +688,7 @@ void QuestHoleControl(MessageCode code, TPinballComponent* caller)
 			if (TableG->MultiballCount == 1)
 			{
 				info_text_box->MessageField = ModeEggExchange;
-				BroadcastMessage(FtMessageCode::ModeStarted, nullptr);
+				MissionHandler(FtMessageCode::ModeStarted, nullptr);
 				return;
 			}
 		}
