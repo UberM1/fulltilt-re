@@ -73,37 +73,37 @@ namespace pirates {
 // by whichever file ends up owning the single definition; that is part2's open note, not a
 // new one.
 
-extern TTextBox* info_text_box; // DAT_0043ad3c -- MessageField is the mode register
-extern TPinballTable* TableG;   // DAT_0043ab9c
+extern TTextBox*& info_text_box; // DAT_0043ad3c -- MessageField is the mode register
+extern TPinballTable*& TableG;   // DAT_0043ab9c
 
 // The four blockers that route the ball out of the drop-target/sink area. The kickback
 // drives all four with exactly the floats pirates_part1.cpp's SwapBankRoute passes, bar
 // a_blocg's; see the handler.
-extern TBlocker* blocC; // DAT_0043ae0c
-extern TBlocker* blocE; // DAT_0043ae1c
-extern TBlocker* blocF; // DAT_0043ae2c
-extern TBlocker* blocG; // DAT_0043ae3c
+extern TBlocker*& blocC; // DAT_0043ae0c
+extern TBlocker*& blocE; // DAT_0043ae1c
+extern TBlocker*& blocF; // DAT_0043ae2c
+extern TBlocker*& blocG; // DAT_0043ae3c
 
 // The route-indicator pair. v_lite504 lit means the playfield path is the live one; the
 // launch-lane trip wire, every drop-bank completion and the kickback all assert it, and
 // s_trip2 plus every mode start assert the other direction.
-extern TLight* lite504; // DAT_0043ae54
-extern TLight* lite505; // DAT_0043ae6c
+extern TLight*& lite504; // DAT_0043ae54
+extern TLight*& lite505; // DAT_0043ae6c
 
-extern TLight* lite544; // DAT_0043bbbc -- the kickback's "armed" lamp
+extern TLight*& lite544; // DAT_0043bbbc -- the kickback's "armed" lamp
 
 // The Shoot Again lamp. Declared the way pirates_part2.cpp declares it, because no slice
 // binds the tag yet; part2 reads it from the launcher and the stepper at the end of this
 // file is its own handler.
-extern TLight* lite569; // DAT_0043bc44
+extern TLight*& lite569; // DAT_0043bc44
 
 // The outlane kickback pair, part1's variable names for a_kick2 and s_bwal610. Both carry
 // a plain ActiveFlag rather than a message interface: pirates_part1.cpp's two return lanes
 // set it, the launcher sets it at every serve, and the lamp handler below clears it.
-extern TPinballComponent* kick2;   // DAT_0043bba4 -- a_kick2
-extern TPinballComponent* bwal610; // DAT_0043c42c -- s_bwal610
+extern TPinballComponent*& kick2;   // DAT_0043bba4 -- a_kick2
+extern TPinballComponent*& bwal610; // DAT_0043c42c -- s_bwal610
 
-extern TPinballComponent* a_kick1; // DAT_0043bbd4 -- the kickback armed by the multiballs
+extern TPinballComponent*& a_kick1; // DAT_0043bbd4 -- the kickback armed by the multiballs
 
 // The three light groups both flipper buttons rotate.
 //
@@ -113,9 +113,9 @@ extern TPinballComponent* a_kick1; // DAT_0043bbd4 -- the kickback armed by the 
 // either the five W-I-N-D-S letters (v_lite533..537, which part1 drives individually) or
 // the four wind-lane indicator pairs. Dumping the group's member list out of PIRATES.DAT
 // would settle it; nothing in the rules branches on the answer.
-extern TLightGroup* lane_winds_lights;          // DAT_0043b7b4
-extern TLightGroup* island_lane_top_lights;     // DAT_0043babc
-extern TLightGroup* island_lane_bottom_lights;  // DAT_0043bb2c
+extern TLightGroup*& lane_winds_lights;          // DAT_0043b7b4
+extern TLightGroup*& island_lane_top_lights;     // DAT_0043babc
+extern TLightGroup*& island_lane_bottom_lights;  // DAT_0043bb2c
 
 // ---------------------------------------------------------------------------
 // Cross-slice interface

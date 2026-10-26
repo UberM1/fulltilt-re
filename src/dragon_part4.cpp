@@ -213,7 +213,7 @@ void AwardArmor();        // 0x004234b0, random among the un-owned pieces, not i
 void CheckTowerLocks();      // 0x00423be0
 void AwardDragonEggs(int n);  // 0x004232b0
 int CollectJackpot(float unused, bool showText); // 0x00424490
-void DisarmDragon(int restoreLightOverrides); // 0x00424050, the dragon's head and jaw
+void DisarmDragon(bool slain);                // 0x00424050, the dragon's head and jaw
 
 // part1 keeps LastScoringComp (DAT_00434d20) file-static, so the plunger's reset of it
 // needs a setter from that slice.
@@ -242,9 +242,9 @@ int game_over_phase = 0;
 static int drain_phase = 0;
 
 // Owned by the quest machinery and the scoring prologue; cleared on every ball feed.
-extern int quest_select_locked;    // DAT_00439b14, makes SelectNextQuest return -1
-extern int dropped_target_count;   // DAT_00434d08, the bonus's "Targets dropped" line
-extern int spell_cast_count;       // DAT_00434d24
+extern bool BallDraining;   // DAT_00439b14, makes SelectNextQuest return -1
+extern int TargetsHitThisBall;   // DAT_00434d08, the bonus's "Targets dropped" line
+extern int SpellsCastThisBall;       // DAT_00434d24
 
 // _DAT_00439b04 -- written only here and by the table's tilt message (0x00424260 case
 // 0x3f3), and read nowhere in the decompiled set, so it is dead as far as the rules go.
@@ -278,13 +278,13 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 	if (code != MessageCode::PlungerStartFeedTimer) // binary 0x3f9
 		return;
 
-	quest_select_locked = 0;
+	BallDraining = false;
 	unknown_439b04 = 0;
 
 	// Spells, the dragon's head and the tower locks are all per-ball.
 	ClearSpells();
 	CheckTowerLocks();
-	DisarmDragon(1);
+	DisarmDragon(true);
 
 	// Both armor blockers retract. The two handlers are called directly, so the mode
 	// controller does not see the TBlockerDisable -- the same shortcut part2 documents on
@@ -356,8 +356,8 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 	spell_spot_lights->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 
 	bump1->MessageField = 0; // the shared forest-bumper weapon counter
-	dropped_target_count = 0;
-	spell_cast_count = 0;
+	TargetsHitThisBall = 0;
+	SpellsCastThisBall = 0;
 	ClearLastScoringComponent();
 
 	// Every ball opens with a quest pre-selected and the table in mode 10, which is what

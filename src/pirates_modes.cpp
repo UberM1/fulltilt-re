@@ -545,7 +545,7 @@ int SpecialAddScoreAt(TPinballComponent* source, int score);   // 0x423350 -- un
 int AddScoreFromTable(TPinballComponent* source, int index);   // 0x4232c0 -- source->scoring[i]
 
 void AddToJackpot(int amount);        // 0x423650 -- clamps at 10,000,000
-void AwardJackpot(float displayTime); // 0x424700 -- adds the jackpot; never resets it
+float CollectJackpot(float displayTime); // 0x424700 -- adds the jackpot; never resets it
 int Rnd(int n);                       // 0x42dd0b, the MSVC LCG -> (rand()*n) >> 15
 
 const char* GetRcString(int id);      // 0x409730(id, 0) -- takes TWO arguments
@@ -581,7 +581,7 @@ void EnterTreasureHunt();      // 0x423560 -> state 8
 void EnterMutiny();            // 0x4235a0 -> state 9
 void EnterSwordFight();        // 0x4235c0 -> state 10; also resets the volcano bank
 void EnterPegLegsLoot();       // 0x4235f0 -> state 0xb
-void EnterLavaBall();          // 0x423610 -> state 0xc
+void StartLavaBall();          // 0x423610 -> state 0xc
 void EnterJailBreak();         // 0x423630 -> state 0xd
 
 // Board-level helpers the controllers drive. All live in the 0x423000-0x42d000
@@ -591,10 +591,10 @@ void RestoreBanksAndLetters();     // 0x42ab40 -- rebuilds the three drop banks 
 void EjectLavaSink(float delay);   // 0x423680 -- a_sink8->Message(SinkResetTimer, delay)
 void ResetVolcanoLights(int mode);     // 0x425310
 void RestoreVolcanoLights();           // 0x4253a0 -- re-derives all four from a_spot11's mask
-void RaiseShipBank();                  // 0x424440
-void RaiseTavernBank();                // 0x424f70
-void RaiseParrotBank();                // 0x4252d0
-void ResetBrigLights(bool lit);        // 0x425d50
+void RaiseShipDropBank();                  // 0x424440
+void RaiseTavernDropBank();                // 0x424f70
+void RaiseParrotDropBank();                // 0x4252d0
+void ResetBrigLights(int mode);        // 0x425d50
 void ClearKegMagnets();                // 0x424c70 -- 0x4c to all six, lights off
 void ClearTreasureXLights();           // 0x424500
 int ArmNextTreasureX();                // 0x424580 -- advances the X cursor, returns a sweep id
@@ -602,8 +602,8 @@ void RestoreTreasureBoard();           // 0x424560
 void BlankWindGroups();                // 0x425080
 void FlashIndicatedWind(bool on);      // 0x425110
 void LightShipwreckMystery(float t);   // 0x423a30
-void AdvanceFathom(float t);           // 0x424350 -- ScoreMultiplier = fathoms + 1
-void MaxCrew(float t);                 // 0x425000 -- a_bump2->MessageField = 6
+float BumpMultiplier(float t);          // 0x424350 -- ScoreMultiplier = fathoms + 1
+float AwardMaxCrew(float t);                // 0x425000 -- a_bump2->MessageField = 6
 void AwardCoin();                      // 0x423720
 void AwardShipwreckMystery(float t);   // 0x425c50
 
@@ -1214,7 +1214,7 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 		// the mode wants the first sink to read as "the first ship".
 		ModeScratch = 1;
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepAttackShip);
-		RaiseShipBank();
+		RaiseShipDropBank();
 		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, Forever);
 		tag_a_bloce.Component->Message(ft::BlockerRestartTimeout, 1.0f);
 		tag_v_lite504.Component->Message(ft::LightResetAndTurnOn, 0.0f);
@@ -1239,7 +1239,7 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 
 	case ft::ModeTeardown:
 		tag_v_lite567.Component->Message(ft::LightResetAndTurnOff, 0.0f);
-		RaiseShipBank();
+		RaiseShipDropBank();
 		EndOfEveryMode();
 		return;
 
@@ -1384,7 +1384,7 @@ void StormController(MessageCode code, TPinballComponent* caller)
 			ModeScratch++;
 			if (StormJackpotPeriod == ModeScratch)
 			{
-				AwardJackpot(0.0f);
+				CollectJackpot(0.0f);
 				ModeScratch = 0;
 				return;
 			}
@@ -1434,9 +1434,9 @@ void StormController(MessageCode code, TPinballComponent* caller)
 		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, 0.0f);
 		// Storm is the only mode that re-raises all three drop banks: every
 		// target on the table is a bailing target.
-		RaiseTavernBank();
-		RaiseShipBank();
-		RaiseParrotBank();
+		RaiseTavernDropBank();
+		RaiseShipDropBank();
+		RaiseParrotDropBank();
 		tag_v_lite778.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_a_kout2.Component->Message(ft::HoldFieldEnable, 0.0f);
 		// All eleven SKULDUGGERY letters flash, matching the three raised banks.
@@ -1552,12 +1552,12 @@ void TavernController(MessageCode code, TPinballComponent* caller)
 		{
 		case ft::MissionComplete:
 			StartOfEveryMode();
-			ResetBrigLights(false);
+			ResetBrigLights(0);
 			AddScoreAt(nullptr, BonusTavern);
 			tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepTavern);
 			midi::PlayMusic(tavern_music);
 			Play(tag_tabb65wave.Component);
-			RaiseTavernBank();
+			RaiseTavernDropBank();
 			tag_v_lite547.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 			tag_v_lite546.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 			tag_v_lite545.Component->Message(ft::LightResetAndTurnOff, 0.0f);
@@ -1578,8 +1578,8 @@ void TavernController(MessageCode code, TPinballComponent* caller)
 			return;
 
 		case ft::ModeTeardown:
-			ResetBrigLights(false);
-			RaiseTavernBank();
+			ResetBrigLights(0);
+			RaiseTavernDropBank();
 			ClearKegMagnets();  // keg magnets do not survive the mode
 			EndOfEveryMode();
 			return;
@@ -1850,7 +1850,7 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite550.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite549.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite548.Component->Message(ft::LightFlasherStartTimed, Forever);
-		RaiseParrotBank();
+		RaiseParrotDropBank();
 		midi::PlayMusic(attack_sword_music);
 		Play(tag_tabb75wave.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_SWORD_FIGHT), Forever);
@@ -1970,9 +1970,9 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 			// total is scored, and AddScoreAt is the MULTIPLIED wrapper, so
 			// the finale pays the new multiplier on the whole total. ("Max
 			// Crew" and the jackpot in between do not touch it.)
-			AdvanceFathom(Forever);
-			MaxCrew(Forever);
-			AwardJackpot(0.0f);
+			BumpMultiplier(Forever);
+			AwardMaxCrew(Forever);
+			CollectJackpot(0.0f);
 
 			int total = coins * 500000 + treasures * 500000 + maps * 1000000 + modes * 1000000;
 			AddScoreAt(nullptr, total);
@@ -2001,7 +2001,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 			// EnterLavaBall that follows is what actually wins.)
 			Handler(ft::ModeTeardown, nullptr);
 			EjectLavaSink(0.0f);
-			EnterLavaBall();
+			StartLavaBall();
 			return;
 		}
 
@@ -2136,7 +2136,7 @@ void JailBreakController(MessageCode code)
 			// itself, paying nothing -- so the manual's "needs at least one
 			// ball in the brig" requirement is real, it just lives here rather
 			// than in the brig target's handler.
-			ResetBrigLights(true);
+			ResetBrigLights(1);
 			SetMode(Mode::Idle);
 			Handler(ft::MissionComplete, nullptr);
 			return;
@@ -2200,7 +2200,7 @@ void JailBreakController(MessageCode code)
 		// That is what the original does; whether it matters depends on what
 		// Idle's 0x4f touches, and it touches neither.
 		Handler(ft::MissionComplete, nullptr);
-		ResetBrigLights(false);
+		ResetBrigLights(0);
 		ResetVolcanoLights(1);
 		return;
 

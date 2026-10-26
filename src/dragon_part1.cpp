@@ -203,6 +203,10 @@ void MissionHandler(MessageCode code, TPinballComponent* cmp);          // 0x004
 // handler) and notifies the outgoing one. Upstream has no equivalent.
 static TPinballComponent* LastScoringComp = nullptr; // DAT_00434d20
 
+// What the "...\n%ld" displays format: the amount these wrappers last credited,
+// after the multiplier. dragon_common.cpp's FormatWithValue reads it.
+extern int LastCreditedScore;
+
 static void NoteScoringComponent(TPinballComponent* caller)
 {
 	if (LastScoringComp == caller)
@@ -220,7 +224,7 @@ static void NoteScoringComponent(TPinballComponent* caller)
 int AddScoreFor(TPinballComponent* caller, int index)
 {
 	NoteScoringComponent(caller);
-	return TableG->AddScore(caller->get_scoring(index));
+	return LastCreditedScore = TableG->AddScore(caller->get_scoring(index));
 }
 
 // 0x004230f0 -- same, with a literal score instead of a scoring-table lookup. Goes
@@ -228,7 +232,7 @@ int AddScoreFor(TPinballComponent* caller, int index)
 int AddScoreAt(TPinballComponent* caller, int score)
 {
 	NoteScoringComponent(caller);
-	return TableG->AddScore(score);
+	return LastCreditedScore = TableG->AddScore(score);
 }
 
 // 0x00423130 -- upstream's SpecialAddScore, except that Dragon forces the multiplier to
@@ -238,7 +242,7 @@ int AddScoreAt(TPinballComponent* caller, int score)
 // It forces 1 rather than 0 because Full Tilt has no score_multipliers array: AddScore
 // is `field * score + ScoreAdded`, so ScoreMultiplier holds the multiplier itself and
 // its neutral value is 1. Upstream's 0 is a 3D Pinball-ism, where the field is an index.
-void DragonSpecialAddScore(TPinballComponent* caller, int score)
+int DragonSpecialAddScore(TPinballComponent* caller, int score)
 {
 	const auto bonus = TableG->BonusScoreFlag;
 	const auto jackpot = TableG->JackpotScoreFlag;
@@ -248,10 +252,18 @@ void DragonSpecialAddScore(TPinballComponent* caller, int score)
 	TableG->BonusScoreFlag = false;
 	TableG->JackpotScoreFlag = false;
 	TableG->ScoreMultiplier = 1;
-	TableG->AddScore(score);
+	const int credited = TableG->AddScore(score);
 	TableG->BonusScoreFlag = bonus;
 	TableG->JackpotScoreFlag = jackpot;
 	TableG->ScoreMultiplier = scoreMult;
+	return LastCreditedScore = credited;
+}
+
+// The DAT_00434d20 = 0 inside the plunger at 0x004245b0: a new ball owes nothing to
+// whatever scored last, so no 0x4d goes out and the next scorer is the first.
+void ClearLastScoringComponent()
+{
+	LastScoringComp = nullptr;
 }
 
 // 0x004238a0 -- the jackpot clamp is the one upstream's AddScore applies in FT mode.

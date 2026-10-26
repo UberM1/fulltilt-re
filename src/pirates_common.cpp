@@ -11,13 +11,19 @@
 #include "pch.h"
 #include "control.h"
 
+#include <cstdio>
+#include <cstring>
+
+#include "high_score.h"
 #include "pb.h"
 #include "TPinballTable.h"
 #include "TPinballComponent.h"
+#include "TSound.h"
+#include "TTextBox.h"
 
 namespace pirates
 {
-extern TPinballTable* TableG;
+extern TPinballTable*& TableG;
 
 // 0x00435d2c -- the component that last scored.
 //
@@ -89,6 +95,147 @@ int AddScoreUnmultiplied(TPinballComponent* caller, int score)
 	TableG->JackpotScoreFlag = jackpot;
 	TableG->ScoreMultiplier = mult;
 	return credited;
+}
+
+// ---------------------------------------------------------------------------
+// The rest of the shared .data cells
+//
+// Each is declared `extern` by pirates_part2.cpp and defined nowhere; the comments
+// there carry the analysis, so these are the definitions only.
+// ---------------------------------------------------------------------------
+
+// DAT_0043aba8 -- non-zero once the game-over sequence has begun.
+int game_over_phase = 0;
+
+// DAT_0043aba0 -- cleared at every ball serve and at the end-of-game lockdown, and
+// read by nothing in either corpus.
+int unknown_43aba0 = 0;
+
+// DAT_0043abb0 -- Peg Leg's Loot's teardown sets it; the next drain blanks the coin
+// and special-treasure groups and clears it.
+int collection_cycle_reset = 0;
+
+// ---------------------------------------------------------------------------
+// Glyph tokens
+//
+// Read out of PIRATES.EXE's .rdata. Single characters in the table's symbol font,
+// stored as fixed-stride runs, which is where the odd strides in the comments at
+// the declaration sites come from. The port has no symbol font, so DisplayGlyph
+// renders them as ASCII -- see docs/engine-changes.md.
+// ---------------------------------------------------------------------------
+
+// 0x43ab28, stride 9: the run for the n-th bailed Storm target.
+const char* StormGlyphs[9] = {
+	"", "K", "KK", "KKK", "KKKK", "KKKKK", "KKKKKK", "KKKKKKK", "KKKKKKKK",
+};
+
+// 0x43ab16, stride 2: Peg Leg's Loot's payout steps.
+const char* PegLegGlyphs[9] = {"", "L", "M", "N", "O", "P", "Q", "R", "S"};
+
+// 0x43aa58, stride 8: the skill-shot ladder, one token per lane.
+const char* SkillShotGlyphs[9] = {
+	"$&(),.2", "\"$&'*,.", "0\"$%(*,", "20\"#&(*", ".20!$&(",
+	",.2/\"$&", "*,.10\"$", "(*,-20\"", "&(*+.20",
+};
+
+// 0x43aaa0, stride 4, indexed by the three-bit tavern window mask -- which is why
+// the display shows which windows are collected. The 1996 tokens are three symbol
+// characters each; the ASCII they land on here is "333".."444".
+extern const char TavernWindowGlyphs[8][4];
+const char TavernWindowGlyphs[8][4] = {
+	"333", "334", "343", "344", "433", "434", "443", "444",
+};
+
+// 0x43aac0 -- the W-I-N-D-S token, entry 8 of the same run.
+extern const char WindsGlyph[4];
+const char WindsGlyph[4] = "5";
+
+// ---------------------------------------------------------------------------
+// Engine wrappers
+// ---------------------------------------------------------------------------
+
+// 0x409730 with its second argument 0, which is what pb::get_rc_string already is.
+const char* GetRcString(int id)
+{
+	return pb::get_rc_string(static_cast<Msg>(id));
+}
+
+// 0x41de40 with font 0 and font 1. Upstream's TTextBox has one font.
+void Display(TTextBox* box, const char* text, float time)
+{
+	if (box && text)
+		box->Display(text, time);
+}
+
+void DisplayGlyph(TTextBox* box, const char* glyph, float time)
+{
+	if (box && glyph)
+		box->Display(glyph, time);
+}
+
+// 0x41d930
+void ClearText(TTextBox* box)
+{
+	if (box)
+		box->Clear();
+}
+
+// `*(int*)(info_text_box + 0x5e) != 0`: the text box's own display timer. The
+// dispatcher re-spells its expiry as a mode tick, so this gates that.
+bool AnnouncementPending(TTextBox* box)
+{
+	return box && box->Timer != 0;
+}
+
+// vtable +0x18. The original returns the clip length; no caller here uses it.
+void Play(TSound* sound)
+{
+	if (sound)
+		sound->Play(nullptr, "pirates");
+}
+
+// Skulduggery always passes the value explicitly, unlike Dragon's lost x87
+// argument, so this one is the plain sprintf it looks like.
+void FormatWithValue(char* out, const char* format, int value)
+{
+	if (!out)
+		return;
+	if (!format)
+	{
+		*out = '\0';
+		return;
+	}
+	if (std::strchr(format, '%'))
+		std::snprintf(out, 64, format, static_cast<long>(value));
+	else
+		std::snprintf(out, 64, "%s", format);
+}
+
+// 0x410ff0 -- is there a high score at all? Peg Leg's Loot's finale checks it
+// before offering to beat one.
+bool AnyHighScore()
+{
+	for (auto& entry : high_score::highscore_table)
+		if (entry.Score > 0)
+			return true;
+	return false;
+}
+
+// 0x42dd0b -- the 15-bit LCG and the open-coded `(rand() * n) >> 15`. MSVC's rand()
+// constants, reproduced rather than deferring to the host's so a seed replays.
+int Rnd(int n)
+{
+	static unsigned int seed = 1;
+	seed = seed * 214013u + 2531011u;
+	const int r = static_cast<int>((seed >> 16) & 0x7fff);
+	return n > 0 ? (r * n) >> 15 : 0;
+}
+
+// 0x423650 -- the jackpot accrual every broadcast feeds, with its clamp.
+void AddToJackpot(int amount)
+{
+	auto total = TableG->JackpotScore + amount;
+	TableG->JackpotScore = total > 10000000 ? 10000000 : total;
 }
 
 } // namespace pirates

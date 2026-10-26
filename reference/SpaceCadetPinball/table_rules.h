@@ -70,6 +70,14 @@ struct TableRules
 	// and have the 3D Pinball path write values instead of indices. A per-table
 	// array would reintroduce the indexing this table never had.
 
+	// How TPinballTable::ScoreMultiplier is read. 3D Pinball and Space Cadet hold
+	// an INDEX into score_multipliers[5] (neutral 0); the Full Tilt bonus tables
+	// hold the multiplier VALUE (neutral 1, written as 2..5 by the weapon and
+	// fathom awards). Reading one as the other either scales wrongly or, for a
+	// value of 5, indexes off the end of the array -- which is why this is a flag
+	// and not a comment. The long note below says why no per-table array is right.
+	bool MultiplierIsValue;
+
 	// Where the table keeps its mode. Space Cadet uses the dummy light `lite198`,
 	// Dragon's Keep the MessageField of its single TTextBox `info_text_box`. The
 	// engine only needs to read and write it, not know which object it is.
@@ -85,6 +93,19 @@ struct TableRules
 	// point bound here is the dispatcher (`dragon::MissionHandler`,
 	// `pirates::Handler`), not the switch.
 	void (*ModeControl)(MessageCode code, TPinballComponent* caller);
+
+	// Which of the two runs first. Space Cadet's `control::handler` calls the
+	// component's own handler and then MissionControl; both bonus tables do the
+	// opposite -- DRAGON.EXE's 0x423060 and PIRATES.EXE's 0x423080 both call the
+	// mode machine and then the component's ControlFunc. It is not cosmetic: many
+	// of Dragon's handlers suppress their own scoring while a quest is running,
+	// which only works if the quest controller has already seen the message, and
+	// running it the other way round double-scores silently.
+	//
+	// A field rather than something derived from `ModeControl`, because the order
+	// is a property of the table's rules and not of which function implements them.
+	bool ModeBeforeComponent;
+
 	void (*ResetRules)(TPinballTable* table);
 	void (*BallDrained)(TPinballTable* table);
 

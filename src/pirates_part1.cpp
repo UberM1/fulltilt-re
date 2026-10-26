@@ -331,7 +331,7 @@ int AddScoreUnmultiplied(TPinballComponent* caller, int score); // 0x00423350
 // 0x00424700 -- award the jackpot. A negative time is used as its magnitude and suppresses
 // the sound; the return value is the time the announcement will occupy (t + 2.0), which
 // callers chain into their own next Display. See the note on DropBankCompletedTavern.
-float AwardJackpot(float time);
+float CollectJackpot(float time);
 
 // Re-raise and re-enable a whole drop bank, clearing its bitmask. Shared with the mode
 // controllers (Attack Ship, Storm, Tavern and Sword Fight all re-raise their bank at mode
@@ -403,7 +403,7 @@ void BumperControl(MessageCode code, TPinballComponent* caller)
 		if (++mode_scratch_counter == 10)
 		{
 			mode_scratch_counter = 0;
-			AwardJackpot(0.0f);
+			CollectJackpot(0.0f);
 			return;
 		}
 		AddScoreAt(caller, 25000);
@@ -581,7 +581,7 @@ static void ShipDropBankHit(TPinballComponent* caller)
 		// as its message argument, so the group animation starts when the jackpot line
 		// clears -- the same return-value chaining the tavern bank uses.
 		RaiseShipDropBank();
-		const float jackpotTime = AwardJackpot(0.0f);
+		const float jackpotTime = CollectJackpot(0.0f);
 		fathom_lights->Message(MessageCode::TLightGroupRestartNotifyTimer, jackpotTime);
 		AddScoreAt(caller, 25000);
 		return;
@@ -716,13 +716,13 @@ static void TavernDropBankHit(TPinballComponent* caller)
 		}
 		SwapBankRoute(0.0f, 0.0f);
 		RaiseTavernDropBank();
-		// AwardJackpot(ArmRandomKegMagnet()) -- the keg group's on-count becomes the
+		// CollectJackpot(ArmRandomKegMagnet()) -- the keg group's on-count becomes the
 		// jackpot announcement's dwell, so the display lingers one second longer per lit
 		// keg. That is what the instruction stream says (the float return is stored and
 		// re-pushed at 0x426c80-0x426c89); it looks like the same "chain my announcement
 		// after yours" idiom the ship bank and a_roll2 use, with the two helpers' return
 		// conventions quietly disagreeing.
-		AwardJackpot(ArmRandomKegMagnet());
+		CollectJackpot(ArmRandomKegMagnet());
 		AddScoreAt(nullptr, 50000);
 		return;
 	}

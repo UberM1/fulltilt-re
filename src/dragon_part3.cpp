@@ -44,55 +44,55 @@ namespace dragon {
 // Components -- tags live in control_dragon.cpp / dragon_part1.cpp
 // ---------------------------------------------------------------------------
 
-extern TTextBox* info_text_box;
-extern TPinballTable* TableG;
+extern TTextBox*& info_text_box;
+extern TPinballTable*& TableG;
 
-extern TLight* lite22;   // the 'D' of D-R-A-G-O-N, lit by the fire lizard pair
-extern TLight* lite33;   // weapon 1 \.
-extern TLight* lite34;   // weapon 2  | Max Weapons lights all four
-extern TLight* lite35;   // weapon 3  |
-extern TLight* lite36;   // weapon 4 /
-extern TLight* lite47;   // diverter-A routing indicator
-extern TLight* lite48;   // tower lock 1 (a_sink18, 100,000)
-extern TLight* lite49;   // tower lock 2 (a_sink17, 200,000)
-extern TLight* lite50;   // tower lock 3 (a_sink16, 300,000)
-extern TLight* lite57;   // extra-ball light
-extern TLight* lite63;   // fire lizard sink 1's own light; also the shared hit counter
-extern TLight* lite64;   // fire lizard sink 2's own light
-extern TLight* lite65;   // fire lizard secondary light flashed for a_sink1
-extern TLight* lite66;   // fire lizard secondary light flashed for a_sink2
-extern TLight* lite91;   // Fire Lizards multiplier rung (0..10, x100,000)
-extern TLight* lite114;  // Slay Dragon "hits left" counter
-extern TLight* lite125;  // dragon-chute route indicator
-extern TLight* lite126;  // dragon-ramp route indicator
+extern TLight*& lite22;   // the 'D' of D-R-A-G-O-N, lit by the fire lizard pair
+extern TLight*& lite33;   // weapon 1 \.
+extern TLight*& lite34;   // weapon 2  | Max Weapons lights all four
+extern TLight*& lite35;   // weapon 3  |
+extern TLight*& lite36;   // weapon 4 /
+extern TLight*& lite47;   // diverter-A routing indicator
+extern TLight*& lite48;   // tower lock 1 (a_sink18, 100,000)
+extern TLight*& lite49;   // tower lock 2 (a_sink17, 200,000)
+extern TLight*& lite50;   // tower lock 3 (a_sink16, 300,000)
+extern TLight*& lite57;   // extra-ball light
+extern TLight*& lite63;   // fire lizard sink 1's own light; also the shared hit counter
+extern TLight*& lite64;   // fire lizard sink 2's own light
+extern TLight*& lite65;   // fire lizard secondary light flashed for a_sink1
+extern TLight*& lite66;   // fire lizard secondary light flashed for a_sink2
+extern TLight*& lite91;   // Fire Lizards multiplier rung (0..10, x100,000)
+extern TLight*& lite114;  // Slay Dragon "hits left" counter
+extern TLight*& lite125;  // dragon-chute route indicator
+extern TLight*& lite126;  // dragon-ramp route indicator
 
-extern TLightGroup* well_light_group;
-extern TLightGroup* spell_spot_light_group;
-extern TLightGroup* dragon_fire_light_group;
+extern TLightGroup*& well_light_group;
+extern TLightGroup*& spell_spot_light_group;
+extern TLightGroup*& dragon_fire_light_group;
 
-extern TPinballComponent* a_sink1;   // fire lizard sink, left
-extern TPinballComponent* a_sink2;   // fire lizard sink, right
-extern TPinballComponent* a_sink4;   // the well
-extern TPinballComponent* a_sink16;  // tower lock sink 3 (no handler of its own)
-extern TPinballComponent* a_sink17;  // tower lock sink 2
-extern TPinballComponent* a_sink18;  // tower lock sink 1
-extern TPinballComponent* a_center_post;
-extern TPinballComponent* a_bloce;
-extern TPinballComponent* mode_timer;
+extern TPinballComponent*& a_sink1;   // fire lizard sink, left
+extern TPinballComponent*& a_sink2;   // fire lizard sink, right
+extern TPinballComponent*& a_sink4;   // the well
+extern TPinballComponent*& a_sink16;  // tower lock sink 3 (no handler of its own)
+extern TPinballComponent*& a_sink17;  // tower lock sink 2
+extern TPinballComponent*& a_sink18;  // tower lock sink 1
+extern TPinballComponent*& a_center_post;
+extern TPinballComponent*& a_bloce;
+extern TPinballComponent*& mode_timer;
 
-extern TPinballComponent* a_dvtraa;
-extern TPinballComponent* a_dvtrab;
-extern TPinballComponent* a_dvtrda;
-extern TPinballComponent* a_dvtrdb;
+extern TPinballComponent*& a_dvtraa;
+extern TPinballComponent*& a_dvtrab;
+extern TPinballComponent*& a_dvtrda;
+extern TPinballComponent*& a_dvtrdb;
 
-extern TSound* tabc04wave;
-extern TSound* tabc10wave;
-extern TSound* tabc13wave;
-extern TSound* tabc16wave;
-extern TSound* tabc24wave;
-extern TSound* tabc35wave;
-extern TSound* tabc51wave;
-extern TSound* tabc56wave;
+extern TSound*& tabc04wave;
+extern TSound*& tabc10wave;
+extern TSound*& tabc13wave;
+extern TSound*& tabc16wave;
+extern TSound*& tabc24wave;
+extern TSound*& tabc35wave;
+extern TSound*& tabc51wave;
+extern TSound*& tabc56wave;
 
 // DAT_0043a99c -- an unannotated component global sitting between a_sink17 and a_sink16
 // in .data, read by both fire lizard handlers for one float and never otherwise touched
@@ -165,10 +165,10 @@ void CastRandomSpell();                                 // 0x004237f0
 void SuspendTowerLocks();                               // 0x00423b80
 void CheckTowerLocks();                                // 0x00423be0
 bool StartSelectedQuest();                           // 0x00424210
-float CollectJackpot(float unused, bool showText);       // 0x00424490
+int CollectJackpot(float unused, bool showText);         // 0x00424490
 bool CheckDragonFlurry();                               // 0x004244e0
 void MissionHandler(MessageCode code, TPinballComponent* cmp); // 0x0042c020
-int RandBelow();                                       // 0x0042c4cb
+int DragonRand15();                                    // 0x0042c4cb, the raw 15-bit LCG
 
 // Handlers in other slices that this one calls directly rather than through
 // control::handler -- a_sink4's Max Armor award enables both armor blockers by invoking
@@ -178,14 +178,14 @@ void RightOutlaneBlockerControl(MessageCode code, TPinballComponent* caller); //
 
 // DAT_00439b10 -- set while a quest-start offer is on screen, which makes the next sink
 // park the ball in s_hole118 instead of kicking it out (see dragon-ball-handlers.md §5.1).
-extern int quest_start_pending;
+extern bool KeepAnnouncement;
 
 // The LCG at 0x42c4cb returns 15 bits, and Dragon's "random in [0,n)" is always the
 // open-coded `(rand() * n) >> 15` with the round-toward-zero fixup. Collapsed into one
 // helper; every call site below matched the same instruction pattern.
-static int RandBelow(int n)
+int RandBelow(int n)
 {
-	return (RandBelow() * n) >> 15;
+	return (DragonRand15() * n) >> 15;
 }
 
 // ===========================================================================
@@ -214,7 +214,11 @@ static int RandBelow(int n)
 // one to fix; disassembling FT's TBlocker would settle which.
 static float FireLizardFlashTime()
 {
-	return static_cast<float>(static_cast<int>(unknown_a99c->UnknownP7e));
+	// unknown_a99c is null until the component it names is identified, so fall back
+	// to TBlocker's own -1.0 default, which is the "no duration" the gargoyle rocks
+	// read the same field as.
+	const float raw = unknown_a99c ? unknown_a99c->UnknownP7e : -1.0f;
+	return static_cast<float>(static_cast<int>(raw));
 }
 
 // 0x00425c30 -- the shared tail of both fire lizard handlers (__stdcall, RET 0x4).
@@ -245,10 +249,10 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 		// The pending flag makes whichever sink next swallows the ball park it in
 		// s_hole118 while the quest-start offer is up. It is cleared again before
 		// TryStartSelectedQuest because that call itself takes the ball.
-		quest_start_pending = 1;
+		KeepAnnouncement = true;
 		if (CheckDragonFlurry())
 			return; // D-R-A-G-O-N completed: mode 0xf owns the ball now
-		quest_start_pending = 0;
+		KeepAnnouncement = false;
 		if (StartSelectedQuest())
 			return;
 
@@ -373,7 +377,7 @@ void FireLizardSink2Control(MessageCode code, TPinballComponent* caller)
 }
 
 // ===========================================================================
-// Well Sink -- a_sink4 (0x426140)
+// Well Sink -- a_sink4 (VA 426140; the handler below carries the address)
 // ===========================================================================
 //
 // Two machines in one handler: the quest/spell lottery in ordinary play, and the whole of
@@ -421,13 +425,13 @@ void WellSinkControl(MessageCode code, TPinballComponent* caller)
 		// dragon-ball-handlers.md §3.2 describes.
 		if (RandBelow(4) == 1)
 		{
-			quest_start_pending = 1;
+			KeepAnnouncement = true;
 			if (!StartSelectedQuest())
 			{
 				// Nothing to start, so the offer never appears and the ball comes
 				// straight back. The kickout below then fires a second time on the same
 				// sink, which TSink tolerates; transcribed as found.
-				quest_start_pending = 0;
+				KeepAnnouncement = false;
 				a_sink4->Message(MessageCode::TSinkResetTimer, -1.0f);
 			}
 			// Note the flag is left set when a quest *did* start: s_hole118's handler is

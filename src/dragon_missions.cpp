@@ -435,7 +435,7 @@ int AddScoreAt(TPinballComponent* source, int score);            // 0x4230f0 -- 
 int DragonSpecialAddScore(TPinballComponent* source, int score);     // 0x423130 -- unmultiplied
 void AddToJackpot(int amount);                                 // 0x4238a0 -- clamp 10,000,000
 void AddToSuperJackpot(int amount);                            // 0x423870 -- clamp 20,000,000
-void AwardJackpot(bool showGlyph);                             // 0x424490
+int CollectJackpot(float unused, bool showGlyph);                // 0x424490
 void AwardExtraBall(float displayTime);                        // 0x4231e0
 int RandBelow(int n);                                                // 0x42c4cb, 15-bit LCG -> [0,n)
 const char* GetRcString(int id);
@@ -579,7 +579,7 @@ extern int SpellsCastThisBall;
 // clock. UNVERIFIED name: set to 3 by the plunger and by NewGame, stepped
 // 3->2->1->0 by v_lite40Control, and read here and by s_oneway2Control.
 // Settled by reading 0x424870 (v_lite40Control) properly.
-extern int BallLaunchStage;
+extern int shoot_again_flag;
 
 // Forward declarations of the modes this file does not implement. They are
 // states of the same machine but belong to the bonus/multiball slice.
@@ -1382,7 +1382,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 			if (caller == tag_s_oneway5.Component)
 			{
 				tag_v_lite95.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
-				AwardJackpot(true);
+				CollectJackpot(0.0f, true);
 				CollectGem(0x040);
 				return;
 			}
@@ -1589,7 +1589,7 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 
 // Rescue Maiden's per-hit award ladder.
 //
-// This is the `mode == 6` arm of Dragon_s_trip6_Control @0x427880 -- the
+// This is the `mode == 6` arm of Dragon_s_trip6_Control (VA 427880) -- the
 // PRISON-WINDOW TRIP WIRE, not the tower sink. s_trip6/s_trip5 share that
 // handler and own prison_window_light_group; the other two trip pairs
 // (s_trip3/4, s_trip8/9) read v_lite49/v_lite50 against the watch and gate
@@ -1626,7 +1626,7 @@ void RescueMaidenAwardWindow(TPinballComponent* caller)
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 2:
-		AwardJackpot(true);
+		CollectJackpot(0.0f, true);
 		break;
 	default:
 		// The fourth window: the extra-ball light, and the only site that says
@@ -2130,7 +2130,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN));
 	Display(tag_info_text_box.Component, buffer, Forever);
 	AddScoreAt(caller, 1500000);
-	AwardJackpot(false);
+	CollectJackpot(0.0f, false);
 
 	// All four weapons and the top multiplier.
 	for (int i = 0; i < 4; i++)
@@ -2253,7 +2253,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 			// If the ball is still in the launch lane the clock waits for it
 			// to pass the one-way (see the Oneway case below) -- the player is
 			// not charged for the plunge.
-			if (BallLaunchStage != 3)
+			if (shoot_again_flag != 3)
 			{
 				tag_mode_timer.Component->Message(ft::TimerSet,
 				                                  static_cast<float>(SlayDragonTimeLimit));
@@ -2305,7 +2305,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 				return;
 			if (caller != tag_s_oneway2.Component)
 				return;
-			if (BallLaunchStage != 3)
+			if (shoot_again_flag != 3)
 				return;
 			tag_mode_timer.Component->Message(ft::TimerSet,
 			                                  static_cast<float>(SlayDragonTimeLimit));

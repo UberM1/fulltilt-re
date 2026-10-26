@@ -63,6 +63,8 @@
 
 #include "pb.h"
 #include "TLight.h"
+#include "TBlocker.h"
+#include "TLightGroup.h"
 #include "TPinballTable.h"
 #include "TSound.h"
 #include "TTextBox.h"
@@ -84,128 +86,128 @@ namespace pirates {
 // blockers TBlocker* and the groups TLightGroup*. Whichever file ends up owning the single
 // definition should settle that; the tag names used below are the ones part3 would use.
 
-extern TTextBox* info_text_box; // DAT_0043ad3c -- and its MessageField is the mode register
-extern TPinballTable* TableG;   // DAT_0043ab9c
+extern TTextBox*& info_text_box; // DAT_0043ad3c -- and its MessageField is the mode register
+extern TPinballTable*& TableG;   // DAT_0043ab9c
 
 // Ship letters S-H-I-P-! -- cleared when Peg Leg's Loot takes the ball.
-extern TLight* lite4;
-extern TLight* lite5;
-extern TLight* lite6;
-extern TLight* lite7;
-extern TLight* lite8;
+extern TLight*& lite4;
+extern TLight*& lite5;
+extern TLight*& lite6;
+extern TLight*& lite7;
+extern TLight*& lite8;
 
 // GOLD. v_lite524 doubles as the 4-bit mask (bit 0 a_sink17, bit 1 a_sink15,
 // bit 2 a_sink14, bit 3 the right orbit s_trip8); see pirates-rules.md §4.2.
-extern TLight* lite524;
-extern TLight* lite525;
-extern TLight* lite526;
-extern TLight* lite527;
+extern TLight*& lite524;
+extern TLight*& lite525;
+extern TLight*& lite526;
+extern TLight*& lite527;
 
 // The six Treasure Hunt "X" lights. A flashing X is the armed one.
-extern TLight* mlite44;   // on a_sink17
-extern TLight* mlite51;   // on the ship sink; lit solid by Peg Leg's Loot
-extern TLight* mlite104;  // on a_sink12
-extern TLight* mlite106;  // on a_sink14
-extern TLight* mlite107;  // on a_sink15
-extern TLight* mlite110; // on a_sink9
+extern TLight*& mlite44;   // on a_sink17
+extern TLight*& mlite51;   // on the ship sink; lit solid by Peg Leg's Loot
+extern TLight*& mlite104;  // on a_sink12
+extern TLight*& mlite106;  // on a_sink14
+extern TLight*& mlite107;  // on a_sink15
+extern TLight*& mlite110; // on a_sink9
 
 // Hideaway "ball is coming back out of here" lights, flashed for 2 s on every entry.
-extern TLight* lite519; // a_sink17
-extern TLight* lite520; // a_sink15
-extern TLight* lite521; // a_sink14
+extern TLight*& lite519; // a_sink17
+extern TLight*& lite520; // a_sink15
+extern TLight*& lite521; // a_sink14
 
-extern TLight* lite504; // launch-lane / playfield routing pair, swapped by s_trip1 and
-extern TLight* lite505; // s_trip2 together with the a_bloce blocker
+extern TLight*& lite504; // launch-lane / playfield routing pair, swapped by s_trip1 and
+extern TLight*& lite505; // s_trip2 together with the a_bloce blocker
 
-extern TLight* lite533; // the "W" of WINDS, lit by s_trip11
-extern TLight* lite544; // flashed at ball serve; its own handler is at 0x0042a260
-extern TLight* lite545; // tavern window light hit by a_sink7
-extern TLight* lite546; // tavern window light hit by a_sink6
-extern TLight* lite547; // tavern window light hit by a_sink5; also the 3-bit tavern mask
-extern TLight* lite567; // ship-sink indicator
-extern TLight* lite568; // ship-sink extra ball, collected in normal play only
-extern TLight* lite569; // Shoot Again; its own handler (0x00426080) steps the phase
-extern TLight* lite570; // Ship's Hold -- lit by the ship sink during Mutiny
+extern TLight*& lite533; // the "W" of WINDS, lit by s_trip11
+extern TLight*& lite544; // flashed at ball serve; its own handler is at 0x0042a260
+extern TLight*& lite545; // tavern window light hit by a_sink7
+extern TLight*& lite546; // tavern window light hit by a_sink6
+extern TLight*& lite547; // tavern window light hit by a_sink5; also the 3-bit tavern mask
+extern TLight*& lite567; // ship-sink indicator
+extern TLight*& lite568; // ship-sink extra ball, collected in normal play only
+extern TLight*& lite569; // Shoot Again; its own handler (0x00426080) steps the phase
+extern TLight*& lite570; // Ship's Hold -- lit by the ship sink during Mutiny
 
 // Wind-lane indicator lights. Each lane has two singles plus its whole group; the ladder
 // below lights one, two or all of them by the group's on-count.
-extern TLight* lite600; // left orbit
-extern TLight* lite601;
-extern TLight* lite603; // left island ramp
-extern TLight* lite604;
-extern TLight* lite608; // right orbit
-extern TLight* lite609;
-extern TLight* lite611; // right island ramp
-extern TLight* lite612;
+extern TLight*& lite600; // left orbit
+extern TLight*& lite601;
+extern TLight*& lite603; // left island ramp
+extern TLight*& lite604;
+extern TLight*& lite608; // right orbit
+extern TLight*& lite609;
+extern TLight*& lite611; // right island ramp
+extern TLight*& lite612;
 
 // Combo lights, two singles plus the group per lane. The group's on-count is the combo
 // tier, and it is cleared by ScoringComponentReplaced -- see WindLaneTraversal.
-extern TLight* lite626; // right island ramp
-extern TLight* lite627;
-extern TLight* lite629; // left island ramp
-extern TLight* lite630;
-extern TLight* lite631; // left orbit
-extern TLight* lite632;
-extern TLight* lite634; // right orbit
-extern TLight* lite635;
+extern TLight*& lite626; // right island ramp
+extern TLight*& lite627;
+extern TLight*& lite629; // left island ramp
+extern TLight*& lite630;
+extern TLight*& lite631; // left orbit
+extern TLight*& lite632;
+extern TLight*& lite634; // right orbit
+extern TLight*& lite635;
 
-extern TPinballComponent* left_island_light_group;
-extern TPinballComponent* left_island_combo_light_group;
-extern TPinballComponent* right_wind_light_group;
-extern TPinballComponent* right_island_combo_light_group;
-extern TPinballComponent* left_orbit_light_group;
-extern TPinballComponent* left_orbit_combo_light_group;
-extern TPinballComponent* right_orbit_light_group;
-extern TPinballComponent* right_orbit_combo_light_group;
-extern TPinballComponent* fathom_light_group;             // the multiplier track
-extern TPinballComponent* coin_light_group;
-extern TPinballComponent* special_treasure_light_group;
+extern TLightGroup*& left_island_light_group;
+extern TPinballComponent*& left_island_combo_light_group;
+extern TLightGroup*& right_wind_light_group;
+extern TPinballComponent*& right_island_combo_light_group;
+extern TLightGroup*& left_orbit_light_group;
+extern TLightGroup*& left_orbit_combo_light_group;
+extern TLightGroup*& right_orbit_light_group;
+extern TLightGroup*& right_orbit_combo_light_group;
+extern TLightGroup*& fathom_light_group;             // the multiplier track
+extern TLightGroup*& coin_light_group;
+extern TLightGroup*& special_treasure_light_group;
 
-extern TPinballComponent* a_blocc; // the three sink-area blockers, held open for -1.0 s
-extern TPinballComponent* a_blocf; // (indefinitely) after every sink ejection
-extern TPinballComponent* a_blocg;
-extern TPinballComponent* a_bloce; // launch-lane blocker, paired with v_lite504/v_lite505
-extern TPinballComponent* a_cannon;
-extern TPinballComponent* a_kick1;    // left-outlane kickback, armed by the two multiballs
-extern TPinballComponent* a_kick2;
-extern TPinballComponent* s_bwal610;
-extern TPinballComponent* s_launcher1;
-extern TPinballComponent* drain;
-extern TPinballComponent* a_sink8;  // the lava sink, and the table's shared ball release
-extern TPinballComponent* a_sink9;
-extern TPinballComponent* a_sink12;
-extern TPinballComponent* s_magnet1;
-extern TPinballComponent* s_magnet2;
-extern TPinballComponent* s_magnet3;
-extern TPinballComponent* s_magnet4;
-extern TPinballComponent* s_magnet5;
-extern TPinballComponent* s_magnet6;
-extern TPinballComponent* a_flip1;
-extern TPinballComponent* a_flip2;
-extern TPinballComponent* a_flip3;
-extern TPinballComponent* a_flip4;
+extern TBlocker*& a_blocc; // the three sink-area blockers, held open for -1.0 s
+extern TBlocker*& a_blocf; // (indefinitely) after every sink ejection
+extern TBlocker*& a_blocg;
+extern TBlocker*& a_bloce; // launch-lane blocker, paired with v_lite504/v_lite505
+extern TPinballComponent*& a_cannon;
+extern TPinballComponent*& a_kick1;    // left-outlane kickback, armed by the two multiballs
+extern TPinballComponent*& a_kick2;
+extern TPinballComponent*& s_bwal610;
+extern TPinballComponent*& s_launcher1;
+extern TPinballComponent*& drain;
+extern TPinballComponent*& a_sink8;  // the lava sink, and the table's shared ball release
+extern TPinballComponent*& a_sink9;
+extern TPinballComponent*& a_sink12;
+extern TPinballComponent*& s_magnet1;
+extern TPinballComponent*& s_magnet2;
+extern TPinballComponent*& s_magnet3;
+extern TPinballComponent*& s_magnet4;
+extern TPinballComponent*& s_magnet5;
+extern TPinballComponent*& s_magnet6;
+extern TPinballComponent*& a_flip1;
+extern TPinballComponent*& a_flip2;
+extern TPinballComponent*& a_flip3;
+extern TPinballComponent*& a_flip4;
 
 // The keg lights, one per magnet. Lit by the arming routine, extinguished with a 2.0 s
 // fade when the magnet fires.
-extern TLight* lite560;
-extern TLight* lite561;
-extern TLight* lite562;
-extern TLight* lite563;
-extern TLight* lite564;
-extern TLight* lite565;
+extern TLight*& lite560;
+extern TLight*& lite561;
+extern TLight*& lite562;
+extern TLight*& lite563;
+extern TLight*& lite564;
+extern TLight*& lite565;
 
-extern TSound* tabb08wave; // tavern sink
-extern TSound* tabb11wave; // hideaway swallow
-extern TSound* tabb12wave; // wind lane / orbit pass
-extern TSound* tabb27wave; // ship sink
-extern TSound* tabb39wave; // ball into the brig
-extern TSound* tabb40wave; // ship wire ramp, outside Attack Ship
-extern TSound* tabb41wave; // cannon wire ramp
-extern TSound* tabb43wave; // WINDS lane
-extern TSound* tabb55wave; // lava sink timer, outside Lava-Ball
-extern TSound* tabb57wave; // "Ship Captured"
-extern TSound* tabb70wave; // hideaway during Bermuda Triangle
-extern TSound* tabb87wave; // keg magnet grab
+extern TSound*& tabb08wave; // tavern sink
+extern TSound*& tabb11wave; // hideaway swallow
+extern TSound*& tabb12wave; // wind lane / orbit pass
+extern TSound*& tabb27wave; // ship sink
+extern TSound*& tabb39wave; // ball into the brig
+extern TSound*& tabb40wave; // ship wire ramp, outside Attack Ship
+extern TSound*& tabb41wave; // cannon wire ramp
+extern TSound*& tabb43wave; // WINDS lane
+extern TSound*& tabb55wave; // lava sink timer, outside Lava-Ball
+extern TSound*& tabb57wave; // "Ship Captured"
+extern TSound*& tabb70wave; // hideaway during Bermuda Triangle
+extern TSound*& tabb87wave; // keg magnet grab
 
 // DAT_0043aaa0 -- the announcement tokens, addressed as `lea edx,[ecx*4+0x43aaa0]`, so
 // this is a table of 4-byte strings stored in place rather than an array of pointers.
@@ -363,16 +365,16 @@ float CheckGoldComplete(float t);   // 0x004239a0, fires the coin award at mask 
 void AwardExtraBall(float t);       // 0x004239d0
 void LightShipwreckMystery(float t); // 0x00423a30, lights v_lite529
 float BrigCaptureBall(float t);     // 0x00424210
-float SpellWinds(float t);          // 0x00424290, non-zero once W-I-N-D-S completed
+float CheckWindsComplete(float t);          // 0x00424290, non-zero once W-I-N-D-S completed
 float BumpMultiplier(float t);      // 0x00424350, ScoreMultiplier = fathoms + 1
-void RaiseShipTargets();            // 0x00424440
+void RaiseShipDropBank();            // 0x00424440
 void DropAndDisableShipTargets();   // 0x004244a0
 int ArmNextTreasureX();             // 0x00424580
 float CollectJackpot(float t);      // 0x00424700
 float AwardSpecialTreasure(float t); // 0x00424930
 void ClearKegMagnets();             // 0x00424c70, disarms all six and kills the keg lights
 void AwardTavernWindowMystery();    // 0x00424fb0
-void AwardBermudaIndicatedWind();   // 0x00425230
+void AwardIndicatedWind();   // 0x00425230
 
 // 0x0041de40 with the symbol font selected (the `1` in the fourth argument). The plain
 // font-0 form is info_text_box->Display(); dragon_missions.cpp already names this pair.
@@ -1271,7 +1273,7 @@ static void WindLaneTraversal(const WindLane& lane, TPinballComponent* caller)
 	{
 		if (lane.wind1->FlasherOnFlag)
 		{
-			AwardBermudaIndicatedWind();
+			AwardIndicatedWind();
 			return;
 		}
 		AddScoreUnmultiplied(caller, 50000);
@@ -1436,7 +1438,7 @@ void ShipWireRampControl(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	RaiseShipTargets();
+	RaiseShipDropBank();
 	mode_scratch_counter++;
 	info_text_box->Display(pb::get_rc_string(PiratesMsg(Str_ShipCaptured)), 2.0f);
 	BumpMultiplier(2.0f);
@@ -1517,7 +1519,7 @@ void ReturnWireControl(MessageCode code, TPinballComponent* caller)
 		lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 		return;
 	case ModeAttackShip:
-		RaiseShipTargets();
+		RaiseShipDropBank();
 		return;
 	default:
 		return;
@@ -1592,7 +1594,7 @@ void RightOrbitControl(MessageCode code, TPinballComponent* caller)
 		// must not run during Bermuda, and the shared routine is entered after it.
 		if (lite608->FlasherOnFlag)
 		{
-			AwardBermudaIndicatedWind();
+			AwardIndicatedWind();
 			return;
 		}
 		AddScoreUnmultiplied(caller, 50000);
@@ -1629,7 +1631,7 @@ void WindsLaneControl(MessageCode code, TPinballComponent* caller)
 	}
 
 	lite533->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-	if (SpellWinds(0.0) != 0.0f)
+	if (CheckWindsComplete(0.0) != 0.0f)
 		return;
 
 	AddScoreFor(caller, 0); // 25,000

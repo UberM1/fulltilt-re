@@ -40,6 +40,7 @@ HEADER = """// control_{lower}.cpp -- rules for Full Tilt! Pinball's {title} tab
 
 // The rules declare some tags with their concrete type, and component_tag<T>
 // instantiates std::is_base_of<TPinballComponent, T>, which needs T complete.
+#include "TBlocker.h"
 #include "TLight.h"
 #include "TLightGroup.h"
 #include "TSound.h"
