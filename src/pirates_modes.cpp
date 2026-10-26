@@ -707,7 +707,8 @@ int BallsInBrig = 0;
 
 // 0x435d90 -- the shoot-again light's phase, 3 -> 0. Storm's west wind lane
 // sets it to 2; the launcher steps it down.
-int ShootAgainPhase = 0;
+// Owned by pirates_part2.cpp, where v_lite569's handler is the stepper.
+extern int shoot_again_phase;
 
 // 0x43d158 -- which of the four interleaved spokes of bermuda_light_group is
 // lit. A 13-member group animated as a 4x4 table at 0.1 s per step.
@@ -1389,7 +1390,7 @@ void StormController(MessageCode code, TPinballComponent* caller)
 			// The west wind lane lights "shoot again" for ten seconds.
 			if (caller == tag_a_roll6.Component)
 			{
-				ShootAgainPhase = 2;
+				shoot_again_phase = 2;
 				tag_v_lite569.Component->Message(ft::LightTurnOnTimed, 10.0f);
 			}
 			return;
@@ -2076,7 +2077,7 @@ void LavaBallController(MessageCode code)
 		{
 			EjectLavaSink(1.0f);
 		}
-		pb::MainTable->BallsInPlay += 2;
+		pb::MainTable->MultiballCount += 2;
 		BallsInBrig = 0;
 
 		ClearText(tag_info_text_box.Component);
@@ -2089,7 +2090,7 @@ void LavaBallController(MessageCode code)
 	case ft::ModeAbort:
 		// A drain. Only the drain that brings the count back to one ends the
 		// mode; the other two are ignored, which is the whole multiball rule.
-		if (pb::MainTable->BallsInPlay != 1)
+		if (pb::MainTable->MultiballCount != 1)
 			return;
 		RestoreBanksAndLetters();
 		ClearText(tag_info_text_box.Component);
@@ -2156,7 +2157,7 @@ void JailBreakController(MessageCode code)
 		tag_v_lite551.Component->MessageField = 0xf;
 		RestoreVolcanoLights();
 
-		pb::MainTable->BallsInPlay += BallsInBrig;
+		pb::MainTable->MultiballCount += BallsInBrig;
 		BallsInBrig = 0;
 
 		// Turn the three brig lights on, then flash them for a second and
@@ -2179,7 +2180,7 @@ void JailBreakController(MessageCode code)
 		return;
 
 	case ft::ModeAbort:
-		if (pb::MainTable->BallsInPlay != 1)
+		if (pb::MainTable->MultiballCount != 1)
 			return;
 		RestoreBanksAndLetters();
 		ClearText(tag_info_text_box.Component);
@@ -2238,13 +2239,13 @@ void LockdownController(MessageCode code)
 
 		if (BallsInBrig > 0)
 		{
-			pb::MainTable->BallsInPlay += BallsInBrig;
+			pb::MainTable->MultiballCount += BallsInBrig;
 			BallsInBrig = 0;
 		}
 		return;
 	}
 
-	if (code == ft::ModeAbort && pb::MainTable->BallsInPlay == 1)
+	if (code == ft::ModeAbort && pb::MainTable->MultiballCount == 1)
 		tag_a_kick1.Component->Message(ft::HoldFieldDisable, 0.0f);
 }
 
