@@ -36,6 +36,13 @@
 #include "TPinballTable.h"
 #include "TPinballComponent.h"
 
+// component_tag<T> instantiates std::is_base_of<TPinballComponent, T>, which needs
+// T complete -- a forward declaration is not enough.
+#include "TLight.h"
+#include "TLightGroup.h"
+#include "TSound.h"
+#include "TTextBox.h"
+
 namespace dragon {
 
 // ---------------------------------------------------------------------------
