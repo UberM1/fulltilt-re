@@ -1369,18 +1369,29 @@ Ordered roughly by how much they would change a reimplementation.
   the way the in-scope handlers enter them.
 * **`drainPhase == 2`** is unreachable in the decompiled set.
 * **`TableG + 0x6a`**, **`DAT_00434d2c`**, and the 1-vs-2 meaning of `gameOverPhase`.
-* **The polarity of the "other sink" logic** in `a_sink1`/`a_sink2`/`FUN_00425c30`. The
-  register allocation in those three functions is the worst in the scope, and the
-  `0x427100` listing does not bear on it. **Raw listings for `0x425ea0`, `0x426000` and
-  `0x425c30` would settle it** — these are the three functions in this scope most worth
-  getting assembly for.
-* **`a_sink9`/`a_sink10` omit the plunger relaunch** on the lock path where the other four
-  entrances have it. Possibly real (those towers may feed differently), possibly a
-  decompiler omission. `0x427100` *does* have the relaunch, confirming it belongs in the
-  lock path at least for tower 1; listings for `0x4274d0` and `0x427680` would confirm
-  whether tower 3 really differs.
-* **Whether the `0.0` vs `-1.0` distinction** found in `a_sink18`'s two kickout paths also
-  holds in the other five entrances (the decompilation renders them all as `-1.0`, and it
-  got `a_sink18` wrong).
 * **Sound ids.** I have used `tabcNNwave` → `soundwaveNN` naively; the numbering is
   Dragon's own and does not line up with CADET's.
+
+Three items that were listed here in the first pass are now **resolved** against the raw
+listings and have moved into the body: the "other sink" polarity (§3.1 — real), tower 3's
+missing plunger relaunch (§3.3.2 — real), and `a_kout2->MessageField`'s dual use
+(§4.3 — real, and the counter half is vestigial).
+
+The `TSinkResetTimer` argument is also now settled for all six tower entrances. Since
+`TSink::Message` substitutes the DAT-configured `TimerTime` only for a *negative* value,
+`0.0` means "eject immediately" and `-1.0` means "use the configured delay":
+
+| Handler | out-of-quest kickout | in-quest unarmed kickout |
+|---|---|---|
+| `a_sink15` | `-1.0` | `-1.0` |
+| `a_sink18` | `-1.0` | **`0.0`** |
+| `a_sink13` | `-1.0` | `-1.0` |
+| `a_sink17` | **`0.0`** | **`0.0`** |
+| `a_sink9` | `-1.0` | `-1.0` |
+| `a_sink10` | `-1.0` | `-1.0` |
+
+So the distinction is per *handler*, not per sink object — `a_sink17` the object is kicked
+with `0.0` by its own handler but `-1.0` by `a_sink13`'s. This looks like hand-written
+inconsistency rather than design, but it is observable behaviour and should be ported
+literally. Only `a_sink18` was mis-rendered by the decompiler; `a_sink17`'s two `0.0`s were
+correct in the `.c` file.
