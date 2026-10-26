@@ -35,7 +35,7 @@ def implementations(prefix):
         pending = []
         for i, line in enumerate(lines):
             m = re.match(r"\s*namespace\s+(\w+)\s*\{?", line)
-            if m and "dragon" in m.group(1):
+            if m and m.group(1) == prefix:
                 ns, ns_depth = m.group(1), depth
             depth += line.count("{") - line.count("}")
             if ns is not None and depth <= ns_depth:
