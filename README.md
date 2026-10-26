@@ -123,13 +123,15 @@ they were how the rules region was first located, and their 10 named exports
 
 ## Status
 
-Both tables' rules are written. Nothing runs yet: the engine changes they need are
-listed, derived from compile errors rather than guessed, in `docs/engine-changes.md`.
+Both tables' rules are written and every one of the twelve files compiles against the
+patched engine with zero errors. What is left is linking them in and playing a ball --
+`docs/integration.md` is that step, and `docs/engine-changes.md` is the patch that got
+here.
 
 | | components | handlers | implemented |
 |---|---|---|---|
 | Dragon's Keep | 75 | 64 | **64 (100%)** |
-| Skulduggery | 74 | 69 | 63 (91%) |
+| Skulduggery | 74 | 69 | **69 (100%)** |
 
 - [x] Locate the rules region (rva `0x023000`-`0x02d000`, ~40 KB), three ways
 - [x] Validate every extraction method against `control.cpp` before using it
@@ -142,8 +144,9 @@ listed, derived from compile errors rather than guessed, in `docs/engine-changes
 - [x] Dragon's Keep: all 64 handlers and the quest state machine
 - [x] Skulduggery: the mode state machine and 63 of 69 handlers
 - [x] Build upstream from source (`nix-build build.nix`)
-- [ ] The last six Skulduggery handlers
-- [ ] The engine changes in `docs/engine-changes.md`
+- [x] Skulduggery: all 69 handlers
+- [x] The engine changes in `docs/engine-changes.md` -- every rule file compiles
+- [x] Point the component tables at the real handlers rather than generated stubs
 - [ ] Wire `reference/SpaceCadetPinball/table_rules.h` into the engine and actually play a ball
 
 ### What the compiler says
