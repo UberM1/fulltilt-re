@@ -1,14 +1,17 @@
 // pirates_part3.cpp -- Skulduggery rules, part 3: the two flipper buttons, the kickback,
-// the brig release one-way, the launch-lane one-way and the tavern window light.
+// the brig release one-way, the launch-lane one-way, the tavern window light, the Shoot
+// Again lamp's phase stepper and the kickback's armed lamp.
 //
-// The six handler addresses nothing else covered -- five routines, because a_flip1 and
+// The eight handler addresses nothing else covered -- seven routines, because a_flip1 and
 // a_flip2 are byte-identical -- in the shape pirates_part1.cpp and
 // pirates_part2.cpp established: free functions in namespace pirates, MessageCode spelled
 // out, the mode register read as info_text_box->MessageField against named Mode* constants,
 // and one address comment opening each handler's doc block.
 //
 //   0x00422a80  v_lite547    tavern window light (and v_lite546/545)  ~ ExtraBallLight
+//   0x00426080  v_lite569    the Shoot Again lamp's phase stepper      ~ ShootAgainLight
 //   0x0042a1e0  a_flip1+2    both flipper buttons                     ~ LeftFlipperControl
+//   0x0042a260  v_lite544    the kickback's armed lamp, and its disarm (table-specific)
 //   0x0042a2a0  a_kick2      the kickback fires                       ~ LeftKickerControl
 //   0x0042a340  s_oneway7    brig release                             (table-specific)
 //   0x0042a3b0  s_oneway3    launch-lane exit                         ~ oneway2 in Dragon
@@ -31,7 +34,9 @@
 //   1       TLightTurnOn (1, +0)                     the flipper-button notification
 //   0x10    TLightFlasherStartTimedThenStayOff (16)  v_lite544 at the kickback's fire
 //   0x13    TLightResetAndTurnOn (19)                v_lite504
-//   0x14    TLightResetAndTurnOff (20)               v_lite505
+//   0x14    TLightResetAndTurnOff (20)               v_lite505, v_lite569 phase 1 -> 0
+//   7       TLightFlasherStartTimed (7, +0)          v_lite569 phase 2 -> 1
+//   9       TLightTurnOnTimed (9, +0)                v_lite569 phase 3 -> 2
 //   0x1c    TLightGroupStepBackward (24, +4)         the three rotated lane groups
 //   0x39    FT-only, see FtMessageCode::TBlockerHold the four a_bloc* blockers
 //   0x46    ControlTimerExpired (60, +10)            a_kick2's and v_lite569's trigger
@@ -87,6 +92,17 @@ extern TLight* lite505; // DAT_0043ae6c
 
 extern TLight* lite544; // DAT_0043bbbc -- the kickback's "armed" lamp
 
+// The Shoot Again lamp. Declared the way pirates_part2.cpp declares it, because no slice
+// binds the tag yet; part2 reads it from the launcher and the stepper at the end of this
+// file is its own handler.
+extern TLight* lite569; // DAT_0043bc44
+
+// The outlane kickback pair, part1's variable names for a_kick2 and s_bwal610. Both carry
+// a plain ActiveFlag rather than a message interface: pirates_part1.cpp's two return lanes
+// set it, the launcher sets it at every serve, and the lamp handler below clears it.
+extern TPinballComponent* kick2;   // DAT_0043bba4 -- a_kick2
+extern TPinballComponent* bwal610; // DAT_0043c42c -- s_bwal610
+
 extern TPinballComponent* a_kick1; // DAT_0043bbd4 -- the kickback armed by the multiballs
 
 // The three light groups both flipper buttons rotate.
@@ -110,11 +126,10 @@ extern TLightGroup* island_lane_bottom_lights;  // DAT_0043bb2c
 // never free even when the component scores nothing.
 int AddScoreFor(TPinballComponent* caller, int index); // 0x004232c0
 
-// FUN_00426080 -- v_lite569's own handler, the Shoot Again lamp's three-phase countdown.
-// Not yet reimplemented by any slice, so this is a prototype and not a definition (hence
-// the FUN_ spelling: the address belongs to whichever file ends up owning the body).
-// s_oneway3 below drives it directly, exactly as dragon_part2.cpp's
-// LaunchLaneOneWayControl drives Dragon's.
+// v_lite569's own handler, the Shoot Again lamp's phase stepper. The body is at the end
+// of this file now; this is only the forward declaration s_oneway3 needs, because
+// s_oneway3 drives the stepper directly rather than through control::handler -- exactly as
+// dragon_part2.cpp's LaunchLaneOneWayControl drives Dragon's.
 void ShootAgainLightControl(MessageCode code, TPinballComponent* caller);
 
 // DAT_00435d90 -- the Shoot Again phase, 3 = lamp solid and untimed, 2 = 10 s timed on,
@@ -345,6 +360,126 @@ void LaunchLaneOneWayControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision && shoot_again_phase == 3)
 		ShootAgainLightControl(MessageCode::ControlTimerExpired, nullptr);
+}
+
+// ===========================================================================
+// The Shoot Again lamp
+// ===========================================================================
+
+// 0x00426080 -- v_lite569 (skeleton: v_lite569Control)
+//
+// The Shoot Again lamp's phase stepper, and the only writer that walks the phase down.
+// pirates-rules.md §5.5 puts the 3 -> 0 walk in the launcher; it is here. The launcher
+// only ever *asserts* a phase (3 at serve) or re-asserts the lamp state for the phase it
+// already holds, and the drain clears the cell outright.
+//
+// One step per call, and each step repaints the lamp for the phase it steps *into* --
+// which is why the three messages are the same three s_launcher1's PlungerFeedBall arm
+// sends, with the same two floats:
+//
+//   3 -> 2   TLightTurnOnTimed 10 s        solid for ten more seconds
+//   2 -> 1   TLightFlasherStartTimed 5 s   flashing for five
+//   1 -> 0   TLightResetAndTurnOff         out, Shoot Again spent
+//
+// Phase 3 itself is the untimed hold the serve installs: nothing in the handler produces
+// it, and s_oneway3 leaving the launch lane is what knocks it down to 2 and starts the
+// clock (see LaunchLaneOneWayControl above). After that the lamp's own timeout drives the
+// rest, because TLight::TimerExpired notifies its control handler -- so 2 -> 1 and 1 -> 0
+// happen 10 s and 5 s later with nothing else involved.
+//
+// Two differences from the structural reference, upstream's ShootAgainLightControl:
+//
+// First, upstream keeps its state in `caller->MessageField` and has only two phases
+// (lit -> flashing-then-off). Skulduggery keeps three phases in a global, which is what
+// lets the launcher and the drain read and write it; and because the lamp is reached
+// through the v_lite569 pointer rather than through `caller`, `caller` is unused here.
+// That is not cosmetic -- it is what makes the direct call in LaunchLaneOneWayControl
+// legal with a null caller, and the original does exactly that.
+//
+// Second, note what the stepper does *not* do: it does not clamp. The launcher clamps
+// anything above 3 down to 3 before it reads the cell; the stepper just tests 1, 2 and 3
+// and returns having done nothing for any other value, phase 0 included. So a phase the
+// west-wind lane in pirates_modes.cpp pushed past 3 sits frozen until the next feed
+// clamps it.
+//
+// The listing is a plain cmp/je chain on 1, 2, 3 -- there is no jump table in this
+// function. The table at 0x00426068 that the phase/lamp-state mapping was read from is
+// s_launcher1's switch, immediately before this body in .text; it belongs to 0x00425e70.
+void ShootAgainLightControl(MessageCode code, TPinballComponent* caller)
+{
+	if (code != MessageCode::ControlTimerExpired) // binary 0x46
+		return;
+
+	if (shoot_again_phase == 1)
+	{
+		shoot_again_phase = 0;
+		lite569->Message(MessageCode::TLightResetAndTurnOff, 0.0); // binary 0x14
+	}
+	else if (shoot_again_phase == 2)
+	{
+		shoot_again_phase = 1;
+		lite569->Message(MessageCode::TLightFlasherStartTimed, 5.0f); // binary 7, 0x40a00000
+	}
+	else if (shoot_again_phase == 3)
+	{
+		shoot_again_phase = 2;
+		lite569->Message(MessageCode::TLightTurnOnTimed, 10.0f); // binary 9, 0x41200000
+	}
+}
+
+// ===========================================================================
+// The kickback's armed lamp
+// ===========================================================================
+
+// 0x0042a260 -- v_lite544 (skeleton: v_lite544Control)
+//
+// v_lite544 is the outlane kickback's armed indicator, and this handler is how the
+// kickback disarms itself: the lamp owns the arm state, and a_kick2 plus s_bwal610 just
+// follow it.
+//
+// Nothing here looks at the kickback at all. On the lamp's timeout the handler reads the
+// lamp's own three on-flags, and if all three are clear -- the lamp ended the timeout dark
+// -- it drops the ActiveFlag on a_kick2 and s_bwal610, the same two bytes
+// pirates_part1.cpp's return lanes and s_launcher1's serve set to 1. If any flag is still
+// set the lamp is still showing something and the pair stays live.
+//
+// That guard is what separates the two ways the lamp is driven, because
+// TLight::TimerExpired clears ToggledOnFlag and FlasherOnFlag before it notifies the
+// control handler, leaving LightOnFlag as the carrier:
+//
+//   armed  TLightFlasherStartTimedThenStayOn 1 s   (both return lanes, and every serve)
+//          flashes a second, then stays lit -- LightOnFlag set, so the pair survives.
+//   fired  TLightFlasherStartTimedThenStayOff 1 s  (KickbackControl above)
+//          flashes a second, then TLight's TurnOffAfterFlashingFg path sends
+//          TLightResetAndTurnOff -- all three flags clear, so the pair goes inactive.
+//
+// So the kickback is a one-shot that rearms from the return lanes, and the single-second
+// flash doubles as both the "armed" and the "just fired" animation; only the lamp's
+// resting state afterwards differs. It also means a serve always rearms it, which is
+// consistent with s_launcher1 setting both ActiveFlags itself rather than relying on this.
+//
+// UNVERIFIED: the field identities behind the three offsets the listing reads --
+// [+0x42], [+0x4e], [+0x46]. They are taken from s_launcher1, whose PlungerFeedBall arm
+// guards TLightResetAndTurnOn with [+0x42], TLightTurnOnTimed with [+0x4e] and
+// TLightFlasherStartTimed with [+0x46], which pins them to LightOnFlag, ToggledOnFlag and
+// FlasherOnFlag respectively -- pirates_part2.cpp already reads them that way. Dumping
+// Full Tilt's TLight layout would confirm it directly; note the binary reads all three as
+// 32-bit where upstream declares bools, so the port's field accesses are a layout
+// approximation either way.
+void KickbackArmedLightControl(MessageCode code, TPinballComponent* caller)
+{
+	if (code != MessageCode::ControlTimerExpired) // binary 0x46
+		return;
+
+	if (lite544->LightOnFlag)     // [+0x42]
+		return;
+	if (lite544->ToggledOnFlag)   // [+0x4e]
+		return;
+	if (lite544->FlasherOnFlag)   // [+0x46]
+		return;
+
+	kick2->ActiveFlag = 0;
+	bwal610->ActiveFlag = 0;
 }
 
 } // namespace pirates
