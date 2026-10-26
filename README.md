@@ -128,7 +128,8 @@ they were how the rules region was first located, and their 10 named exports
 - [x] Dump component/handler/score tables for both targets
 - [x] Tooling: Ghidra 12.1.2 + `rea`, packaged in `nixos_conf` as
       `modules/features-nixos/home/reversing.nix`
-- [x] Recover Full Tilt's `MessageCode` numbering (upstream + 10, `ControlCollision` + 11)
+- [x] Recover Full Tilt's `MessageCode` numbering (piecewise, not a flat offset --
+      see `analysis/message_codes.py`)
 - [x] Decompile every handler: 159 CADET, 159 Dragon, 178 Skulduggery functions
 - [x] Classify each handler against its nearest named Space Cadet equivalent
 - [x] Generate `src/control_dragon.cpp` / `src/control_pirates.cpp` skeletons
@@ -181,5 +182,7 @@ binaries/   win95/ (PE32 i386, the real targets) and win31/ (NE 16-bit)
 game/       playable 32-bit install from the CD
 docs/       FULLTILT.HLP (the CD's manual) and a rules spec drawn from it
 src/        generated control_<table>.cpp skeletons (regenerable, untracked)
-tools/      Ghidra / rea setup
+reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
+            (untracked; re-clone with
+            `git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`)
 ```
