@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from dump_components import ENTRY, dump, load, mapper  # noqa: E402
 from dump_simple import simple_components  # noqa: E402
+from link_impls import implementations  # noqa: E402
 
 HEADER = """// control_{lower}.cpp -- rules for Full Tilt! Pinball's {title} table.
 //
@@ -155,8 +156,22 @@ def main(exe, matches_txt, out_path):
         else:
             L.append(f'component_tag<TPinballComponent> tag_{key} = {{"{name}"}};')
 
-    L.append("\n// Handlers. Bodies are TODO; see the address and the reference handler.")
+    # Where a hand-written reimplementation exists, the table must point at it --
+    # otherwise the generated stub shadows the real rule and the table silently does
+    # nothing. link_impls pairs each original address with the function implementing
+    # it, keyed on the address comment every reimplementation carries.
+    impls = implementations(lower)
+
+    L.append("\n// Handlers implemented in the hand-written rule files.")
+    for va in handlers:
+        if va in impls:
+            fn, fname, _ns = impls[va]
+            L.append(f"void {fn}(MessageCode code, TPinballComponent* caller); // {fname}")
+
+    L.append("\n// Handlers still to reverse engineer.")
     for va, nm in handlers.items():
+        if va in impls:
+            continue
         ref, score = near.get(va, (None, 0.0))
         hint = (
             f"resembles Space Cadet's {ref} ({score:.2f})"
@@ -175,7 +190,11 @@ def main(exe, matches_txt, out_path):
 
     L.append(f"\ncomponent_info {lower}_score_components[{len(rows)}]\n{{")
     for name, va, scores in rows:
-        fn = f"{lower}::{handlers[va]}Control"
+        fn = (
+            f"{lower}::{impls[va][0]}"
+            if va in impls
+            else f"{lower}::{handlers[va]}Control"
+        )
         arr = arrays.get(scores)
         tail = f"{len(scores)}, {lower}::{arr}" if scores else "0, nullptr"
         L.append(f"\tcomponent_info{{{lower}::tag_{ident(name)}, {{{fn}, {tail}}}}},")
@@ -189,8 +208,9 @@ def main(exe, matches_txt, out_path):
     Path(out_path).write_text("\n".join(L) + "\n")
     print(f"{exe}: {len(rows)} components, {len(handlers)} handlers, {len(arrays)} score arrays")
     print(f"  -> {out_path}")
-    unknown = sum(1 for va in handlers if near.get(va, ("", 0))[1] < 0.55)
-    print(f"  {len(handlers) - unknown} stubs have a Space Cadet reference, {unknown} do not")
+    done = sum(1 for va in handlers if va in impls)
+    print(f"  {done}/{len(handlers)} handlers wired to a reimplementation,"
+          f" {len(handlers) - done} still stubs")
     print(f"  simple_components[{len(simple)}], {len(all_tags)} distinct tags")
 
 

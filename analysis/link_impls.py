@@ -21,8 +21,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# `// 0x00424bc0 ...` or `... (0x424bc0)` on a comment line above a definition.
-ADDR_COMMENT = re.compile(r"//.*?0x0{0,2}(4[0-9a-f]{5})\b")
+# `// 0x00424bc0 ...` as a doc block's first line, and `FUN_0042a220` anywhere in the
+# block. The second form is how a reimplementation says "this function also serves that
+# address" -- several handlers are bound twice in the binary because the bodies are
+# byte-identical, and without it the table would leave the duplicate pointing at a stub.
+ADDR_COMMENT = re.compile(r"(?:0x0{0,2}|FUN_0{0,2})(4[0-9a-f]{5})\b")
 DEFN = re.compile(r"^(?:static\s+)?(?:void|int|float|bool)\s+([A-Za-z_][\w:]*)\s*\(")
 
 
@@ -41,9 +44,12 @@ def implementations(prefix):
             if ns is not None and depth <= ns_depth:
                 ns = None
 
-            hit = ADDR_COMMENT.search(line)
-            if hit:
-                pending.append(int(hit.group(1), 16))
+            if line.lstrip().startswith("//"):
+                # findall, not search: a doc block may name both the handler's own
+                # address and the duplicates it also serves, on the same line.
+                hits = ADDR_COMMENT.findall(line)
+                if hits:
+                    pending.extend(int(h, 16) for h in hits)
                 continue
             d = DEFN.match(line)
             if d:
