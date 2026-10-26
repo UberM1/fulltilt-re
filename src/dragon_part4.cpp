@@ -435,12 +435,11 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	{
 		drain_phase = 3;
 
-		// UNVERIFIED: SetTiltLock (0x3f3, unshifted and pinned by the flipper sends below)
-		// to the drain. Upstream's TDrain::Message handles only Reset, which kills its
-		// pending timer and clears BallInDrainFlag, and that is the effect this path needs
-		// -- the drained ball must not count. Disassembling FT's TDrain::Message is what
-		// would settle it.
-		drain->Message(MessageCode::SetTiltLock, 0.0);
+		// Reset, not SetTiltLock: Skulduggery's drain sends 0x402 to its own drain at
+		// the equivalent point, and 0x402 is upstream's Reset under the public-code
+		// shift. That kills the drain's pending timer and clears BallInDrainFlag, which
+		// is exactly what this path needs -- the drained ball must not count.
+		drain->Message(MessageCode::Reset, 0.0);
 
 		// TPinballTable+0x6a, set only here. UNVERIFIED, but almost certainly upstream's
 		// BallInDrainFlag: upstream sets it in TDrain::Collision and clears it in

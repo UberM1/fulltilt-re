@@ -359,7 +359,7 @@ float AdvanceFathomMultiplier(float time); // 0x004243d0, island lanes' award
 // Skulduggery's single per-mode scratch counter, DAT_00435cf8. It is a hit count in Mutiny
 // and a bitfield in Sword Fight (bits 0..3 volcano, bits 4..6 parrot); FUN_0042aad0 zeroes
 // it at every mode start, which is what keeps the two uses from meeting.
-extern int ModeScratch; // DAT_00435cf8
+extern int mode_scratch_counter; // DAT_00435cf8
 
 // ---------------------------------------------------------------------------
 // Formatted announcements
@@ -400,9 +400,9 @@ void BumperControl(MessageCode code, TPinballComponent* caller)
 	// else arm -- and the crew level is neither read nor advanced.
 	if (mode == ModeMutiny)
 	{
-		if (++ModeScratch == 10)
+		if (++mode_scratch_counter == 10)
 		{
-			ModeScratch = 0;
+			mode_scratch_counter = 0;
 			AwardJackpot(0.0f);
 			return;
 		}
@@ -817,9 +817,9 @@ static void ParrotDropBankHit(TPinballComponent* caller)
 		// letters go solid; clear it a second time in the same Sword Fight and they only
 		// flash, because the bits are already set and the award cycler has already been
 		// told. Either way the bank is re-raised and the cycler runs.
-		if ((ModeScratch & 0x70) == 0)
+		if ((mode_scratch_counter & 0x70) == 0)
 		{
-			ModeScratch |= 0x70;
+			mode_scratch_counter |= 0x70;
 			lite9->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
 			lite10->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
 			lite11->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
@@ -935,7 +935,8 @@ static void VolcanoBankHitIdle(TPinballComponent* caller)
 // This is the "volcano group cleared" test, and as shipped it never passes: it reads
 // v_lite550->MessageField, a field nothing in either decompiled corpus ever writes (the
 // only two occurrences of the expression in 364 functions are the read and the clear in
-// this one function). The four target handlers put their bits in ModeScratch instead.
+// this one function). The four target handlers put their bits in the mode scratch counter
+// instead.
 // Confirmed from the listing: the function opens `mov eax,ds:[DAT_0043af84]`, which is
 // v_lite550, not the a_spot11 slot sixteen dwords earlier where the real volcano mask
 // lives -- the same one-hex-digit class of bug as the v_lite551/a_spot11 mix-up in Jail
@@ -946,7 +947,7 @@ static void VolcanoBankHitIdle(TPinballComponent* caller)
 //   * the four volcano lights are never swept (the TLightResetTimed/TLightFlasherStartTimed
 //     block below is dead);
 //   * but the *award* still happens, because AwardSpecialTreasureOrNext (FUN_00425550)
-//     runs its own `ModeScratch & 0xf == 0xf` check on the bits the handlers really set.
+//     runs its own `mode_scratch_counter & 0xf == 0xf` check on the bits the handlers really set.
 // So Sword Fight's volcano objective works, by a different route than the code reads, and
 // pays the flat 30,000 on the clearing hit as well.
 //
@@ -994,7 +995,7 @@ void VolcanoTargetControl11(MessageCode code, TPinballComponent* caller)
 		AddScoreFor(caller, 0); // 1000
 		return;
 	}
-	ModeScratch |= 0x1;
+	mode_scratch_counter |= 0x1;
 	lite551->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	AwardSpecialTreasureOrNext(VolcanoBankHitSwordFight(0.0f));
 	tabb94wave->Play(caller, "VolcanoTargetControl");
@@ -1022,7 +1023,7 @@ void VolcanoTargetControl8(MessageCode code, TPinballComponent* caller)
 		AddScoreFor(caller, 0); // 1000
 		return;
 	}
-	ModeScratch |= 0x2;
+	mode_scratch_counter |= 0x2;
 	lite550->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	AwardSpecialTreasureOrNext(VolcanoBankHitSwordFight(0.0f));
 	tabb94wave->Play(caller, "VolcanoTargetControl");
@@ -1049,7 +1050,7 @@ void VolcanoTargetControl9(MessageCode code, TPinballComponent* caller)
 		AddScoreFor(caller, 0); // 1000
 		return;
 	}
-	ModeScratch |= 0x4;
+	mode_scratch_counter |= 0x4;
 	lite549->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	AwardSpecialTreasureOrNext(VolcanoBankHitSwordFight(0.0f));
 	tabb94wave->Play(caller, "VolcanoTargetControl");
@@ -1076,7 +1077,7 @@ void VolcanoTargetControl10(MessageCode code, TPinballComponent* caller)
 		AddScoreFor(caller, 0); // 1000
 		return;
 	}
-	ModeScratch |= 0x8;
+	mode_scratch_counter |= 0x8;
 	lite548->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	// Unique to this target, and dead: a_spot8->MessageField is zeroed by the Sword Fight
 	// setter (FUN_004235c0) and read nowhere in either corpus, so this is the third
