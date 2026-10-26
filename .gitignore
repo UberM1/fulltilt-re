@@ -5,3 +5,4 @@ game/
 *.DAT
 *.iso
 *.img
+__pycache__/
