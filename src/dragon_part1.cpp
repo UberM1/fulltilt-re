@@ -212,23 +212,31 @@ static void NoteScoringComponent(TPinballComponent* caller)
 }
 
 // 0x004230a0 -- the workhorse: score this component's scoring[index].
-void AddScoreFor(TPinballComponent* caller, int index)
+//
+// Returns the amount actually credited, after the multiplier and the bonus/jackpot
+// flags. Callers use it: every "...\n%ld" display in Dragon formats this return, not
+// the nominal score.
+int AddScoreFor(TPinballComponent* caller, int index)
 {
 	NoteScoringComponent(caller);
-	TableG->AddScore(caller->get_scoring(index));
+	return TableG->AddScore(caller->get_scoring(index));
 }
 
 // 0x004230f0 -- same, with a literal score instead of a scoring-table lookup. Goes
 // through AddScore, so the weapon multiplier still applies.
-void AddScoreAt(TPinballComponent* caller, int score)
+int AddScoreAt(TPinballComponent* caller, int score)
 {
 	NoteScoringComponent(caller);
-	TableG->AddScore(score);
+	return TableG->AddScore(score);
 }
 
 // 0x00423130 -- upstream's SpecialAddScore, except that Dragon forces the multiplier to
 // 1 where upstream forces 0, and it takes the scoring component (null from the weapon
-// award). Dragon's score_multipliers is {1, 1, 2, 3, 4, 5}: multiplier == index.
+// award).
+//
+// It forces 1 rather than 0 because Full Tilt has no score_multipliers array: AddScore
+// is `field * score + ScoreAdded`, so ScoreMultiplier holds the multiplier itself and
+// its neutral value is 1. Upstream's 0 is a 3D Pinball-ism, where the field is an index.
 void DragonSpecialAddScore(TPinballComponent* caller, int score)
 {
 	const auto bonus = TableG->BonusScoreFlag;

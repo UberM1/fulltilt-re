@@ -3,7 +3,8 @@
 Derived purely from `decomp/pirates/functions/*.c` (Ghidra output, 178 functions) plus
 `decomp/pirates_rest/functions/*.c` (186 more, 0x42d000–0x435000 — **this is where the
 dispatcher lives**), every `DAT_` pre-annotated with its component tag name; the objdump
-listings in `decomp/pirates/asm/*.txt`; static tables read out of
+listings in `decomp/pirates/asm/*.txt` and `decomp/pirates_rest/asm/*.txt`, plus listings
+regenerated for the 14 mid-range helpers with `analysis/disasm.py`; static tables read out of
 `binaries/win95/PIRATES.EXE`; and the conventions established in
 `analysis/dragon-quest-system.md` / `analysis/dragon-scoring-handlers.md`. No Ghidra/rea
 runs. Cross-checked against the Skulduggery section of `docs/dragon-rules-spec.md`
@@ -98,15 +99,62 @@ belongs to whoever owns it.
   `%ld`-bearing format line, not a name — but the operand itself stays **[U]** at every
   call site unless read from the listing.
 
-### 0.3 Asm cross-check
+### 0.3 Asm cross-check, and the recovered `sprintf` operands
 
-`decomp/pirates/asm/*.txt` exists for the 69 named handlers (not for `pirates_rest`).
-I re-read the riskiest body in this document — `Pirates_s_magnet1_Control`, whose Ghidra
-output is almost entirely stack-byte noise — against `asm/0x42a470.txt`, and every claim
-in §5.4 survives, with one refinement: the keg light is extinguished as
-`v_lite560->Message(0x14, 2.0f)` (a 2-second fade, not an immediate off), and the award is
-`push 0x186a0; push caller; call 0x423310` = **`AddScoreAt(caller, 100000)`** —
-100,000 confirmed from the instruction stream. **[C]**
+Listings now exist for both ranges: `decomp/pirates/asm/*.txt` (the 69 named handlers) and
+`decomp/pirates_rest/asm/*.txt` (186 functions, 0x42d000–0x435000). For the 14 *helpers* in
+the 0x423000–0x42d000 range that are neither (`FUN_00423720`, `FUN_00425000`,
+`FUN_00425230`, `FUN_00425ab0`, and the eight mode controllers) I regenerated listings with
+`python3 analysis/disasm.py binaries/win95/PIRATES.EXE decomp/pirates <out>`; the output is
+**byte-identical** to the supplied `pirates_rest` listings on the function they overlap
+(`0x42d590`), so it is the same pipeline and can be trusted the same way.
+
+Spot-check first: `Pirates_s_magnet1_Control`, the noisiest Ghidra body in this document and
+the basis of §5.4, read against `asm/0x42a470.txt`. Every claim survives, with one
+refinement — the keg light is extinguished as `v_lite560->Message(0x14, 2.0f)` (a 2-second
+fade, not an immediate off) — and the award is `push 0x186a0; push caller; call 0x423310`
+= **`AddScoreAt(caller, 100000)`**, confirmed from the instruction stream. **[C]**
+
+#### The call shape **[C]**
+
+Every formatted display in the corpus compiles to one fixed pattern, and it is what makes
+the operands recoverable:
+
+```
+push <VALUE>            ; the sprintf vararg  <-- Ghidra drops this
+push 0x0                ; get_rc_string's 2nd argument
+push <string id>
+call 0x409730            ; get_rc_string(id, 0)  -- __stdcall, pops 8
+lea  ecx,[esp+N]         ; the output buffer
+push eax                 ; the format string
+push ecx                 ; the buffer
+call 0x42dfaf            ; sprintf(buf, fmt, VALUE)
+```
+
+Two corrections fall out of this on their own: **`FUN_00409730` takes two arguments**
+(`id`, `0`), not the one Ghidra models; and the vararg is the **single dword pushed
+immediately before `push 0x0; push <id>`** — which lines up exactly with
+`FUN_0042dfaf`'s own `&stack0x0000000c`. All 50 call sites follow it without exception.
+
+#### What the operands are **[C]**
+
+| Operand form | Sites | Meaning |
+|---|---|---|
+| `eax` straight after `call 0x4232c0` / `0x423310` / `0x423350` | 23 | **the score just added** — the three scoring wrappers all end `call 0x419f10` + `ret` with no `mov eax`, so they return `TPinballTable::AddScore`'s value |
+| `eax` after `mode_timer->Message(0x48)` then `cdq; mov ecx,0x3e8; idiv ecx` | 8 | **whole seconds remaining** (the timer answers in ms) |
+| `ebx`/`eax` after a `lea`/`shl` multiply chain | 6 | a drain-bonus term (§6.1) |
+| `caller->get_scoring(level)` | 2 | the new bumper value (§6) |
+
+That "the wrappers return the score added" is **[P]** rather than **[C]** for the *reason*
+— `FUN_00419f10` is engine code outside this corpus — but **[C]** for the mechanism: the
+value in `eax` at the push is whatever `AddScore` returned, and upstream's
+`TPinballTable::AddScore` returns the score it added.
+
+So **string 3003 (`0xbbb`) is the generic "score awarded" line**, used by the magnets, the
+ship sink, the ship wire ramp, the coin award, the Bermuda progressive and the Peg Leg's
+Loot total alike, with the awarded score as its `%ld`. **[C]** Open item 2 of the previous
+revision is closed; the per-site numbers it affected are listed where they belong (§1.4,
+§6, §6.1).
 
 ---
 
@@ -235,6 +283,29 @@ the bonus controller, and **states 0xc / 0xd do have controllers** — they simp
    * state 10: the parrot and volcano banks are gated on it and clearing either awards a
      collectible → **Sword Fight**.
 
+### 1.3.2 An eighth confirmation: the mode-name strings **[C]**
+
+Recovering the `0x50` tick operands (§0.3) turned out to settle the state map a seventh and
+eighth time, and this is the strongest evidence in the document because it matches the
+manual's **own mode-name string ids** one-to-one against controllers. Every mode
+controller's `0x50` arm formats "seconds remaining" into its own name string:
+
+| Controller | `0x50` format string | Manual's name for that id |
+|---|---|---|
+| `FUN_0042ad70` (state 4) | **3016** | Attack Ship |
+| `FUN_0042b090` (state 8) | **3053** | Treasure Hunt |
+| `FUN_0042b420` (state 7) | **3025** | Tavern |
+| `FUN_0042c070` (state 5) | **3045** | Bermuda Triangle |
+| `FUN_0042c430` (state 6) | *the buffer `DAT_00435d50`* | Storm — see below |
+| `FUN_0042ca00` (state 9) | **3051** | Mutiny |
+| `FUN_0042cc10` (state 10) | **3052** | Sword Fight |
+| `FUN_0042cfc0` (state 0xb) | **3054** | Peg Leg's Loot |
+
+All eight agree with the assignment. Storm is the elegant case: it has no fixed name, so
+`FUN_0042c430`'s `0x4f` **`strcpy`s the chosen severity string (3046–3049) into the buffer
+`DAT_00435d50`** and the `0x50` tick then uses that buffer as its own format string —
+which is why the severity line carries a `%ld` and why the copy exists at all. **[C]**
+
 ### 1.4 Hint strings do *not* follow selection order **[C]**
 
 Each controller's `0x4f` prints its own hint with `time = -1.0` (persistent):
@@ -329,22 +400,29 @@ branch with caller type `0x40e` (1038 `light_sweeps`) arms `mode_timer` and broa
 
 ### 2.3 Start bonus and time limit **[C]** for the values present
 
-| State | Mode | Start bonus | Time limit (s) | Sweep id |
-|---|---|---|---|---|
-| 4 | Attack Ship | 200,000 | **[U]** (float lost) | **[U]** |
-| 5 | Bermuda Triangle | 200,000 | **31.14** | 8.0 |
-| 6 | Storm | 300,000 | **24.14** | 9.0 |
-| 7 | Tavern | 200,000 | **27.40** | 7.0 |
-| 8 | Treasure Hunt | 300,000 | **30.68** | `FUN_00424580()` → 1…6 |
-| 9 | Mutiny | 100,000 | **[U]** | **[U]** |
-| 10 | Sword Fight | 250,000 | **[U]** | **[U]** |
-| 0xb | Peg Leg's Loot | 1,000,000 | **[U]** | — (none) |
-| 0x10 | drain bonus | — | 30.0 | — |
+All eight are now read from the instruction stream (`push <float>; push 0x45` immediately
+before the `mode_timer->Message` call) — the four that Ghidra dropped as lost float
+arguments are the last four rows: **[C]**
 
-The four `[U]`s are the Ghidra "lost float argument" artifact described in
-`dragon-scoring-handlers.md` §0.3: the call decompiles as
-`mode_timer->Message(0x45)` with no second operand. Recoverable only by hand
-disassembly.
+| State | Mode | Start bonus | Time limit (s) | Raw float | Sweep id |
+|---|---|---|---|---|---|
+| 4 | Attack Ship | 200,000 | **29.38** | `0x41eb0a3d` | 0.0 |
+| 5 | Bermuda Triangle | 200,000 | **31.14** | `0x41f91eb8` | 8.0 |
+| 6 | Storm | 300,000 | **24.14** | `0x41c11eb8` | 9.0 |
+| 7 | Tavern | 200,000 | **27.40** | `0x41db3333` | 7.0 |
+| 8 | Treasure Hunt | 300,000 | **30.68** | `0x41f570a4` | `FUN_00424580()` → 1…6 |
+| 9 | Mutiny | 100,000 | **48.28** | `0x42411eb8` | 10.0 |
+| 10 | Sword Fight | 250,000 | **29.38** | `0x41eb0a3d` | 11.0 |
+| 0xb | Peg Leg's Loot | 1,000,000 | **30.68** | `0x41f570a4` | — (none) |
+| 0x10 | drain bonus | — | 30.0 | `0x41f00000` | — |
+
+Three observations worth keeping **[C]**: **Mutiny is by far the longest mode at 48.28 s**
+and also the cheapest to start (100,000) — consistent with its objective being a raw
+bumper-hit count; Attack Ship and Sword Fight **share** 29.38 s and Treasure Hunt and
+Peg Leg's Loot **share** 30.68 s, i.e. the designers reused four distinct wave lengths
+across eight modes; and Peg Leg's Loot is the only mode with **no light sweep** (the grep
+for `0x1b` in `0x42cfc0` is empty), which is why its `0x4f` arms the timer directly instead
+of waiting for the sweep to finish.
 
 > **Disagreement with the manual [C].** The manual says "**Starting a mode is worth
 > 200,000 points**". The binary pays a **different amount per mode** — 100,000 (Mutiny)
@@ -657,14 +735,25 @@ releases exactly what the brig holds**, between 1 and 3 balls — flash the thre
 `0x53`: as Lava-Ball — only at `BallsInPlay == 1`, then restore, disarm `a_kick1`, state 2,
 `FUN_00425d50(0)`, `FUN_00425310(1)`.
 
-> **Suspected mis-decompile or original bug [P].** `0x4f` contains
-> `*(undefined4 *)(v_lite551 + 6) = 0xf;` immediately before `FUN_004253a0()`, but
-> `FUN_004253a0` reads the volcano mask from **`a_spot11->MessageField`**, not from
-> `v_lite551`'s. Writing `0xf` into `a_spot11->MessageField` would mean "light all four
-> volcano lights", which is clearly the intent. Either the tag resolution is off by one
-> slot or the original code names the wrong component. There is **no asm listing for
-> `0x42d590`** (`decomp/pirates/asm/` covers only the 69 named handlers), so this cannot
-> be settled here. **[U]**
+> **Settled from the listing: it is an original-source bug, not a mis-decompile. [C]**
+> `asm/0x42d590.txt` reads
+> ```
+> 42d5de:  mov   eax,ds:0x43af6c          ; v_lite551
+> 42d5e3:  mov   DWORD PTR [eax+0x6],0xf  ; ->MessageField = 0xf
+> 42d5ea:  call  0x4253a0                 ; RestoreVolcanoLights()
+> ```
+> so Ghidra's tag resolution was right: the write really does target **`v_lite551`**
+> (`DAT_0043af6c`), one of the four volcano *display* lights, and not `a_spot11`
+> (`DAT_0043af1c`) where the volcano mask lives. `FUN_004253a0` then re-derives all four
+> lights from `a_spot11->MessageField`, which is untouched.
+>
+> The write is therefore **dead**: `v_lite551->MessageField` is read nowhere in either
+> corpus (it is the only occurrence of that expression in 364 functions), and
+> `FUN_004253a0()` just restores whatever the volcano mask already said. The intent was
+> plainly `a_spot11->MessageField = 0xf` — "light all four volcano lights for the duration
+> of Jail Break" — so **Jail Break silently fails to light the volcano bank**, and the two
+> globals differ by a single hex digit in the source (`af6c` vs `af1c`). A port should
+> decide deliberately whether to reproduce the bug. **[C]**
 
 ### State 0x11 — end-of-game table lockdown (`FUN_0042d730`) **[C]**
 
@@ -798,6 +887,33 @@ explains the orphan engine string **3006 "Port O' Call"** as the eighth group's 
 
 The wind *letter* lights are only five (`v_lite533`…`v_lite537` = W-I-N-D-S) and are
 rotated right by either flipper (§6).
+
+**Eight groups for six names — resolved [C].** Each lane handler formats its score into its
+own name string, and the recovered `sprintf` operands (§0.3) give the full mapping. Two
+names cover two lanes each, which is exactly the arithmetic:
+
+| Lane handler | Light group | Name string | Wind |
+|---|---|---|---|
+| `a_ramp8` (0x428b70) | `left_island` | **3004** | Island Breeze (left island ramp) |
+| `a_ramp5` (0x428d80) | `right_wind` | **3005** | Nor'Easter (right island ramp) |
+| `s_trip3` (0x429210) | `left_orbit` | **3008** | Tradewind Loop |
+| `s_trip8` (0x429400) | `right_orbit` | **3008** | Tradewind Loop *(same string)* |
+| `a_roll2` (0x4298f0) | `south_wind` | **3010** | Sou'Eastern |
+| `a_roll9` (0x429ac0) | `east_wind_1` | **3011** | Easterly |
+| `a_roll8` (0x429c30) | `east_wind_2` | **3011** | Easterly *(same string)* |
+| `a_roll6` (0x429da0) | `west_wind` | **3012** | Westerly |
+
+✓✓ This is the manual's six winds exactly, including "**Tradewinds** (left *and* right
+orbit)" as one name over two lanes — and it adds that **Easterly** is likewise one name
+over the two east wind lanes, which is why Treasure Hunt can bury an award at "either east
+wind lane".
+
+**And "Port O' Call" is not a wind at all [C].** String **3006** is displayed by
+`Pirates_a_ramp13_Control` (0x428f70, 50,000, triggered on `0x56` ramp-traversal) — the
+**Cannon Wire Ramp**. The spec's `[GAP]` calling 3006 "a seventh wind name not in the
+manual" is withdrawn: it is the name of the cannon ramp, and the manual's six winds are
+complete. (For the same reason string **3007** "In The Brig" belongs to `s_hole19`, and
+**3002** "Secret Hideaway" to the three hideaways plus `a_sink9`/`a_sink12`.)
 
 ---
 
@@ -993,7 +1109,10 @@ its mode-local accrual on top. **[C]**
   is always `get_scoring(a_bump2->MessageField)`, i.e. the seven-entry table
   `1500, 3000, 4500, 6000, 7500, 9000, 10500`. ✓✓ manual "+1,500 per 12 hits up to a
   maximum of 10,500". **[C]** (Dragon's equivalent counter is 10; the manual's "every 12"
-  is right for this table.)
+  is right for this table.) The recovered `sprintf` operand settles what the `%ld` in
+  3001 / 3044 shows: `caller->get_scoring(newLevel)` — i.e. **the new per-bumper value**,
+  so the lines read "Crew Added / Bumpers Now 6000" and, from `FUN_00425000`
+  (`get_scoring(6)`), "Max Crew / Bumpers Now **10500**". ✓ manual. **[C]**
 * **Brig** — `s_hole19` (`0x42` ball captured, string 3007 "In The Brig") →
   `FUN_00424210`: `TableG+0x192 -= 1`, `DAT_00435d3c += 1`; at 2 enable `s_oneway12`; at
   **3** start Jail Break. `s_oneway7` is the release: `DAT_00435d3c -= 1`,
@@ -1002,7 +1121,21 @@ its mode-local accrual on top. **[C]**
 ### 6.1 Drain bonus — states 0x10 / 0x11, `FUN_0042b820` **[C]**
 
 `DAT_00435d38` = step, `DAT_00435d00` = accumulator, `DAT_00435d34` = "skip the display"
-(set when a flipper press fast-forwards it, message `1`). One line per step:
+(set when a flipper press fast-forwards it, message `1`). One line per step.
+
+All four multipliers are now confirmed **from the instruction stream**, independent of
+Ghidra — the compiler emitted them as `lea`/`shl` chains rather than `imul`, so they are
+worth showing: **[C]**
+
+| Step | Chain in `asm/0x42b820.txt` | Product |
+|---|---|---|
+| 0 | `5·5·5·5 · x` then `shl 4` → `625·16` | **×10,000** |
+| 1 | `(32m−m)·4+m = 125m`, `·5·5` → `3125m`, `shl 6` → `·64` | **×200,000** |
+| 2 | `(64p+p)·3 = 195p`, `·4+p = 781p`, `·4+p = 3125p`, `·5`, `shl 4` | **×250,000** |
+| 3 | `(32t−t)·4+t = 125t`, `·5·5` → `3125t`, `shl 5` → `·32` | **×100,000** |
+
+and the `sprintf` operand at each step is the **term value already multiplied**, so the
+display reads "<term name>: <points>". **[C]**
 
 | Step | Term | Value | String |
 |---|---|---|---|
@@ -1077,7 +1210,7 @@ order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
 
 ## 9. Open items
 
-**Closed by reading `FUN_0042d850` / `FUN_0042d900` and the `pirates_rest` corpus:**
+**Closed by the dispatcher (`FUN_0042d850` / `FUN_0042d900`) and the `pirates_rest` corpus:**
 
 * ~~the dispatcher itself~~ → §0. The mode half of the state table is confirmed by the
   primary source and agrees exactly with the `DAT_0043d0f0` reconstruction; four non-mode
@@ -1088,45 +1221,57 @@ order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
   sink and/or the brig; Jail Break `+= BallsInBrig`; both end at `BallsInPlay == 1`;
   end-of-game (`0x11`) returns anything the brig still holds.
 * ~~GOLD bit 8 has no writer~~ → §4.2. It is `s_trip8`, the right orbit.
-* ~~what string 3003 (`0xbbb`) is~~ → §0.2. `FUN_0042dfaf` is `sprintf`, so 3003 is a
-  format line; the *operand* at each call site remains unrecovered (below).
 
-**Still open:**
+**Closed by the objdump listings:**
 
-1. **Four of eight mode time limits** are still lost to the Ghidra float-argument artifact
-   (Attack Ship, Mutiny, Sword Fight, Peg Leg's Loot), along with their light-sweep ids
-   (§2.3). These are in handlers that *do* have objdump listings
-   (`decomp/pirates/asm/0x42ad70.txt`, `0x42ca00.txt`, `0x42cc10.txt`, `0x42cfc0.txt`),
-   so they are mechanically recoverable — I have not read them. **[U]**
-2. **Every `sprintf` call site has unrecovered numeric varargs.** `FUN_0042dfaf` takes
-   `(buf, fmt, ...)` and Ghidra models only the two fixed parameters, so each displayed
-   value in this document that comes from a `get_rc_string` + `sprintf` pair is
-   un-verified as to *what number* is shown (the scores themselves are separate
-   `AddScore` calls and are confirmed). Recoverable from the listings — the magnet
-   spot-check in §0.3 shows the pattern. **[U]**
-3. **`FUN_0042d590`'s `v_lite551->MessageField = 0xf`** (§3, Jail Break) — almost certainly
-   meant to be `a_spot11->MessageField`. No asm listing exists for `pirates_rest`
-   addresses, so this cannot be settled from what is on disk. **[U]**
-4. `Pirates_a_sink4_Control` (`0x4283f0`) decompiles into stack-byte noise in three of its
-   five arms. Its listing `decomp/pirates/asm/0x4283f0.txt` exists; the state-9 and
-   state-0xb constants should be re-read from it before being trusted. **[P]**
-5. `DAT_00435d04` is shared by three different cursors — the Treasure Hunt "X" selector
+* ~~the `sprintf` operands~~ → §0.3. The call shape is uniform across all 50 sites, so
+  every `%ld` is now accounted for: the awarded score (23 sites), whole seconds remaining
+  (8), a drain-bonus term (6), the new bumper value (2). Two incidental corrections fell
+  out: `FUN_00409730` takes **two** arguments, and the three scoring wrappers **return**
+  the score they added.
+* ~~the four missing mode time limits~~ → §2.3. Attack Ship **29.38**, Mutiny **48.28**,
+  Sword Fight **29.38**, Peg Leg's Loot **30.68**, with their light-sweep ids
+  (0.0 / 10.0 / 11.0 / none).
+* ~~`v_lite551->MessageField = 0xf`~~ → §3, Jail Break. Not a mis-decompile: the listing
+  confirms the write targets `v_lite551`, so it is an **original-source bug** (`af6c` for
+  `af1c`) and Jail Break never lights the volcano bank.
+* ~~the eighth wind group~~ → §4.6. Resolved by the recovered name-string operands, which
+  give all eight lanes: **Tradewind Loop** and **Easterly** each cover two lanes, giving
+  the manual's six winds over eight groups, and string 3006 **"Port O' Call" is the cannon
+  wire ramp**, not a wind — so the spec's `[GAP]` on a seventh wind name is withdrawn.
+* ~~the drain-bonus multipliers~~ → §6.1, now read from the `lea`/`shl` chains rather than
+  from Ghidra: ×10,000 / ×200,000 / ×250,000 / ×100,000.
+* **A seventh and eighth confirmation of the state map** arrived as a side effect
+  (§1.3.2): every mode controller's `0x50` arm formats into the manual's own name string
+  for that mode (3016 / 3053 / 3025 / 3045 / severity / 3051 / 3052 / 3054), eight for
+  eight.
+
+**Still open — and these are genuinely open, not awaiting a listing:**
+
+1. `Pirates_a_sink4_Control` (`0x4283f0`) decompiles into stack-byte noise in three of its
+   five arms. Its listing exists and the two `0xbbb` operands in it are now accounted for
+   (§0.3), but I have **not** re-read the state-9 and state-0xb arms instruction by
+   instruction, so the lights those arms touch and their timings should be re-checked
+   before being relied on. **[P]** — the one remaining item that *is* just reading.
+2. `DAT_00435d04` is shared by three different cursors — the Treasure Hunt "X" selector
    (`FUN_00424580`), the Bermuda indicated-wind selector (`FUN_00425110` /
    `FUN_00425230`), and the Sword Fight award selector (`FUN_00425440`) — and
-   `FUN_0042aad0` zeroes it at every mode start. The dispatcher does not touch it, so
-   whether the aliasing is a deliberate single "wheel position" concept or a bug is
-   **[U]**.
-6. `a_kout2` is armed by Storm and `a_kout1` by Bermuda, but both route to one handler that
-   checks neither the mode nor which kickout fired, and `FUN_0042d730` disarms both at end
-   of game. Whether a disarmed kickout can still capture — i.e. whether the flat 1,000,000
-   is reachable outside its mode — depends on `0x4b`/`0x4c` semantics inside the component
-   class, which is engine code and not in this corpus. **[U]**
-7. **The eighth wind group.** `FUN_00425110` enumerates eight groups for six manual wind
-   names; the orphan engine string 3006 "Port O' Call" is the obvious candidate for the
-   extra one, but nothing in the rules code names a group. Settling it needs the
-   playfield diagram from `FULLTILT.HLP`. **[P]**
-8. **`simple_components[]` has 192 entries** against the score table's 74, so ~118
+   `FUN_0042aad0` zeroes it at every mode start. The dispatcher does not touch it. Whether
+   the aliasing is a deliberate single "wheel position" concept or a second bug of the
+   `v_lite551` kind cannot be decided from the code alone; it needs the table in motion.
+   **[U]**
+3. `0x4b` / `0x4c` semantics. Both are sent to magnets and kickouts as
+   "enable / disable the holding field", and `FUN_0042d730` disarms every one of them at
+   end of game — but whether a *disarmed* device can still capture a ball (and so whether
+   the flat 1,000,000 of `a_kout1`/`a_kout2` is reachable outside its mode) is decided
+   inside the component class. **That is engine code and is not in this corpus at all**, so
+   no amount of reading the table rules will settle it. **[U]**
+4. **`simple_components[]` has 192 entries** against the score table's 74, so ~118
    components are bound with no handler of their own. I used it only to resolve
-   `v_lite527`; a full sweep of it against the lights referenced in this document has not
-   been done, and would be the cheapest way to find any remaining "who writes this light"
-   gap. **[U]**
+   `v_lite527`; a full sweep against the lights referenced in this document has not been
+   done, and would be the cheapest way to find any remaining "who writes this light" gap.
+   **[U]**
+5. Mode **success vs. timeout** (§2.4). There is no discriminator anywhere in the
+   dispatcher or the eight controllers, so "completed" means "started". **[C]** for the
+   mechanism; whether that is the intended design is not answerable from the binary.
+   **[U]**
