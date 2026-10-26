@@ -111,10 +111,6 @@ def main(exe, matches_txt, out_path):
     for scores, nm in arrays.items():
         L.append(f"int {nm}[{len(scores)}] = {{{', '.join(str(x) for x in scores)}}};")
 
-    L.append("\n// Component tags. Names are the group names stored in the DAT.")
-    for name in OrderedDict((n, None) for n, _v, _s in rows):
-        L.append(f'component_tag<TPinballComponent> tag_{ident(name)} = {{"{name}"}};')
-
     L.append("\n// Handlers. Bodies are TODO; see the address and the reference handler.")
     for va, nm in handlers.items():
         ref, score = near.get(va, (None, 0.0))
@@ -133,7 +129,13 @@ def main(exe, matches_txt, out_path):
 
     L.append(f"\n}} // namespace {lower}\n")
 
-    L.append(f"component_info {lower}_score_components[{len(rows)}]\n{{")
+    # Tags sit outside the namespace: the component table below names them
+    # unqualified, and they are the binding surface control::make_links walks.
+    L.append("// Component tags. Names are the group names stored in the DAT.")
+    for name in OrderedDict((n, None) for n, _v, _s in rows):
+        L.append(f'component_tag<TPinballComponent> tag_{ident(name)} = {{"{name}"}};')
+
+    L.append(f"\ncomponent_info {lower}_score_components[{len(rows)}]\n{{")
     for name, va, scores in rows:
         fn = f"{lower}::{handlers[va]}Control"
         arr = arrays.get(scores)
