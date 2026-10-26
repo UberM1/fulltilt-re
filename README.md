@@ -123,21 +123,54 @@ they were how the rules region was first located, and their 10 named exports
 
 ## Status
 
-- [x] Locate the rules region (rva `0x023000`–`0x02d000`, ~40 KB)
+- [x] Locate the rules region (rva `0x023000`-`0x02d000`, ~40 KB)
 - [x] Validate the extraction method against `control.cpp`
 - [x] Dump component/handler/score tables for both targets
-- [ ] Tooling: Ghidra + `rea` MCP, so handlers can be decompiled from the agent
-- [ ] Decompile the 64 Dragon handlers, using CADET's equivalents as reference
-- [ ] Mission/rank system (Space Cadet's is 17 missions, 9 ranks)
-- [ ] `control_dragon.cpp` against a per-table interface upstream doesn't have yet
-- [ ] Verify against an independent rules spec (`docs/`), not just the binary
+- [x] Tooling: Ghidra 12.1.2 + `rea`, packaged in `nixos_conf` as
+      `modules/features-nixos/home/reversing.nix`
+- [x] Recover Full Tilt's `MessageCode` numbering (upstream + 10, `ControlCollision` + 11)
+- [x] Decompile every handler: 159 CADET, 159 Dragon, 178 Skulduggery functions
+- [x] Classify each handler against its nearest named Space Cadet equivalent
+- [x] Generate `src/control_dragon.cpp` / `src/control_pirates.cpp` skeletons
+- [ ] Fill in the handler bodies (50/64 Dragon and 51/69 Skulduggery have a template)
+- [ ] The quest system -- it lives in unnamed functions, not in the component table
+- [ ] A per-table interface upstream does not have yet
+- [ ] The 7 object types the engine does not implement (1034-1038, 1042, 1043)
+
+## Pipeline
+
+```
+dump_components.py   score_components[] out of .data: names, handlers, scores
+make_seeds.py        -> REA_GHIDRA_SEED_FILE; Ghidra cannot find these functions
+                        on its own, nothing calls them
+rea decompile-all    seeded, headless, ~160 functions per binary
+match_handlers.py    nearest named Space Cadet handler, by normalised token stream
+message_codes.py     Full Tilt's MessageCode numbering, by alignment with control.cpp
+gen_control.py       -> src/control_<table>.cpp: tables exact, bodies TODO
+```
+
+Everything regenerates from `binaries/` plus the scripts, which is why `decomp/`
+and `src/` are not tracked.
+
+### Triage
+
+| | components | handlers | with a Space Cadet template | table-specific |
+|---|---|---|---|---|
+| Dragon's Keep | 75 | 64 | 50 | 14 |
+| Skulduggery | 74 | 69 | 51 | 18 |
+
+Skulduggery's 18 include all six magnets (`s_magnet1`-`6`), which score identically
+against every Space Cadet handler and are therefore one new behaviour, not six.
+Dragon's 14 are dominated by the sinks, which is where the manual puts the dragon-egg
+and treasure collection -- two independent sources pointing at the same components.
 
 ## Layout
 
 ```
-analysis/   compare.py, dump_components.py, and their output
+analysis/   the scripts above, and their output
 binaries/   win95/ (PE32 i386, the real targets) and win31/ (NE 16-bit)
 game/       playable 32-bit install from the CD
-docs/       independently sourced rules documentation
+docs/       FULLTILT.HLP (the CD's manual) and a rules spec drawn from it
+src/        generated control_<table>.cpp skeletons (regenerable, untracked)
 tools/      Ghidra / rea setup
 ```

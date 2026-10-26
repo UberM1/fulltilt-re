@@ -7,3 +7,5 @@ game/
 *.img
 __pycache__/
 decomp/
+decomp/
+src/
