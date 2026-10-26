@@ -76,71 +76,78 @@ namespace pirates {
 // Declared as plain extern pointers, dragon_part3.cpp's form, because the tags already
 // exist in the generated control_pirates.cpp and pirates_part1.cpp binds several of these
 // same components; a second definition here would collide.
+//
+// Names follow dragon_part3.cpp: lights drop the binary's v_ prefix (v_lite560 -> lite560),
+// everything else keeps its tag name. pirates_part1.cpp agrees on the lights and on the
+// sounds but shortens four of the components (a_blocc -> blocC, a_bloce -> blocE,
+// a_blocf -> blocF, a_blocg -> blocG, a_kick2 -> kick2, s_bwal610 -> bwal610) and types the
+// blockers TBlocker* and the groups TLightGroup*. Whichever file ends up owning the single
+// definition should settle that; the tag names used below are the ones part3 would use.
 
 extern TTextBox* info_text_box; // DAT_0043ad3c -- and its MessageField is the mode register
 extern TPinballTable* TableG;   // DAT_0043ab9c
 
 // Ship letters S-H-I-P-! -- cleared when Peg Leg's Loot takes the ball.
-extern TLight* v_lite4;
-extern TLight* v_lite5;
-extern TLight* v_lite6;
-extern TLight* v_lite7;
-extern TLight* v_lite8;
+extern TLight* lite4;
+extern TLight* lite5;
+extern TLight* lite6;
+extern TLight* lite7;
+extern TLight* lite8;
 
 // GOLD. v_lite524 doubles as the 4-bit mask (bit 0 a_sink17, bit 1 a_sink15,
 // bit 2 a_sink14, bit 3 the right orbit s_trip8); see pirates-rules.md §4.2.
-extern TLight* v_lite524;
-extern TLight* v_lite525;
-extern TLight* v_lite526;
-extern TLight* v_lite527;
+extern TLight* lite524;
+extern TLight* lite525;
+extern TLight* lite526;
+extern TLight* lite527;
 
 // The six Treasure Hunt "X" lights. A flashing X is the armed one.
-extern TLight* v_mlite44;   // on a_sink17
-extern TLight* v_mlite51;   // on the ship sink; lit solid by Peg Leg's Loot
-extern TLight* v_mlite104;  // on a_sink12
-extern TLight* v_mlite106;  // on a_sink14
-extern TLight* v_mlite107;  // on a_sink15
-extern TLight* v_mlite110; // on a_sink9
+extern TLight* mlite44;   // on a_sink17
+extern TLight* mlite51;   // on the ship sink; lit solid by Peg Leg's Loot
+extern TLight* mlite104;  // on a_sink12
+extern TLight* mlite106;  // on a_sink14
+extern TLight* mlite107;  // on a_sink15
+extern TLight* mlite110; // on a_sink9
 
 // Hideaway "ball is coming back out of here" lights, flashed for 2 s on every entry.
-extern TLight* v_lite519; // a_sink17
-extern TLight* v_lite520; // a_sink15
-extern TLight* v_lite521; // a_sink14
+extern TLight* lite519; // a_sink17
+extern TLight* lite520; // a_sink15
+extern TLight* lite521; // a_sink14
 
-extern TLight* v_lite504; // launch-lane / playfield routing pair, swapped by s_trip1 and
-extern TLight* v_lite505; // s_trip2 together with the a_bloce blocker
+extern TLight* lite504; // launch-lane / playfield routing pair, swapped by s_trip1 and
+extern TLight* lite505; // s_trip2 together with the a_bloce blocker
 
-extern TLight* v_lite533; // the "W" of WINDS, lit by s_trip11
-extern TLight* v_lite544; // flashed at ball serve; its own handler is at 0x0042a260
-extern TLight* v_lite545; // tavern window light hit by a_sink7
-extern TLight* v_lite546; // tavern window light hit by a_sink6
-extern TLight* v_lite547; // tavern window light hit by a_sink5; also the 3-bit tavern mask
-extern TLight* v_lite567; // ship-sink indicator
-extern TLight* v_lite568; // ship-sink extra ball, collected in normal play only
-extern TLight* v_lite569; // Shoot Again; its own handler (0x00426080) steps the phase
-extern TLight* v_lite570; // Ship's Hold -- lit by the ship sink during Mutiny
+extern TLight* lite533; // the "W" of WINDS, lit by s_trip11
+extern TLight* lite544; // flashed at ball serve; its own handler is at 0x0042a260
+extern TLight* lite545; // tavern window light hit by a_sink7
+extern TLight* lite546; // tavern window light hit by a_sink6
+extern TLight* lite547; // tavern window light hit by a_sink5; also the 3-bit tavern mask
+extern TLight* lite567; // ship-sink indicator
+extern TLight* lite568; // ship-sink extra ball, collected in normal play only
+extern TLight* lite569; // Shoot Again; its own handler (0x00426080) steps the phase
+extern TLight* lite570; // Ship's Hold -- lit by the ship sink during Mutiny
 
 // Wind-lane indicator lights. Each lane has two singles plus its whole group; the ladder
 // below lights one, two or all of them by the group's on-count.
-extern TLight* v_lite600; // left orbit
-extern TLight* v_lite601;
-extern TLight* v_lite603; // left island ramp
-extern TLight* v_lite604;
-extern TLight* v_lite608; // right orbit
-extern TLight* v_lite609;
-extern TLight* v_lite611; // right island ramp
-extern TLight* v_lite612;
+extern TLight* lite600; // left orbit
+extern TLight* lite601;
+extern TLight* lite603; // left island ramp
+extern TLight* lite604;
+extern TLight* lite608; // right orbit
+extern TLight* lite609;
+extern TLight* lite611; // right island ramp
+extern TLight* lite612;
 
 // Combo lights, two singles plus the group per lane. The group's on-count is the combo
 // tier, and it is cleared by ScoringComponentReplaced -- see WindLaneTraversal.
-extern TLight* v_lite626; // right island ramp
-extern TLight* v_lite627;
-extern TLight* v_lite629; // left island ramp
-extern TLight* v_lite630;
-extern TLight* v_lite631; // left orbit
-extern TLight* v_lite632;
-extern TLight* v_lite634; // right orbit
-extern TLight* v_lite635;
+extern TLight* lite626; // right island ramp
+extern TLight* lite627;
+extern TLight* lite629; // left island ramp
+extern TLight* lite630;
+extern TLight* lite631; // left orbit
+extern TLight* lite632;
+extern TLight* lite634; // right orbit
+extern TLight* lite635;
 
 extern TPinballComponent* left_island_light_group;
 extern TPinballComponent* left_island_combo_light_group;
@@ -180,12 +187,12 @@ extern TPinballComponent* a_flip4;
 
 // The keg lights, one per magnet. Lit by the arming routine, extinguished with a 2.0 s
 // fade when the magnet fires.
-extern TLight* v_lite560;
-extern TLight* v_lite561;
-extern TLight* v_lite562;
-extern TLight* v_lite563;
-extern TLight* v_lite564;
-extern TLight* v_lite565;
+extern TLight* lite560;
+extern TLight* lite561;
+extern TLight* lite562;
+extern TLight* lite563;
+extern TLight* lite564;
+extern TLight* lite565;
 
 extern TSound* tabb08wave; // tavern sink
 extern TSound* tabb11wave; // hideaway swallow
@@ -200,13 +207,21 @@ extern TSound* tabb57wave; // "Ship Captured"
 extern TSound* tabb70wave; // hideaway during Bermuda Triangle
 extern TSound* tabb87wave; // keg magnet grab
 
-// DAT_0043aaa0 -- eight symbol-font strings indexed by the tavern window mask (0..7), so
-// the display shows which of the three windows are collected. The Tavern mode setter
-// (FUN_00423520) uses the same base address as its own start glyph, i.e. entry 0.
-extern const char* const TavernWindowGlyphs[8];
+// DAT_0043aaa0 -- the announcement tokens, addressed as `lea edx,[ecx*4+0x43aaa0]`, so
+// this is a table of 4-byte strings stored in place rather than an array of pointers.
+// Entries 0..7 are indexed by the tavern window mask, which is why the display shows which
+// of the three windows are collected; the Tavern mode setter (FUN_00423520) uses the base
+// address as its own start glyph, i.e. entry 0.
+//
+// pirates_part1.cpp resolved the four slots starting at DAT_0043aac4 to the single
+// characters "6".."9", and 0x43aac4 - 0x43aaa0 is nine entries, so the table is one
+// contiguous run of tokens and WindsGlyph below is the entry just past the tavern eight.
+// UNVERIFIED: what the eight tavern tokens and the WINDS token expand to. Dumping
+// PIRATES.DAT's message groups would settle it; nothing in the rules depends on the text.
+extern const char TavernWindowGlyphs[8][4];
 
-// DAT_0043aac0 -- the W-I-N-D-S symbol row shown by s_trip11.
-extern const char WindsGlyph[];
+// DAT_0043aac0 -- the W-I-N-D-S token shown by s_trip11; entry 8 of the same table.
+extern const char WindsGlyph[4];
 
 // ---------------------------------------------------------------------------
 // Table-local message codes
@@ -454,19 +469,19 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 		switch (shoot_again_phase)
 		{
 		case 0:
-			v_lite569->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			lite569->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 			return;
 		case 1:
-			if (!v_lite569->FlasherOnFlag)
-				v_lite569->Message(MessageCode::TLightFlasherStartTimed, 5.0f);
+			if (!lite569->FlasherOnFlag)
+				lite569->Message(MessageCode::TLightFlasherStartTimed, 5.0f);
 			return;
 		case 2:
-			if (!v_lite569->ToggledOnFlag)
-				v_lite569->Message(MessageCode::TLightTurnOnTimed, 10.0f);
+			if (!lite569->ToggledOnFlag)
+				lite569->Message(MessageCode::TLightTurnOnTimed, 10.0f);
 			return;
 		default: // 3
-			if (!v_lite569->LightOnFlag)
-				v_lite569->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+			if (!lite569->LightOnFlag)
+				lite569->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 			return;
 		}
 	}
@@ -489,15 +504,15 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 		ClearKegMagnets();
 
 		a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
-		v_lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 	}
 
 	// A new ball always starts with the save armed and untimed.
-	v_lite569->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+	lite569->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 	shoot_again_phase = 3;
 
-	v_lite544->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+	lite544->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	a_kick2->ActiveFlag = 1;
 	s_bwal610->ActiveFlag = 1;
 
@@ -515,8 +530,8 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 	// four twice on a fresh ball; kept as written rather than hoisted, because the
 	// duplication is the only thing that makes a *re-served* ball reset the routing too.
 	a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
-	v_lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-	v_lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+	lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+	lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -560,11 +575,11 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	// test below then fails and the ball is lost even with Shoot Again showing.
 	if (TableG->TiltLockFlag != 0)
 	{
-		v_lite569->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite569->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		shoot_again_phase = 0;
 	}
 
-	if (v_lite569->light_on())
+	if (lite569->light_on())
 	{
 		info_text_box->Display(pb::get_rc_string(PiratesMsg(Str_ShootAgain)), 2.0f);
 		drain_phase = 3;
@@ -679,8 +694,8 @@ void HideawayLeftControl(MessageCode code, TPinballComponent* caller)
 		const int addedScore = AddScoreFor(caller, 0); // 40,000
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
 		info_text_box->Display(Buffer, 2.0f);
-		v_lite524->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-		v_lite524->MessageField |= 1; // GOLD "G"
+		lite524->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite524->MessageField |= 1; // GOLD "G"
 		CheckGoldComplete(2.0f);
 		tabb11wave->Play(nullptr, "Hideaway");
 		EjectHideawayAtRandom();
@@ -703,7 +718,7 @@ void HideawayLeftControl(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ModeTreasureHunt:
-		if (!v_mlite44->FlasherOnFlag)
+		if (!mlite44->FlasherOnFlag)
 		{
 			// The X on this hideaway is not the armed one, so it is an ordinary 40,000.
 			const int addedScore = AddScoreFor(caller, 0);
@@ -716,9 +731,9 @@ void HideawayLeftControl(MessageCode code, TPinballComponent* caller)
 		{
 			// The armed X goes solid and this hideaway -- alone among the five Treasure
 			// Hunt sinks -- pays the jackpot rather than a special treasure.
-			v_mlite44->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-			v_lite524->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-			v_lite519->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			mlite44->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+			lite524->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			lite519->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 			CollectJackpot(0.0);
 			ArmNextTreasureX();
 			// Out through the lava sink, not the random hideaway: the next X has just been
@@ -743,12 +758,12 @@ void HideawayLeftControl(MessageCode code, TPinballComponent* caller)
 	}
 	}
 
-	v_lite519->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
+	lite519->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
 }
 
 // 0x00427e50 -- a_sink15 (skeleton: a_sink15Control)
 //
-// a_sink17's twin on GOLD bit 2 and X light v_mlite107, with two asymmetries that are in
+// a_sink17's twin on GOLD bit 2 and X light mlite107, with two asymmetries that are in
 // the listing and are reproduced rather than tidied: the idle arm flashes this hideaway's
 // own light v_lite520 once *before* scoring as well as at the end, and the armed-X arm pays
 // a special treasure where a_sink17 pays the jackpot.
@@ -763,12 +778,12 @@ void HideawayCentreControl(MessageCode code, TPinballComponent* caller)
 	{
 	case ModeIdle:
 	{
-		v_lite520->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite520->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		const int addedScore = AddScoreFor(caller, 0);
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
 		info_text_box->Display(Buffer, 2.0f);
-		v_lite525->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-		v_lite524->MessageField |= 2; // GOLD "O"
+		lite525->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite524->MessageField |= 2; // GOLD "O"
 		CheckGoldComplete(2.0f);
 		tabb11wave->Play(nullptr, "Hideaway");
 		EjectHideawayAtRandom();
@@ -788,7 +803,7 @@ void HideawayCentreControl(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ModeTreasureHunt:
-		if (!v_mlite107->FlasherOnFlag)
+		if (!mlite107->FlasherOnFlag)
 		{
 			const int addedScore = AddScoreFor(caller, 0);
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
@@ -798,9 +813,9 @@ void HideawayCentreControl(MessageCode code, TPinballComponent* caller)
 		}
 		else
 		{
-			v_mlite107->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-			v_lite525->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-			v_lite520->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			mlite107->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+			lite525->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			lite520->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 			AwardSpecialTreasure(0.0);
 			ArmNextTreasureX();
 			EjectLavaSink(-1.0f);
@@ -823,7 +838,7 @@ void HideawayCentreControl(MessageCode code, TPinballComponent* caller)
 	}
 	}
 
-	v_lite520->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
+	lite520->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
 }
 
 // 0x00428120 -- a_sink14 (skeleton: a_sink14Control)
@@ -841,12 +856,12 @@ void HideawayRightControl(MessageCode code, TPinballComponent* caller)
 	{
 	case ModeIdle:
 	{
-		v_lite521->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite521->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		const int addedScore = AddScoreFor(caller, 0);
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
 		info_text_box->Display(Buffer, 2.0f);
-		v_lite526->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-		v_lite524->MessageField |= 4; // GOLD "L"
+		lite526->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite524->MessageField |= 4; // GOLD "L"
 		CheckGoldComplete(2.0f);
 		tabb11wave->Play(nullptr, "Hideaway");
 		EjectHideawayAtRandom();
@@ -866,7 +881,7 @@ void HideawayRightControl(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ModeTreasureHunt:
-		if (!v_mlite106->FlasherOnFlag)
+		if (!mlite106->FlasherOnFlag)
 		{
 			const int addedScore = AddScoreFor(caller, 0);
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
@@ -876,9 +891,9 @@ void HideawayRightControl(MessageCode code, TPinballComponent* caller)
 		}
 		else
 		{
-			v_mlite106->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-			v_lite526->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-			v_lite521->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			mlite106->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+			lite526->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+			lite521->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 			AwardSpecialTreasure(0.0);
 			ArmNextTreasureX();
 			EjectLavaSink(-1.0f);
@@ -901,7 +916,7 @@ void HideawayRightControl(MessageCode code, TPinballComponent* caller)
 	}
 	}
 
-	v_lite521->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
+	lite521->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -951,8 +966,8 @@ void ShipSinkControl(MessageCode code, TPinballComponent* caller)
 		// Lights Ship's Hold: whatever the drain bonus totals this ball is carried into the
 		// next one. No score, no ejection delay change -- the light *is* the award.
 		tabb27wave->Play(nullptr, "ShipSink");
-		v_lite570->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-		v_lite567->Message(MessageCode::TLightFlasherStartTimed, 1.0f);
+		lite570->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		lite567->Message(MessageCode::TLightFlasherStartTimed, 1.0f);
 		EjectLavaSink(-1.0f);
 		return;
 
@@ -960,14 +975,14 @@ void ShipSinkControl(MessageCode code, TPinballComponent* caller)
 		// The finale's arming shot. Note there is no ejection: the ball stays in the sink
 		// while the payout steps run, which is the manual's "put the ball in the ship
 		// sink". Step 1 is what the controller looks for.
-		v_mlite51->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-		v_lite4->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite5->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite6->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite7->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite8->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite568->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite567->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		mlite51->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		lite4->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite5->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite6->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite7->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite8->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite568->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite567->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		mode_scratch_counter = 1;
 		return;
 
@@ -979,16 +994,16 @@ void ShipSinkControl(MessageCode code, TPinballComponent* caller)
 	// blockers are released indefinitely so the ejected ball has somewhere to go. The
 	// doubled a_blocf send is in the original.
 	a_blocf->Message(FtMessageCode::TBlockerHold, 0.0);
-	v_lite567->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+	lite567->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	a_blocc->Message(FtMessageCode::TBlockerHold, -1.0f);
 	a_blocf->Message(FtMessageCode::TBlockerHold, -1.0f);
 	a_blocg->Message(FtMessageCode::TBlockerHold, -1.0f);
 	EjectLavaSink(-1.0f);
 
-	if (info_text_box->MessageField == ModeIdle && v_lite568->light_on())
+	if (info_text_box->MessageField == ModeIdle && lite568->light_on())
 	{
 		// The ship sink's extra ball, collectable in normal play only.
-		v_lite568->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite568->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		AwardExtraBall(0.0);
 	}
 	else
@@ -1021,7 +1036,7 @@ void TreasureSinkLeftControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField == ModeTreasureHunt)
 	{
-		if (!v_mlite110->FlasherOnFlag)
+		if (!mlite110->FlasherOnFlag)
 		{
 			const int addedScore = AddScoreFor(caller, 0); // 40,000
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
@@ -1030,7 +1045,7 @@ void TreasureSinkLeftControl(MessageCode code, TPinballComponent* caller)
 			EjectHideawayAtRandom();
 			return;
 		}
-		v_mlite110->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		mlite110->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 		left_orbit_light_group->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		AwardSpecialTreasure(0.0);
 		ArmNextTreasureX();
@@ -1059,7 +1074,7 @@ void TreasureSinkRightControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField == ModeTreasureHunt)
 	{
-		if (!v_mlite104->FlasherOnFlag)
+		if (!mlite104->FlasherOnFlag)
 		{
 			const int addedScore = AddScoreFor(caller, 0);
 			snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_SecretHideaway)), addedScore);
@@ -1068,7 +1083,7 @@ void TreasureSinkRightControl(MessageCode code, TPinballComponent* caller)
 			EjectHideawayAtRandom();
 			return;
 		}
-		v_mlite104->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		mlite104->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 		right_orbit_light_group->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		AwardSpecialTreasure(0.0);
 		ArmNextTreasureX();
@@ -1095,7 +1110,7 @@ void TreasureSinkRightControl(MessageCode code, TPinballComponent* caller)
 // its own -- the three call it directly -- so it carries no address comment; it is the
 // routine at the end of a_sink12's listing range, immediately after that handler.
 //
-// v_lite547->MessageField is the 3-bit window mask for all three sinks (a_sink5 sets bit 0,
+// lite547->MessageField is the 3-bit window mask for all three sinks (a_sink5 sets bit 0,
 // a_sink6 bit 1, a_sink7 bit 2) and also indexes the glyph row that is displayed. Collect
 // all three and the mask resets, the three window lights are flashed off together, and the
 // score index steps from 0 to 1 -- i.e. 75,000 a sink, 200,000 for the set. The score
@@ -1104,15 +1119,15 @@ static void TavernSinkAward(TPinballComponent* caller)
 {
 	char Buffer[64];
 
-	DisplayGlyph(info_text_box, TavernWindowGlyphs[v_lite547->MessageField], 2.0f);
+	DisplayGlyph(info_text_box, TavernWindowGlyphs[lite547->MessageField], 2.0f);
 
-	const bool allThree = (v_lite547->MessageField & 7) == 7;
+	const bool allThree = (lite547->MessageField & 7) == 7;
 	if (allThree)
 	{
-		v_lite547->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
-		v_lite546->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
-		v_lite545->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
-		v_lite547->MessageField = 0;
+		lite547->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
+		lite546->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
+		lite545->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
+		lite547->MessageField = 0;
 	}
 
 	const int addedScore = AddScoreFor(caller, allThree ? 1 : 0);
@@ -1143,13 +1158,13 @@ void TavernSinkLeftControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField != ModeTavern)
 	{
-		v_lite547->MessageField |= 1;
-		v_lite547->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite547->MessageField |= 1;
+		lite547->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		TavernSinkAward(caller);
 		return;
 	}
 
-	if (v_lite547->FlasherOnFlag)
+	if (lite547->FlasherOnFlag)
 		AwardTavernWindowMystery();
 	else
 		tabb08wave->Play(nullptr, "TavernSinkMiss");
@@ -1167,13 +1182,13 @@ void TavernSinkCentreControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField != ModeTavern)
 	{
-		v_lite547->MessageField |= 2;
-		v_lite546->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite547->MessageField |= 2;
+		lite546->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		TavernSinkAward(caller);
 		return;
 	}
 
-	if (v_lite546->FlasherOnFlag)
+	if (lite546->FlasherOnFlag)
 		AwardTavernWindowMystery();
 	else
 		tabb08wave->Play(nullptr, "TavernSinkMiss");
@@ -1188,13 +1203,13 @@ void TavernSinkRightControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField != ModeTavern)
 	{
-		v_lite547->MessageField |= 4;
-		v_lite545->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite547->MessageField |= 4;
+		lite545->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		TavernSinkAward(caller);
 		return;
 	}
 
-	if (v_lite545->FlasherOnFlag)
+	if (lite545->FlasherOnFlag)
 		AwardTavernWindowMystery();
 	else
 		tabb08wave->Play(nullptr, "TavernSinkMiss");
@@ -1326,7 +1341,7 @@ void LeftIslandRampControl(MessageCode code, TPinballComponent* caller)
 {
 	const WindLane lane = {
 		left_island_light_group, left_island_combo_light_group,
-		v_lite629, v_lite630, v_lite603, v_lite604, Str_IslandBreeze
+		lite629, lite630, lite603, lite604, Str_IslandBreeze
 	};
 
 	if (code == FtMessageCode::ScoringComponentReplaced)
@@ -1352,7 +1367,7 @@ void RightIslandRampControl(MessageCode code, TPinballComponent* caller)
 {
 	const WindLane lane = {
 		right_wind_light_group, right_island_combo_light_group,
-		v_lite626, v_lite627, v_lite611, v_lite612, Str_NorEaster
+		lite626, lite627, lite611, lite612, Str_NorEaster
 	};
 
 	if (code == FtMessageCode::ScoringComponentReplaced)
@@ -1444,8 +1459,8 @@ void LaunchLaneExitControl(MessageCode code, TPinballComponent* caller)
 		return;
 
 	a_bloce->Message(FtMessageCode::TBlockerHold, 1.0f);
-	v_lite504->Message(MessageCode::TLightResetAndTurnOn, 0.0);
-	v_lite505->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+	lite504->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+	lite505->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 }
 
 // 0x00429040 -- s_hole19 (skeleton: s_hole19Control)
@@ -1498,8 +1513,8 @@ void ReturnWireControl(MessageCode code, TPinballComponent* caller)
 	case ModeLavaBall:
 	case ModeJailBreak:
 		a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
-		v_lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
-		v_lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
+		lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
+		lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 		return;
 	case ModeAttackShip:
 		RaiseShipTargets();
@@ -1525,7 +1540,7 @@ void LeftOrbitControl(MessageCode code, TPinballComponent* caller)
 {
 	const WindLane lane = {
 		left_orbit_light_group, left_orbit_combo_light_group,
-		v_lite631, v_lite632, v_lite600, v_lite601, Str_TradewindLoop
+		lite631, lite632, lite600, lite601, Str_TradewindLoop
 	};
 
 	if (code == FtMessageCode::ScoringComponentReplaced)
@@ -1552,7 +1567,7 @@ void RightOrbitControl(MessageCode code, TPinballComponent* caller)
 {
 	const WindLane lane = {
 		right_orbit_light_group, right_orbit_combo_light_group,
-		v_lite634, v_lite635, v_lite608, v_lite609, Str_TradewindLoop
+		lite634, lite635, lite608, lite609, Str_TradewindLoop
 	};
 
 	if (code == FtMessageCode::ScoringComponentReplaced)
@@ -1565,8 +1580,8 @@ void RightOrbitControl(MessageCode code, TPinballComponent* caller)
 
 	if (info_text_box->MessageField == ModeIdle)
 	{
-		v_lite527->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-		v_lite524->MessageField |= 8; // GOLD "D"
+		lite527->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+		lite524->MessageField |= 8; // GOLD "D"
 		// Unlike the three hideaways, this site runs the completion check with 0.0 rather
 		// than 2.0 -- the coin award announces itself and the ladder line follows.
 		CheckGoldComplete(0.0);
@@ -1575,7 +1590,7 @@ void RightOrbitControl(MessageCode code, TPinballComponent* caller)
 	{
 		// Handled here rather than inside WindLaneTraversal because the GOLD block above
 		// must not run during Bermuda, and the shared routine is entered after it.
-		if (v_lite608->FlasherOnFlag)
+		if (lite608->FlasherOnFlag)
 		{
 			AwardBermudaIndicatedWind();
 			return;
@@ -1613,7 +1628,7 @@ void WindsLaneControl(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	v_lite533->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
+	lite533->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 	if (SpellWinds(0.0) != 0.0f)
 		return;
 
@@ -1716,35 +1731,35 @@ static void KegMagnetGrab(TLight* kegLight, TPinballComponent* magnet, TPinballC
 void KegMagnet1Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite560, s_magnet1, caller);
+		KegMagnetGrab(lite560, s_magnet1, caller);
 }
 
 // 0x0042a500 -- s_magnet2 (skeleton: s_magnet2Control)
 void KegMagnet2Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite561, s_magnet2, caller);
+		KegMagnetGrab(lite561, s_magnet2, caller);
 }
 
 // 0x0042a590 -- s_magnet3 (skeleton: s_magnet3Control)
 void KegMagnet3Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite562, s_magnet3, caller);
+		KegMagnetGrab(lite562, s_magnet3, caller);
 }
 
 // 0x0042a620 -- s_magnet4 (skeleton: s_magnet4Control)
 void KegMagnet4Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite563, s_magnet4, caller);
+		KegMagnetGrab(lite563, s_magnet4, caller);
 }
 
 // 0x0042a6b0 -- s_magnet5 (skeleton: s_magnet5Control)
 void KegMagnet5Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite564, s_magnet5, caller);
+		KegMagnetGrab(lite564, s_magnet5, caller);
 }
 
 // 0x0042a740 -- s_magnet6 (skeleton: s_magnet6Control)
@@ -1757,7 +1772,7 @@ void KegMagnet5Control(MessageCode code, TPinballComponent* caller)
 void KegMagnet6Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)
-		KegMagnetGrab(v_lite565, s_magnet6, caller);
+		KegMagnetGrab(lite565, s_magnet6, caller);
 }
 
 } // namespace pirates

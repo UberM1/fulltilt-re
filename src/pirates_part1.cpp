@@ -367,8 +367,10 @@ extern int ModeScratch; // DAT_00435cf8
 
 // The original's one fixed shape for a formatted line:
 //   sprintf(buf, get_rc_string(id, 0), value); info_text_box->Display(buf, time);
-// with get_rc_string at 0x00409730 (two arguments, not the one Ghidra models) and sprintf
-// at 0x0042dfaf. Static so the other slices can keep their own copy.
+// with get_rc_string = FUN_00409730 (two arguments, not the one Ghidra models) and
+// sprintf = FUN_0042dfaf. Addresses are written in the FUN_ form rather than as literals
+// because analysis/link_impls.py attributes every 0x4xxxxx in the comment block above a
+// definition to that definition. Static so the other slices can keep their own copy.
 static void DisplayWithValue(int rcId, int value, float time)
 {
 	char buffer[128];
@@ -487,8 +489,8 @@ void FlipperRebounderControl2(MessageCode code, TPinballComponent* caller)
 
 // Both completion gates re-raise all three banks and then fork; see §2.2 and §4.5.
 // Declared here because the bank routines call them before deciding anything else.
-static bool SkulduggeryCompleteIdle();     // 0x00425de0
-static bool SkulduggeryCompleteLavaBall(); // 0x00425e30
+static bool SkulduggeryCompleteIdle();     // FUN_00425de0
+static bool SkulduggeryCompleteLavaBall(); // FUN_00425e30
 
 // 0x00425de0 -- all eleven letters lit, in idle play: clear the letters, re-raise all
 // three banks and start the selected mode. Returns true when it fired, in which case the
@@ -934,16 +936,17 @@ static void VolcanoBankHitIdle(TPinballComponent* caller)
 // v_lite550->MessageField, a field nothing in either decompiled corpus ever writes (the
 // only two occurrences of the expression in 364 functions are the read and the clear in
 // this one function). The four target handlers put their bits in ModeScratch instead.
-// Confirmed from the listing at 0x425490: `mov eax,ds:0x43af84` is v_lite550, not
-// a_spot11 (0x43af1c) where the real mask lives -- the same one-hex-digit class of bug as
-// the v_lite551/a_spot11 mix-up in Jail Break (pirates-rules.md §3).
+// Confirmed from the listing: the function opens `mov eax,ds:[DAT_0043af84]`, which is
+// v_lite550, not the a_spot11 slot sixteen dwords earlier where the real volcano mask
+// lives -- the same one-hex-digit class of bug as the v_lite551/a_spot11 mix-up in Jail
+// Break (pirates-rules.md §3).
 //
 // The consequences are worth being deliberate about in a port:
 //   * the live effect of this function in Sword Fight is only the flat 30,000;
 //   * the four volcano lights are never swept (the TLightResetTimed/TLightFlasherStartTimed
 //     block below is dead);
-//   * but the *award* still happens, because AwardSpecialTreasureOrNext (0x00425550) runs
-//     its own `ModeScratch & 0xf == 0xf` check on the bits the handlers really set.
+//   * but the *award* still happens, because AwardSpecialTreasureOrNext (FUN_00425550)
+//     runs its own `ModeScratch & 0xf == 0xf` check on the bits the handlers really set.
 // So Sword Fight's volcano objective works, by a different route than the code reads, and
 // pays the flat 30,000 on the clearing hit as well.
 //
