@@ -123,23 +123,34 @@ they were how the rules region was first located, and their 10 named exports
 
 ## Status
 
-- [x] Locate the rules region (rva `0x023000`-`0x02d000`, ~40 KB)
-- [x] Validate the extraction method against `control.cpp`
-- [x] Dump component/handler/score tables for both targets
+Both tables' rules are written. Nothing runs yet: the engine changes they need are
+listed, derived from compile errors rather than guessed, in `docs/engine-changes.md`.
+
+| | components | handlers | implemented |
+|---|---|---|---|
+| Dragon's Keep | 75 | 64 | **64 (100%)** |
+| Skulduggery | 74 | 69 | 63 (91%) |
+
+- [x] Locate the rules region (rva `0x023000`-`0x02d000`, ~40 KB), three ways
+- [x] Validate every extraction method against `control.cpp` before using it
 - [x] Tooling: Ghidra 12.1.2 + `rea`, packaged in `nixos_conf` as
       `modules/features-nixos/home/reversing.nix`
-- [x] Recover Full Tilt's `MessageCode` numbering (piecewise, not a flat offset --
-      see `analysis/message_codes.py`)
-- [x] Decompile every handler: 159 CADET, 159 Dragon, 178 Skulduggery functions
-- [x] Classify each handler against its nearest named Space Cadet equivalent
-- [x] Generate `src/control_dragon.cpp` / `src/control_pirates.cpp` skeletons
-- [x] Resolve component names everywhere (4,240 references annotated)
-- [x] The quest system: 6 quests, no ranks, mode register in `info_text_box->MessageField`
-- [x] Dragon's Keep scoring handlers implemented (`src/dragon_part1.cpp`)
-- [ ] The remaining Dragon handler bodies
-- [ ] Skulduggery's rules (analysis in progress)
-- [ ] A per-table interface upstream does not have yet
-- [ ] The 7 object types the engine does not implement (1034-1038, 1042, 1043)
+- [x] Decompile the rules and engine: 631 Dragon, 364 Skulduggery, 179 CADET functions
+- [x] Disassemble every handler with objdump, as an independent check on the decompiler
+- [x] Resolve every `DAT_<addr>` to its component name (4,240 references annotated)
+- [x] Recover Full Tilt's `MessageCode` numbering (piecewise)
+- [x] Dragon's Keep: all 64 handlers and the quest state machine
+- [x] Skulduggery: the mode state machine and 63 of 69 handlers
+- [x] Build upstream from source (`nix-build build.nix`)
+- [ ] The last six Skulduggery handlers
+- [ ] The engine changes in `docs/engine-changes.md`
+- [ ] Wire `src/table_rules.h` into the engine and actually play a ball
+
+### What the compiler says
+
+Five of nine rule files compile against **unmodified** upstream headers. The split is
+itself a finding: per-component rules need nothing Space Cadet did not already need, and
+every outstanding error comes from running more than one table.
 
 ## Pipeline
 
@@ -159,8 +170,8 @@ dump_strings.py      RT_STRING resources: the rules identify messages by id,
                      so this is the binaries' own documentation
 ```
 
-Everything regenerates from `binaries/` plus the scripts, which is why `decomp/`
-and `src/` are not tracked.
+Everything but the hand-written rules regenerates from `binaries/` plus the scripts,
+which is why `decomp/` and the generated skeletons are not tracked.
 
 ### Triage
 
