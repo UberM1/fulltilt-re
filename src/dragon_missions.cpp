@@ -34,6 +34,7 @@
 
 #include "pb.h"
 #include "TPinballTable.h"
+#include "midi.h"
 #include "TPinballComponent.h"
 
 // component_tag<T> instantiates std::is_base_of<TPinballComponent, T>, which needs
@@ -42,6 +43,20 @@
 #include "TLightGroup.h"
 #include "TSound.h"
 #include "TTextBox.h"
+
+// Music track indices into the table's TABC1..TABCN set, which
+// midi::load_table_tracks loads 1-based. The engine addresses tracks by index;
+// the originals hold Mix_Music-like handles in globals, so these names are the
+// handles' roles rather than the handles themselves.
+//
+// UNVERIFIED: which TABCn file each role maps to. The roles are pinned by the
+// call sites; the file numbering needs the track table out of the DAT.
+constexpr music_track idle_music = 1;
+constexpr music_track dragon_hoard_music = 2;
+constexpr music_track fire_lizards_music = 3;
+constexpr music_track rescue_maiden_music = 4;
+constexpr music_track dragon_pass_music = 5;
+constexpr music_track wizards_fury_music = 6;
 
 namespace dragon {
 
@@ -408,12 +423,6 @@ component_tag<TSound> tag_tabc57wave = {"tabc57wave"};  // Slay Dragon
 component_tag<TSound> tag_tabc58wave = {"tabc58wave"};  // dragon fire sweep
 
 // MIDI tracks, one per quest. Upstream calls the equivalent `midi::play_track`.
-extern midi_track* dragon_hoard_music;
-extern midi_track* fire_lizards_music;
-extern midi_track* rescue_maiden_music;
-extern midi_track* dragon_pass_music;
-extern midi_track* wizards_fury_music;
-extern midi_track* idle_music;
 
 // ---------------------------------------------------------------------------
 // Per-table interface this file depends on but does not define
@@ -443,8 +452,6 @@ void ClearText(TTextBox* box);                                 // 0x41d930
 // label and value itself, or there are two call shapes the decompile has
 // flattened into one. Settled by disassembling 0x42c76f.
 void FormatWithValue(char* out, const char* labelOrFormat);
-void PlayMusic(midi_track* track);                             // 0x40eb50
-midi_track* CurrentMusic();                                    // 0x40e9b0
 void ComponentHandler(MessageCode code, TPinballComponent* caller);  // 0x423060
 void Play(TSound* sound);  // vtable +0x18; the original returns the clip length
 
@@ -1146,8 +1153,8 @@ void IdleController(MessageCode code)
 			ClearText(tag_info_text_box.Component);
 		KeepAnnouncement = false;
 
-		if (CurrentMusic() != idle_music)
-			PlayMusic(idle_music);
+		if (midi::CurrentMusic() != idle_music)
+			midi::PlayMusic(idle_music);
 		return;
 	}
 
@@ -1437,7 +1444,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HOARD_HINT), Forever);
 		SetGemMask(0);
-		PlayMusic(dragon_hoard_music);
+		midi::PlayMusic(dragon_hoard_music);
 		Play(tag_tabc46wave.Component);
 		return;
 
@@ -1532,7 +1539,7 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite63.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite64.Component->Message(ft::LightFlasherStartTimed, Forever);
 		Play(tag_tabc48wave.Component);
-		PlayMusic(fire_lizards_music);
+		midi::PlayMusic(fire_lizards_music);
 		return;
 
 	case ft::QuestRestart:
@@ -1761,7 +1768,7 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 		ClearText(tag_info_text_box.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_MAIDEN_HINT), Forever);
 		Play(tag_tabc50wave.Component);
-		PlayMusic(rescue_maiden_music);
+		midi::PlayMusic(rescue_maiden_music);
 		tag_v_lite48.Component->Message(ft::LightFlasherStartTimed, Forever);
 		return;
 
@@ -1886,7 +1893,7 @@ void DragonPassController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite46.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite45.Component->Message(ft::LightFlasherStartTimed, Forever);
 		Play(tag_tabc53wave.Component);
-		PlayMusic(dragon_pass_music);
+		midi::PlayMusic(dragon_pass_music);
 		return;
 
 	case ft::QuestRestart:
@@ -1975,7 +1982,7 @@ void WizardsFuryController(MessageCode code, TPinballComponent* caller)
 		tag_well_light_group.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_spell_spot_light_group.Component->Message(ft::LightFlasherStartTimed, Forever);
 		Play(tag_tabc55wave.Component);
-		PlayMusic(wizards_fury_music);
+		midi::PlayMusic(wizards_fury_music);
 		return;
 
 	case ft::QuestRestart:

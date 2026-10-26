@@ -58,6 +58,7 @@
 
 #include "pb.h"
 #include "TPinballTable.h"
+#include "midi.h"
 #include "TPinballComponent.h"
 
 // component_tag<T> instantiates std::is_base_of<TPinballComponent, T>, which needs
@@ -66,6 +67,21 @@
 #include "TLightGroup.h"
 #include "TSound.h"
 #include "TTextBox.h"
+
+// Music track indices into the table's TABB1..TABBN set, which
+// midi::load_table_tracks loads 1-based. The engine addresses tracks by index;
+// the originals hold Mix_Music-like handles in globals, so these names are the
+// handles' roles rather than the handles themselves.
+//
+// UNVERIFIED: which TABBn file each role maps to. The roles are pinned by the
+// call sites; the file numbering needs the track table out of the DAT.
+constexpr music_track idle_music = 1;
+constexpr music_track attack_sword_music = 2;
+constexpr music_track storm_mutiny_music = 3;
+constexpr music_track treasure_pegleg_music = 4;
+constexpr music_track tavern_music = 5;
+constexpr music_track bermuda_music = 6;
+constexpr music_track game_over_music = 7;
 
 namespace pirates {
 
@@ -505,13 +521,6 @@ component_tag<TSound> tag_tabb99wave = {"tabb99wave"};  // Peg Leg's Loot
 // MIDI tracks. Note the sharing: three pointers cover six modes, which is why
 // Attack Ship and Sword Fight, Treasure Hunt and Peg Leg's Loot, and Storm and
 // Mutiny sound alike.
-extern midi_track* idle_music;              // 0x43ab80
-extern midi_track* attack_sword_music;      // 0x43ab84
-extern midi_track* treasure_pegleg_music;   // 0x43ab88
-extern midi_track* tavern_music;            // 0x43ab8c
-extern midi_track* bermuda_music;           // 0x43ab90
-extern midi_track* storm_mutiny_music;      // 0x43ab94
-extern midi_track* game_over_music;         // 0x43ab98
 
 // ---------------------------------------------------------------------------
 // Per-table interface this file depends on but does not define
@@ -550,8 +559,6 @@ void ClearText(TTextBox* box);                                    // 0x41d930
 // listing at every site.
 void FormatWithValue(char* out, const char* format, int value);
 
-void PlayMusic(midi_track* track);  // 0x40eb50
-midi_track* CurrentMusic();         // 0x40e9b0
 void Play(TSound* sound);           // vtable +0x18; the original returns the clip length
 
 // Mode-register setters, one per state, from the transition slice. Each does
@@ -1041,8 +1048,8 @@ void GameOverController(MessageCode code)
 		return;
 
 	pb::MainTable->Message(ft::TableGameOver, 0.0f);
-	if (CurrentMusic() != game_over_music)
-		PlayMusic(game_over_music);
+	if (midi::CurrentMusic() != game_over_music)
+		midi::PlayMusic(game_over_music);
 
 	// The announcement is conditional on there being a high score to announce.
 	if (!AnyHighScore())
@@ -1074,8 +1081,8 @@ void IdleController(MessageCode code)
 	if (code == ft::MissionComplete)
 	{
 		SkillShotActive = false;
-		if (CurrentMusic() != idle_music)
-			PlayMusic(idle_music);
+		if (midi::CurrentMusic() != idle_music)
+			midi::PlayMusic(idle_music);
 		return;
 	}
 
@@ -1221,7 +1228,7 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite7.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite8.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite567.Component->Message(ft::LightFlasherStartTimed, Forever);
-		PlayMusic(attack_sword_music);
+		midi::PlayMusic(attack_sword_music);
 		Play(tag_tabb58wave.Component);
 		return;
 
@@ -1301,7 +1308,7 @@ void BermudaController(MessageCode code, TPinballComponent* caller)
 		AddScoreAt(nullptr, BonusBermuda);
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepBermuda);
 		BlankWindGroups();
-		PlayMusic(bermuda_music);
+		midi::PlayMusic(bermuda_music);
 		Play(tag_tabb66wave.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_BERMUDA), Forever);
 		return;
@@ -1419,7 +1426,7 @@ void StormController(MessageCode code, TPinballComponent* caller)
 		StartOfEveryMode();
 		AddScoreAt(nullptr, BonusStorm);
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepStorm);
-		PlayMusic(storm_mutiny_music);
+		midi::PlayMusic(storm_mutiny_music);
 		Play(tag_tabb67wave.Component);
 		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, 0.0f);
 		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, Forever);
@@ -1547,7 +1554,7 @@ void TavernController(MessageCode code, TPinballComponent* caller)
 			ResetBrigLights(false);
 			AddScoreAt(nullptr, BonusTavern);
 			tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepTavern);
-			PlayMusic(tavern_music);
+			midi::PlayMusic(tavern_music);
 			Play(tag_tabb65wave.Component);
 			RaiseTavernBank();
 			tag_v_lite547.Component->Message(ft::LightResetAndTurnOff, 0.0f);
@@ -1695,7 +1702,7 @@ void TreasureHuntController(MessageCode code, TPinballComponent* caller)
 		// objective.
 		tag_light_sweeps.Component->Message(ft::LightSweepStart,
 		                                    static_cast<float>(ArmNextTreasureX()));
-		PlayMusic(treasure_pegleg_music);
+		midi::PlayMusic(treasure_pegleg_music);
 		Play(tag_tabb59wave.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_TREASURE_HUNT), Forever);
 		return;
@@ -1770,7 +1777,7 @@ void MutinyController(MessageCode code, TPinballComponent* caller)
 		StartOfEveryMode();
 		AddScoreAt(nullptr, BonusMutiny);
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepMutiny);
-		PlayMusic(storm_mutiny_music);
+		midi::PlayMusic(storm_mutiny_music);
 		Play(tag_tabb73wave.Component);
 		// All three blockers released: Mutiny wants the ball loose in the
 		// bumper field, not funnelled at an objective.
@@ -1843,7 +1850,7 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 		tag_v_lite549.Component->Message(ft::LightFlasherStartTimed, Forever);
 		tag_v_lite548.Component->Message(ft::LightFlasherStartTimed, Forever);
 		RaiseParrotBank();
-		PlayMusic(attack_sword_music);
+		midi::PlayMusic(attack_sword_music);
 		Play(tag_tabb75wave.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_SWORD_FIGHT), Forever);
 		return;
@@ -1921,7 +1928,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		// 0x42ce80: re-use the Treasure Hunt board (the X lights, the two
 		// extra sinks, the orbit override) and fire the 4.0 sweep.
 		PrepareTreasureBoard();
-		PlayMusic(treasure_pegleg_music);
+		midi::PlayMusic(treasure_pegleg_music);
 		Play(tag_tabb99wave.Component);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_PEG_LEGS_LOOT), Forever);
 		return;

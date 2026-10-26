@@ -1,31 +1,28 @@
 # Engine changes the port needs
 
-Derived, not guessed. The rules for Dragon's Keep in `src/` are syntax-checked against
-upstream's own headers:
+**Done.** All ten rule files now compile with zero errors against the patched engine, and
+the engine still builds:
 
 ```sh
-nix-build build.nix             # upstream builds unmodified from reference/
+nix-build build.nix                       # engine, patched
 g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/*.cpp
 ```
 
-Five of the eight files compile clean against unmodified upstream headers. Every remaining error is a thing the engine does
-not yet have, so the error list *is* the change list.
+The patch is `engine/fulltilt-engine.patch` -- 100 added lines across 7 files, no
+deletions. Nothing in it changes Space Cadet's behaviour.
 
-| file | errors |
-|---|---|
-| `dragon_part1.cpp` | 0 |
-| `dragon_part2.cpp` | 0 |
-| `dragon_part4.cpp` | 0 |
-| `pirates_part1.cpp` | 0 |
-| `pirates_part2.cpp` | 0 |
-| `dragon_part3.cpp` | 1 |
-| `dragon_missions.cpp` | 43 |
-| `pirates_modes.cpp` | 44 |
+How the list was arrived at, rather than guessed: the rules were written first, against
+the originals, and then compiled against unmodified upstream headers. Every error was a
+thing the engine did not have, so the error list *was* the change list. It went 88 errors
+-> 0 as each item below landed.
 
-The clean files are the ordinary scoring components; the three that do not compile are the
-two mode machines and one sink file. That split is itself informative -- per-component
-rules need nothing from the engine that Space Cadet did not already need, and everything
-below is a consequence of running *more than one table*.
+| change | uses | files |
+|---|---|---|
+| `TPinballComponent::GetComponentType()` | 29 | `TPinballComponent.h`, `TPinballTable.cpp` |
+| indexed per-table music | 21 | `midi.h`, `midi.cpp` |
+| `TPinballTable::SuperJackpotScore` | 1 | `TPinballTable.h` |
+| `TLightGroup::LightAt(index)` | 2 | `TLightGroup.h` |
+| `TBlocker::UnknownP7e` | 1 | `TBlocker.h` |
 
 ## 1. `TPinballComponent::GetComponentType()` — 17 uses
 
@@ -53,7 +50,20 @@ current API does not expose.
 This is the music half of the per-table identity that `src/table_rules.h` describes;
 `MusicPrefix` and `MusicTrackCount` are there for it.
 
-## 3. Balls in play — 6 uses (Skulduggery only)
+## 3. Super jackpot — 1 use
+
+Full Tilt has a second, larger jackpot at `+0x17a` where `JackpotScore` is `+0x172`.
+Dragon's Keep's moat chute pays into it and its mouth sink pays it out. Added as
+`SuperJackpotScore`; Space Cadet leaves it zero.
+
+### Not a gap after all: balls in play
+
+Skulduggery's Lava-Ball and Jail Break change the number of balls on the playfield, and
+the rules first named a `BallsInPlay` field that upstream does not have. It does not need
+one: `+0x192` is `MultiballCount`, which is how Space Cadet's own multiball already
+counts. The rules were rewritten against it rather than the engine extended.
+
+## 3b. Balls in play — resolved
 
 Skulduggery's Lava-Ball adds two balls and Jail Break releases whatever the brig holds, so
 its controllers need to read and change the number of balls on the playfield. Upstream has

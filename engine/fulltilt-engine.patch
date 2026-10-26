@@ -1,0 +1,193 @@
+diff --git a/SpaceCadetPinball/TBlocker.h b/SpaceCadetPinball/TBlocker.h
+index a42f4e2..b7bd5e5 100644
+--- a/SpaceCadetPinball/TBlocker.h
++++ b/SpaceCadetPinball/TBlocker.h
+@@ -10,6 +10,15 @@ public:
+ 
+ 	static void TimerExpired(int timerId, void* caller);
+ 
++	// The field at +0x7e in the Full Tilt builds. Dragon's fire lizard sinks read it
++	// as a float through fld; its gargoyle rocks compare the same offset against -1
++	// as an int. Both readings reconcile if it is a float whose -1.0 means "no
++	// duration", which is how it is typed here.
++	//
++	// UNVERIFIED: disassembling Full Tilt's TBlocker::Message settles it. No rule
++	// depends on the answer -- it only reaches a sound's flash duration.
++	float UnknownP7e = -1.0f;
++
+ 	int InitialDuration;
+ 	int ExtendedDuration;
+ 	int Timer;
+diff --git a/SpaceCadetPinball/TLightGroup.h b/SpaceCadetPinball/TLightGroup.h
+index 17449a0..8cc6693 100644
+--- a/SpaceCadetPinball/TLightGroup.h
++++ b/SpaceCadetPinball/TLightGroup.h
+@@ -30,6 +30,17 @@ public:
+ 	static void NotifyTimerExpired(int timerId, void* caller);
+ 
+ 	std::vector<TLight*> List;
++
++	// Indexed access to the group's members. The bonus tables walk a group one light
++	// at a time -- Dragon's Keep's prison-window sweep overrides a single light on or
++	// off as a cursor passes over it -- which the group-wide operations cannot express.
++	// Returns nullptr out of range rather than asserting, because the cursor wraps.
++	TLight* LightAt(int index) const
++	{
++		if (index < 0 || static_cast<size_t>(index) >= List.size())
++			return nullptr;
++		return List[index];
++	}
+ 	float Timer1Time{};
+ 	float Timer1TimeDefault;
+ 	MessageCode MessageField2{};
+diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
+index e0ccd71..2527a9b 100644
+--- a/SpaceCadetPinball/TPinballComponent.h
++++ b/SpaceCadetPinball/TPinballComponent.h
+@@ -143,6 +143,18 @@ public:
+ 	void SpriteSet(int index) const;
+ 	void SpriteSetBall(int index, vector2i pos, float depth) const;
+ 
++	// The object type code this component was spawned from -- 1000 TWall, 1005
++	// TBumper, 1032 TTimer and so on, exactly the codes in the DAT's table_objects.
++	//
++	// The original reaches this through vtable slot 0, which the decompilation took
++	// for the destructor; the Full Tilt dispatchers call it and switch the result
++	// over 0x3ee/0x3f9/0x408/0x40e. Space Cadet never needs it, but the bonus tables
++	// bind one handler to several component classes and discriminate at runtime --
++	// every Dragon's Keep quest has to tell mode_timer (1032) from light_sweeps
++	// (1038) when a timer expires, and both arrive through the same message.
++	int GetComponentType() const { return ComponentType; }
++
++	int ComponentType = 0;
+ 	char UnusedBaseFlag;
+ 	char ActiveFlag;
+ 	int MessageField;
+diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
+index aa8551a..62189b3 100644
+--- a/SpaceCadetPinball/TPinballTable.cpp
++++ b/SpaceCadetPinball/TPinballTable.cpp
+@@ -181,6 +181,13 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+ 			default:
+ 				continue;
+ 			}
++
++			// Every branch above ends in exactly one construction, and the
++			// TPinballComponent constructor appends to ComponentList, so the object
++			// just spawned is the last entry. Stamping the type here keeps the
++			// knowledge in the one place that already has it.
++			if (!ComponentList.empty())
++				ComponentList.back()->ComponentType = objectType;
+ 		}
+ 	}
+ 
+diff --git a/SpaceCadetPinball/TPinballTable.h b/SpaceCadetPinball/TPinballTable.h
+index c407fdc..8c872df 100644
+--- a/SpaceCadetPinball/TPinballTable.h
++++ b/SpaceCadetPinball/TPinballTable.h
+@@ -85,6 +85,12 @@ public:
+ 	bool BonusScoreFlag{};
+ 	int JackpotScore{};
+ 	bool JackpotScoreFlag{};
++
++	// Full Tilt's second, larger jackpot, at +0x17a in the originals where
++	// JackpotScore is +0x172. Dragon's Keep's moat chute pays into it and its
++	// mouth sink pays it out; Space Cadet has no equivalent and leaves it zero.
++	int SuperJackpotScore{};
++	bool SuperJackpotScoreFlag{};
+ 	int UnknownP71{};
+ 	int BallCount{};
+ 	int MaxBallCount;
+diff --git a/SpaceCadetPinball/midi.cpp b/SpaceCadetPinball/midi.cpp
+index a90e8d1..b9d8143 100644
+--- a/SpaceCadetPinball/midi.cpp
++++ b/SpaceCadetPinball/midi.cpp
+@@ -6,6 +6,8 @@
+ 
+ 
+ std::vector<Mix_Music*> midi::LoadedTracks{};
++std::vector<Mix_Music*> midi::TableTracks{};
++music_track midi::ActiveTableTrack = no_music;
+ Mix_Music* midi::track1, * midi::track2, * midi::track3;
+ MidiTracks midi::active_track, midi::NextTrack;
+ int midi::Volume = MIX_MAX_VOLUME;
+@@ -89,6 +91,41 @@ int midi::music_init(bool mixOpen, int volume)
+ 	return track1 != nullptr;
+ }
+ 
++void midi::load_table_tracks(const char* prefix, int count)
++{
++	TableTracks.assign(1, nullptr); // index 0 is silence, so tracks are 1-based
++	for (int i = 1; i <= count; i++)
++		TableTracks.push_back(load_track(std::string(prefix) + std::to_string(i)));
++	ActiveTableTrack = no_music;
++}
++
++void midi::PlayMusic(music_track track)
++{
++	if (track == ActiveTableTrack)
++		return;
++
++	StopPlayback();
++	ActiveTableTrack = no_music;
++
++	if (track <= 0 || static_cast<size_t>(track) >= TableTracks.size())
++		return;
++
++	// A table may legitimately be missing a track -- the Full Tilt demo ships one --
++	// so a null entry is silence, not an error.
++	auto music = TableTracks[track];
++	if (!music)
++		return;
++
++	Mix_PlayMusic(music, -1);
++	ActiveTableTrack = track;
++	IsPlaying = true;
++}
++
++music_track midi::CurrentMusic()
++{
++	return ActiveTableTrack;
++}
++
+ void midi::music_shutdown()
+ {
+ 	music_stop();
+diff --git a/SpaceCadetPinball/midi.h b/SpaceCadetPinball/midi.h
+index 32a904a..c11026c 100644
+--- a/SpaceCadetPinball/midi.h
++++ b/SpaceCadetPinball/midi.h
+@@ -91,6 +91,14 @@ enum class MidiTracks
+ 	Track3
+ };
+ 
++// A table's music track by index, 1-based, 0 meaning silence.
++//
++// MidiTracks fixes Space Cadet's three at compile time. Skulduggery ships TABB1..TABB6
++// and Dragon's Keep TABC1..TABC7, and their rules choose a track per mode, so the count
++// cannot be a constant and the selection cannot be an enumerator.
++using music_track = int;
++constexpr music_track no_music = 0;
++
+ class midi
+ {
+ public:
+@@ -101,8 +109,18 @@ public:
+ 	static void SetVolume(int volume);
+ 	static bool play_track(MidiTracks track, bool replay);
+ 	static MidiTracks get_active_track();
++
++	// Loads <prefix>1..<prefix><count> in place of the fixed three. Called with the
++	// current table's MusicPrefix and MusicTrackCount.
++	static void load_table_tracks(const char* prefix, int count);
++
++	// Indexed playback, for tables whose rules pick a track per mode.
++	static void PlayMusic(music_track track);
++	static music_track CurrentMusic();
+ private:
+ 	static std::vector<Mix_Music*> LoadedTracks;
++	static std::vector<Mix_Music*> TableTracks;
++	static music_track ActiveTableTrack;
+ 	static Mix_Music* track1, * track2, * track3;
+ 	static MidiTracks active_track, NextTrack;
+ 	static int Volume;
