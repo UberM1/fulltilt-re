@@ -1,3 +1,89 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fb705ed..b4fa034 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -82,6 +82,8 @@ set(SOURCE_FILES
+         SpaceCadetPinball/Sound.cpp
+         SpaceCadetPinball/Sound.h
+         SpaceCadetPinball/SpaceCadetPinball.cpp
++        SpaceCadetPinball/table_rules.cpp
++        SpaceCadetPinball/table_rules.h
+         SpaceCadetPinball/TBall.cpp
+         SpaceCadetPinball/TBall.h
+         SpaceCadetPinball/TBlocker.cpp
+diff --git a/SpaceCadetPinball/DebugOverlay.cpp b/SpaceCadetPinball/DebugOverlay.cpp
+index cdee9b3..ec101e8 100644
+--- a/SpaceCadetPinball/DebugOverlay.cpp
++++ b/SpaceCadetPinball/DebugOverlay.cpp
+@@ -265,7 +265,10 @@ void DebugOverlay::DrawBallDepthSteps()
+ 		auto visualCount = loader::query_visual_states(ball->GroupIndex);
+ 		for (auto index = 0; index < visualCount; ++index)
+ 		{
+-			auto depthPt = reinterpret_cast<vector3*>(loader::query_float_attribute(ball->GroupIndex, index, 501));
++			// Debug-only read of the per-state visual offset; may be absent (see TBall).
++			auto depthPt = reinterpret_cast<vector3*>(loader::query_float_attribute_opt(ball->GroupIndex, index, 501));
++			if (!depthPt)
++				continue;
+ 			auto pt = proj::xform_to_2d(*depthPt);
+ 
+ 			// Snap X coordinate to edge box sides
+diff --git a/SpaceCadetPinball/TBall.cpp b/SpaceCadetPinball/TBall.cpp
+index 0445b7b..74d81f2 100644
+--- a/SpaceCadetPinball/TBall.cpp
++++ b/SpaceCadetPinball/TBall.cpp
+@@ -39,8 +39,13 @@ TBall::TBall(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 		HasGroupFlag = true;
+ 		loader::query_visual(groupIndex, 0, &visual);
+ 		CollisionMask = visual.CollisionGroup;
+-		auto floatArr = loader::query_float_attribute(groupIndex, 0, 408);
+-		Position = {floatArr[0], floatArr[1], floatArr[3]};
++		// Attribute 408 is the ball's start position. Absent means the group carries no
++		// position -- use the origin, exactly as the groupIndex == -1 path above does.
++		auto floatArr = loader::query_float_attribute_opt(groupIndex, 0, 408);
++		if (floatArr)
++			Position = {floatArr[0], floatArr[1], floatArr[3]};
++		else
++			Position = {0, 0, 0};
+ 	}
+ 
+ 	/*Full tilt: ball is ballN, where N[0,2] resolution*/
+@@ -51,16 +56,23 @@ TBall::TBall(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 		groupIndex = loader::query_handle(ballGroupName);
+ 	}
+ 
+-	Radius = *loader::query_float_attribute(groupIndex, 0, 500);
++	// Attribute 500 is the ball radius. Every table in both games has it on the "ball"
++	// group; a table without it is not a pinball table. Guarded only so the miss is a
++	// zero-radius ball and a reported error rather than a null dereference -- no radius
++	// is invented here, because any number picked would silently change every wall
++	// offset on the playfield (CollisionCompOffset below).
++	auto radiusArr = loader::query_float_attribute(groupIndex, 0, 500);
++	Radius = radiusArr ? *radiusArr : 0.0f;
+ 
+ 	auto visualCount = loader::query_visual_states(groupIndex);
+ 	for (auto index = 0; index < visualCount; ++index)
+ 	{
+ 		loader::query_visual(groupIndex, index, &visual);
+ 		ListBitmap->push_back(visual.Bitmap);
+-		auto visVec = reinterpret_cast<vector3*>(loader::query_float_attribute(groupIndex, index, 501));
+-		auto zDepth = proj::z_distance(*visVec);
+-		VisualZArray[index] = zDepth;
++		// 501 is the per-state visual offset used only to precompute a render depth.
++		// Absent means this ball state has no offset: depth 0, no feature to skip.
++		auto visVec = reinterpret_cast<vector3*>(loader::query_float_attribute_opt(groupIndex, index, 501));
++		VisualZArray[index] = visVec ? proj::z_distance(*visVec) : 0.0f;
+ 	}
+ 	RenderSprite = new render_sprite(VisualTypes::Ball, nullptr, nullptr, 0, 0, nullptr);
+ 	PinballTable->CollisionCompOffset = Radius;
+@@ -82,7 +94,7 @@ void TBall::Repaint()
+ 	auto zDepth = proj::z_distance(Position);
+ 
+ 	auto index = 0u;
+-	for (; index < ListBitmap->size() - 1; ++index)
++	for (; ListBitmap && index + 1 < ListBitmap->size(); ++index)
+ 	{
+ 		if (VisualZArray[index] <= zDepth) break;
+ 	}
 diff --git a/SpaceCadetPinball/TBlocker.h b/SpaceCadetPinball/TBlocker.h
 index a42f4e2..b7bd5e5 100644
 --- a/SpaceCadetPinball/TBlocker.h
@@ -18,8 +104,43 @@ index a42f4e2..b7bd5e5 100644
  	int InitialDuration;
  	int ExtendedDuration;
  	int Timer;
+diff --git a/SpaceCadetPinball/TBumper.cpp b/SpaceCadetPinball/TBumper.cpp
+index ba69e1c..41cb428 100644
+--- a/SpaceCadetPinball/TBumper.cpp
++++ b/SpaceCadetPinball/TBumper.cpp
+@@ -14,7 +14,9 @@ TBumper::TBumper(TPinballTable* table, int groupIndex) : TCollisionComponent(tab
+ 
+ 	BmpIndex = 0;
+ 	Timer = 0;
+-	TimerTime = *loader::query_float_attribute(groupIndex, 0, 407);
++	// 407 is the lamp-fade delay. Absent means no delay was authored, so the fade timer
++	// expires on the next tick; the defaulted overload keeps that explicit.
++	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
+ 	loader::query_visual(groupIndex, 0, &visual);
+ 	SoundIndex4 = visual.SoundIndex4;
+ 	SoundIndex3 = visual.SoundIndex3;
+@@ -27,8 +29,9 @@ int TBumper::Message(MessageCode code, float value)
+ 	{
+ 	case MessageCode::TBumperSetBmpIndex:
+ 		{
++			// A sprite-less bumper has no lit states to step through.
+ 			auto nextBmp = static_cast<int>(floor(value));
+-			auto maxBmp = static_cast<int>(ListBitmap->size()) - 1;
++			auto maxBmp = ListBitmap ? static_cast<int>(ListBitmap->size()) - 1 : 0;
+ 			if (2 * nextBmp > maxBmp)
+ 				nextBmp = maxBmp / 2;
+ 			if (nextBmp < 0)
+@@ -48,7 +51,7 @@ int TBumper::Message(MessageCode code, float value)
+ 	case MessageCode::TBumperIncBmpIndex:
+ 		{
+ 			auto nextBmp = BmpIndex + 1;
+-			auto maxBmp = static_cast<int>(ListBitmap->size()) - 1;
++			auto maxBmp = ListBitmap ? static_cast<int>(ListBitmap->size()) - 1 : 0;
+ 			if (2 * nextBmp > maxBmp)
+ 				nextBmp = maxBmp / 2;
+ 			TBumper::Message(MessageCode::TBumperSetBmpIndex, static_cast<float>(nextBmp));
 diff --git a/SpaceCadetPinball/TCollisionComponent.cpp b/SpaceCadetPinball/TCollisionComponent.cpp
-index 822bee1..fdd7473 100644
+index 822bee1..c9f1013 100644
 --- a/SpaceCadetPinball/TCollisionComponent.cpp
 +++ b/SpaceCadetPinball/TCollisionComponent.cpp
 @@ -25,9 +25,15 @@ TCollisionComponent::TCollisionComponent(TPinballTable* table, int groupIndex, b
@@ -32,13 +153,451 @@ index 822bee1..fdd7473 100644
 +			// Space Cadet has none, so the original code dereferenced the result
 +			// unconditionally and crashed here on either bonus table.
  			float offset = table->CollisionCompOffset;
- 			float* floatArr = loader::query_float_attribute(groupIndex, 0, 600);
+-			float* floatArr = loader::query_float_attribute(groupIndex, 0, 600);
 -			TEdgeSegment::install_wall(floatArr, this, &ActiveFlag, visual.CollisionGroup, offset, 0);
++			float* floatArr = loader::query_float_attribute_opt(groupIndex, 0, 600);
 +			if (floatArr)
 +				TEdgeSegment::install_wall(floatArr, this, &ActiveFlag, visual.CollisionGroup, offset, 0);
  		}
  	}
  
+diff --git a/SpaceCadetPinball/TComponentGroup.cpp b/SpaceCadetPinball/TComponentGroup.cpp
+index fd92c97..f5d358f 100644
+--- a/SpaceCadetPinball/TComponentGroup.cpp
++++ b/SpaceCadetPinball/TComponentGroup.cpp
+@@ -13,7 +13,7 @@ TComponentGroup::TComponentGroup(TPinballTable* table, int groupIndex) : TPinbal
+ 	if (groupIndex > 0)
+ 	{
+ 		int attrCount;
+-		auto shortArr = loader::query_iattribute(groupIndex, 1027, &attrCount);
++		auto shortArr = loader::query_iattribute_opt(groupIndex, 1027, &attrCount);
+ 		auto shortArrPtr = shortArr;
+ 		for (auto index = 0; index < attrCount; ++index, ++shortArrPtr)
+ 		{
+diff --git a/SpaceCadetPinball/TDemo.cpp b/SpaceCadetPinball/TDemo.cpp
+index 42b7632..568ba5a 100644
+--- a/SpaceCadetPinball/TDemo.cpp
++++ b/SpaceCadetPinball/TDemo.cpp
+@@ -24,7 +24,7 @@ TDemo::TDemo(TPinballTable* table, int groupIndex)
+ 	FlipRightFlag = 0;
+ 	FlipLeftFlag = 0;
+ 	table->Demo = this;
+-	auto floatArr1 = loader::query_float_attribute(groupIndex, 0, 407);
++	auto floatArr1 = loader::query_float_attribute_opt(groupIndex, 0, 407);
+ 	if (floatArr1)
+ 	{
+ 		FlipTimerTime1 = floatArr1[0];
+@@ -40,20 +40,28 @@ TDemo::TDemo(TPinballTable* table, int groupIndex)
+ 		UnFlipTimerTime2 = 0.1f;
+ 	}
+ 	loader::query_visual(groupIndex, 0, &visual);
+-	auto v5 = loader::query_float_attribute(groupIndex, 0, 1400);
+-	Edge1 = TEdgeSegment::install_wall(v5, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1400);
+-
+-	auto v6 = loader::query_float_attribute(groupIndex, 0, 1401);
+-	TEdgeSegment::install_wall(v6, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1401);
+-
+-	auto v7 = loader::query_float_attribute(groupIndex, 0, 1402);
+-	Edge2 = TEdgeSegment::install_wall(v7, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1402);
+-
+-	auto v8 = loader::query_float_attribute(groupIndex, 0, 1403);
+-	TEdgeSegment::install_wall(v8, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1403);
+-
+-	auto v9 = loader::query_float_attribute(groupIndex, 0, 1404);
+-	Edge3 = TEdgeSegment::install_wall(v9, this, &ActiveFlag, visual.CollisionGroup, table->CollisionCompOffset, 1404);
++	// 1400..1404 are the five trigger walls the demo AI aims at. install_wall reads
++	// *floatArr to pick a wall type, so each must be checked. A demo group that omits
++	// one simply has no wall there -- install nothing and leave the edge handle null;
++	// the demo's own code already tests Edge1/Edge2/Edge3 by identity only.
++	auto v5 = loader::query_float_attribute_opt(groupIndex, 0, 1400);
++	Edge1 = v5 ? TEdgeSegment::install_wall(v5, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1400) : nullptr;
++
++	auto v6 = loader::query_float_attribute_opt(groupIndex, 0, 1401);
++	if (v6)
++		TEdgeSegment::install_wall(v6, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1401);
++
++	auto v7 = loader::query_float_attribute_opt(groupIndex, 0, 1402);
++	Edge2 = v7 ? TEdgeSegment::install_wall(v7, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1402) : nullptr;
++
++	auto v8 = loader::query_float_attribute_opt(groupIndex, 0, 1403);
++	if (v8)
++		TEdgeSegment::install_wall(v8, this, &ActiveFlag, visual.CollisionGroup, 0.0, 1403);
++
++	auto v9 = loader::query_float_attribute_opt(groupIndex, 0, 1404);
++	Edge3 = v9
++		? TEdgeSegment::install_wall(v9, this, &ActiveFlag, visual.CollisionGroup, table->CollisionCompOffset, 1404)
++		: nullptr;
+ }
+ 
+ int TDemo::Message(MessageCode code, float value)
+diff --git a/SpaceCadetPinball/TDrain.cpp b/SpaceCadetPinball/TDrain.cpp
+index 516c584..431028a 100644
+--- a/SpaceCadetPinball/TDrain.cpp
++++ b/SpaceCadetPinball/TDrain.cpp
+@@ -11,7 +11,9 @@
+ TDrain::TDrain(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
+ {
+ 	Timer = 0;
+-	TimerTime = *loader::query_float_attribute(groupIndex, 0, 407);
++	// 407 is the delay between the last ball draining and the end-of-ball handler.
++	// Absent means no delay.
++	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
+ }
+ 
+ int TDrain::Message(MessageCode code, float value)
+diff --git a/SpaceCadetPinball/TFlagSpinner.cpp b/SpaceCadetPinball/TFlagSpinner.cpp
+index 2e9994c..76c4513 100644
+--- a/SpaceCadetPinball/TFlagSpinner.cpp
++++ b/SpaceCadetPinball/TFlagSpinner.cpp
+@@ -17,21 +17,22 @@ TFlagSpinner::TFlagSpinner(TPinballTable* table, int groupIndex) : TCollisionCom
+ 
+ 	Timer = 0;
+ 	loader::query_visual(groupIndex, 0, &visual);
+-	end.X = visual.FloatArr[0];
+-	end.Y = visual.FloatArr[1];
+-	start.X = visual.FloatArr[2];
+-	start.Y = visual.FloatArr[3];
+-	auto line = new TLine(this, &ActiveFlag, visual.CollisionGroup, start, end);
+-	if (line)
++	// FloatArr is null when the group has no line geometry. The two collider lines
++	// below are the spinner's whole physical presence; with no endpoints, install none
++	// and let it be a prop. Falls through to the speed attributes, which have their own
++	// upstream defaults.
++	if (visual.FloatArr)
+ 	{
++		end.X = visual.FloatArr[0];
++		end.Y = visual.FloatArr[1];
++		start.X = visual.FloatArr[2];
++		start.Y = visual.FloatArr[3];
++		auto line = new TLine(this, &ActiveFlag, visual.CollisionGroup, start, end);
+ 		line->place_in_grid(&AABB);
+ 		EdgeList.push_back(line);
+-	}
+ 
+-	line = new TLine(this, &ActiveFlag, visual.CollisionGroup, end, start);
+-	PrevCollider = line;
+-	if (line)
+-	{
++		line = new TLine(this, &ActiveFlag, visual.CollisionGroup, end, start);
++		PrevCollider = line;
+ 		line->place_in_grid(&AABB);
+ 		EdgeList.push_back(line);
+ 	}
+@@ -39,13 +40,13 @@ TFlagSpinner::TFlagSpinner(TPinballTable* table, int groupIndex) : TCollisionCom
+ 	SpeedDecrement = 0.64999998f;
+ 	MaxSpeed = 50000.0f;
+ 	MinSpeed = 5.0f;
+-	auto speedDec = loader::query_float_attribute(groupIndex, 0, 1202);
++	auto speedDec = loader::query_float_attribute_opt(groupIndex, 0, 1202);
+ 	if (speedDec)
+ 		SpeedDecrement = *speedDec;
+-	auto maxSpeed = loader::query_float_attribute(groupIndex, 0, 1200);
++	auto maxSpeed = loader::query_float_attribute_opt(groupIndex, 0, 1200);
+ 	if (maxSpeed)
+ 		MaxSpeed = *maxSpeed;
+-	auto minSpeed = loader::query_float_attribute(groupIndex, 0, 1201);
++	auto minSpeed = loader::query_float_attribute_opt(groupIndex, 0, 1201);
+ 	if (minSpeed)
+ 		MinSpeed = *minSpeed;
+ }
+@@ -89,7 +90,10 @@ void TFlagSpinner::NextFrame()
+ {
+ 	BmpIndex += SpinDirection;
+ 	int bmpIndex = BmpIndex;
+-	int bmpCount = static_cast<int>(ListBitmap->size());
++	// A spinner with no sprite list has no frames to advance through.
++	int bmpCount = ListBitmap ? static_cast<int>(ListBitmap->size()) : 0;
++	if (bmpCount <= 0)
++		return;
+ 	if (bmpIndex >= bmpCount)
+ 		BmpIndex = 0;
+ 	else if (bmpIndex < 0)
+diff --git a/SpaceCadetPinball/TFlipper.cpp b/SpaceCadetPinball/TFlipper.cpp
+index 2f07d83..4196a3c 100644
+--- a/SpaceCadetPinball/TFlipper.cpp
++++ b/SpaceCadetPinball/TFlipper.cpp
+@@ -21,28 +21,36 @@ TFlipper::TFlipper(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+ 	Elasticity = visual.Elasticity;
+ 	Smoothness = visual.Smoothness;
+ 
+-	auto collMult = *loader::query_float_attribute(groupIndex, 0, 803);
+-	auto retractTime = *loader::query_float_attribute(groupIndex, 0, 805);
+-	auto extendTime = *loader::query_float_attribute(groupIndex, 0, 804);
+-	auto vecT2 = reinterpret_cast<vector3*>(loader::query_float_attribute(groupIndex, 0, 802));
+-	auto vecT1 = reinterpret_cast<vector3*>(loader::query_float_attribute(groupIndex, 0, 801));
+-	auto origin = reinterpret_cast<vector3*>(loader::query_float_attribute(groupIndex, 0, 800));
+-	auto flipperEdge = new TFlipperEdge(
+-		this,
+-		&ActiveFlag,
+-		visual.CollisionGroup,
+-		table,
+-		origin,
+-		vecT1,
+-		vecT2,
+-		extendTime,
+-		retractTime,
+-		collMult,
+-		Elasticity,
+-		Smoothness);
+-	flipperEdge->place_in_grid(&AABB);
+-
+-	FlipperEdge = flipperEdge;
++	// 803/804/805 are scalars: collision multiplier and the two travel times. Absent
++	// means unspecified, which for a multiplier and a duration is zero -- no boost, no
++	// travel time. 800/801/802 are the flipper's pivot and its two extreme vectors;
++	// without all three there is no flipper geometry, so build no edge at all rather
++	// than place one at the origin. Message() below already tolerates a null edge.
++	auto collMult = loader::query_float_attribute(groupIndex, 0, 803, 0.0f);
++	auto retractTime = loader::query_float_attribute(groupIndex, 0, 805, 0.0f);
++	auto extendTime = loader::query_float_attribute(groupIndex, 0, 804, 0.0f);
++	auto vecT2 = reinterpret_cast<vector3*>(loader::query_float_attribute_opt(groupIndex, 0, 802));
++	auto vecT1 = reinterpret_cast<vector3*>(loader::query_float_attribute_opt(groupIndex, 0, 801));
++	auto origin = reinterpret_cast<vector3*>(loader::query_float_attribute_opt(groupIndex, 0, 800));
++	FlipperEdge = nullptr;
++	if (origin && vecT1 && vecT2)
++	{
++		auto flipperEdge = new TFlipperEdge(
++			this,
++			&ActiveFlag,
++			visual.CollisionGroup,
++			table,
++			origin,
++			vecT1,
++			vecT2,
++			extendTime,
++			retractTime,
++			collMult,
++			Elasticity,
++			Smoothness);
++		flipperEdge->place_in_grid(&AABB);
++		FlipperEdge = flipperEdge;
++	}
+ 	BmpIndex = 0;
+ 	if (table)
+ 		table->FlipperList.push_back(this);
+@@ -62,6 +70,10 @@ TFlipper::~TFlipper()
+ 
+ int TFlipper::Message(MessageCode code, float value)
+ {
++	// A flipper whose group carried no pivot/extent attributes has no edge to move.
++	if (!FlipperEdge)
++		return 0;
++
+ 	switch (code)
+ 	{
+ 	case MessageCode::TFlipperExtend:
+@@ -106,7 +118,8 @@ int TFlipper::Message(MessageCode code, float value)
+ 
+ void TFlipper::port_draw()
+ {
+-	FlipperEdge->port_draw();
++	if (FlipperEdge)
++		FlipperEdge->port_draw();
+ }
+ 
+ void TFlipper::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
+@@ -115,6 +128,9 @@ void TFlipper::Collision(TBall* ball, vector2* nextPosition, vector2* direction,
+ 
+ void TFlipper::UpdateSprite()
+ {
++	if (!FlipperEdge || !ListBitmap)
++		return;
++
+ 	auto bmpCountSub1 = static_cast<int>(ListBitmap->size()) - 1;
+ 	auto newBmpIndex = static_cast<int>(floor(FlipperEdge->CurrentAngle / FlipperEdge->AngleMax * bmpCountSub1 + 0.5f));
+ 	newBmpIndex = Clamp(newBmpIndex, 0, bmpCountSub1);
+@@ -127,7 +143,7 @@ void TFlipper::UpdateSprite()
+ 
+ int TFlipper::GetFlipperStepAngle(float dt, float* dst) const
+ {
+-	if (!MessageField)
++	if (!MessageField || !FlipperEdge)
+ 		return 0;
+ 
+ 	auto deltaAngle = FlipperEdge->flipper_angle_delta(dt);
+diff --git a/SpaceCadetPinball/THole.cpp b/SpaceCadetPinball/THole.cpp
+index 4c930ff..f9ebfc7 100644
+--- a/SpaceCadetPinball/THole.cpp
++++ b/SpaceCadetPinball/THole.cpp
+@@ -21,12 +21,27 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	BallCapturedFlag = false;
+ 	Unknown3 = loader::query_float_attribute(groupIndex, 0, 407, 0.25f);
+ 	GravityMult = loader::query_float_attribute(groupIndex, 0, 701, 0.2f);
+-	GravityPull = *loader::query_float_attribute(groupIndex, 0, 305);
++	// 305 is the hole's own pull strength. Absent means the hole does not pull.
++	GravityPull = loader::query_float_attribute(groupIndex, 0, 305, 0.0f);
+ 
+ 	loader::query_visual(groupIndex, 0, &visual);
++	// query_visual leaves FloatArr null when the group's float record does not start
++	// with 600, i.e. the hole has no circle geometry at all. Everything below -- the
++	// centre, the collision circle, the field insert -- is that geometry, so there is
++	// no hole to build: skip it rather than install a hole at the origin.
++	if (!visual.FloatArr)
++	{
++		Circle = {};
++		Circle.RadiusSq = 0.001f;
++		ZSetValue = 0.0f;
++		CollisionMask = 0;
++		return;
++	}
+ 	Circle.Center.X = visual.FloatArr[0];
+ 	Circle.Center.Y = visual.FloatArr[1];
+-	Circle.RadiusSq = *loader::query_float_attribute(groupIndex, 0, 306) * visual.FloatArr[2];
++	// 306 scales the visual radius into the capture radius. Absent means unscaled: the
++	// existing zero check below then clamps to the engine's own 0.001f floor.
++	Circle.RadiusSq = loader::query_float_attribute(groupIndex, 0, 306, 0.0f) * visual.FloatArr[2];
+ 	if (Circle.RadiusSq == 0.0f)
+ 		Circle.RadiusSq = 0.001f;
+ 
+@@ -36,8 +51,13 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	tCircle->place_in_grid(&AABB);
+ 	EdgeList.push_back(tCircle);
+ 
+-	ZSetValue = loader::query_float_attribute(groupIndex, 0, 408)[2];
+-	CollisionMask = static_cast<int>(floor(*loader::query_float_attribute(groupIndex, 0, 1304)));
++	// 408 is the captured ball's z. Absent means the hole does not move the ball in z.
++	auto zArr = loader::query_float_attribute_opt(groupIndex, 0, 408);
++	ZSetValue = zArr ? zArr[2] : 0.0f;
++	// 1304 is the collision layer the captured ball is moved onto. Absent means the
++	// hole does not relayer the ball; 0 becomes layer 1 under Full Tilt's 1 << value,
++	// which is the base playfield layer a ball already lives on.
++	CollisionMask = static_cast<int>(floor(loader::query_float_attribute(groupIndex, 0, 1304, 0.0f)));
+ 
+ 	// CollisionMask difference: 3DPB - value given as is, FT: mask = 1 << value
+ 	if (pb::FullTiltMode)
+diff --git a/SpaceCadetPinball/TKickout.cpp b/SpaceCadetPinball/TKickout.cpp
+index dd31ce3..62b5594 100644
+--- a/SpaceCadetPinball/TKickout.cpp
++++ b/SpaceCadetPinball/TKickout.cpp
+@@ -5,6 +5,7 @@
+ #include "control.h"
+ #include "loader.h"
+ #include "pb.h"
++#include "table_rules.h"
+ #include "TBall.h"
+ #include "TCircle.h"
+ #include "timer.h"
+@@ -25,14 +26,32 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
+ 	MessageField = 0;
+ 	Timer = 0;
+ 	BallCaputeredFlag = 0;
+-	FieldMult = *loader::query_float_attribute(groupIndex, 0, 305);
++	// 305 is the kickout's own field strength. Absent means it exerts no field.
++	FieldMult = loader::query_float_attribute(groupIndex, 0, 305, 0.0f);
+ 	loader::query_visual(groupIndex, 0, &visual);
+ 	SoftHitSoundId = visual.SoftHitSoundId;
+ 	HardHitSoundId = visual.Kicker.HardHitSoundId;
+ 
++	// Dragon's accelerators (object type 1036, mapped onto TKickout) and several of its
++	// kickers have no circle geometry, so query_visual leaves FloatArr null. The centre,
++	// the collision circle and the field insert below are all that geometry: with none,
++	// there is no capture area to install.
++	if (!visual.FloatArr)
++	{
++		Circle = {};
++		Circle.RadiusSq = 0.001f;
++		CollisionBallSetZ = 0.0f;
++		ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
++		BallThrowDirection = visual.Kicker.ThrowBallDirection;
++		ThrowAngleMult = visual.Kicker.ThrowBallAngleMult;
++		ThrowSpeedMult1 = visual.Kicker.Boost;
++		return;
++	}
+ 	Circle.Center.X = visual.FloatArr[0];
+ 	Circle.Center.Y = visual.FloatArr[1];
+-	Circle.RadiusSq = *loader::query_float_attribute(groupIndex, 0, 306) * visual.FloatArr[2];
++	// 306 scales the visual radius into the capture radius; absent means unscaled and
++	// the zero check below clamps to the engine's own 0.001f floor.
++	Circle.RadiusSq = loader::query_float_attribute(groupIndex, 0, 306, 0.0f) * visual.FloatArr[2];
+ 	if (Circle.RadiusSq == 0.0f)
+ 		Circle.RadiusSq = 0.001f;
+ 	auto tCircle = new TCircle(this, &ActiveFlag, visual.CollisionGroup,
+@@ -44,8 +63,12 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
+ 	}
+ 
+ 	Circle.RadiusSq = visual.FloatArr[2] * visual.FloatArr[2];
+-	auto zAttr = loader::query_float_attribute(groupIndex, 0, 408);
+-	CollisionBallSetZ = pb::FullTiltMode && !pb::FullTiltDemoMode ? zAttr[3] : zAttr[2];
++	// 408 is the z the captured ball is held at. Absent means the kickout does not
++	// move the ball in z.
++	auto zAttr = loader::query_float_attribute_opt(groupIndex, 0, 408);
++	CollisionBallSetZ = !zAttr
++		                ? 0.0f
++		                : CurrentTable->FullTiltData && !CurrentTable->DemoData ? zAttr[3] : zAttr[2];
+ 	ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
+ 	BallThrowDirection = visual.Kicker.ThrowBallDirection;
+ 	ThrowAngleMult = visual.Kicker.ThrowBallAngleMult;
+diff --git a/SpaceCadetPinball/TLight.cpp b/SpaceCadetPinball/TLight.cpp
+index 86c9674..a317d2c 100644
+--- a/SpaceCadetPinball/TLight.cpp
++++ b/SpaceCadetPinball/TLight.cpp
+@@ -15,12 +15,11 @@ TLight::TLight(TPinballTable* table, int groupIndex) : TPinballComponent(table,
+ 	UndoOverrideTimer = 0;
+ 	FlashTimer = 0;
+ 	Reset();
+-	float* floatArr1 = loader::query_float_attribute(groupIndex, 0, 900);
+-	FlashDelay[0] = *floatArr1;
+-	SourceDelay[0] = *floatArr1;
+-	float* floatArr2 = loader::query_float_attribute(groupIndex, 0, 901);
+-	FlashDelay[1] = *floatArr2;
+-	SourceDelay[1] = *floatArr2;
++	// 900/901 are the flasher's off/on half-periods. A light that is never flashed does
++	// not need them, and many of Dragon's and Skulduggery's lamps omit them. Absent
++	// means no delay: the flasher, if ever started, toggles on consecutive ticks.
++	FlashDelay[0] = SourceDelay[0] = loader::query_float_attribute(groupIndex, 0, 900, 0.0f);
++	FlashDelay[1] = SourceDelay[1] = loader::query_float_attribute(groupIndex, 0, 901, 0.0f);
+ }
+ 
+ int TLight::Message(MessageCode code, float value)
+@@ -142,6 +141,9 @@ int TLight::Message(MessageCode code, float value)
+ 		schedule_timeout(value);
+ 		break;
+ 	case MessageCode::TLightSetOnStateBmpIndex:
++		// Lights on the bonus tables can be pure logic with no sprite list at all.
++		if (!ListBitmap)
++			break;
+ 		LightOnBmpIndex = Clamp(static_cast<int>(floor(value)), 0, static_cast<int>(ListBitmap->size()) - 1);
+ 		BmpArr[0] = -1;
+ 		BmpArr[1] = LightOnBmpIndex;
+@@ -162,6 +164,8 @@ int TLight::Message(MessageCode code, float value)
+ 		break;
+ 	case MessageCode::TLightIncOnStateBmpIndex:
+ 		bmpIndex = LightOnBmpIndex + 1;
++		if (!ListBitmap)
++			break;
+ 		if (bmpIndex >= static_cast<int>(ListBitmap->size()))
+ 			bmpIndex = static_cast<int>(ListBitmap->size()) - 1;
+ 		Message(MessageCode::TLightSetOnStateBmpIndex, static_cast<float>(bmpIndex));
+diff --git a/SpaceCadetPinball/TLightBargraph.cpp b/SpaceCadetPinball/TLightBargraph.cpp
+index 4765df4..ff75ebb 100644
+--- a/SpaceCadetPinball/TLightBargraph.cpp
++++ b/SpaceCadetPinball/TLightBargraph.cpp
+@@ -13,7 +13,7 @@ TLightBargraph::TLightBargraph(TPinballTable* table, int groupIndex) : TLightGro
+ 	TLightBargraph::Reset();
+ 	if (groupIndex > 0)
+ 	{
+-		float* floatArr = loader::query_float_attribute(groupIndex, 0, 904);
++		float* floatArr = loader::query_float_attribute_opt(groupIndex, 0, 904);
+ 		if (floatArr)
+ 		{
+ 			auto count = 2 * List.size();
+diff --git a/SpaceCadetPinball/TLightGroup.cpp b/SpaceCadetPinball/TLightGroup.cpp
+index 514e5b1..ace39cc 100644
+--- a/SpaceCadetPinball/TLightGroup.cpp
++++ b/SpaceCadetPinball/TLightGroup.cpp
+@@ -16,8 +16,10 @@ TLightGroup::TLightGroup(TPinballTable* table, int groupIndex) : TPinballCompone
+ 	if (groupIndex > 0)
+ 	{
+ 		int count;
+-		Timer1TimeDefault = *loader::query_float_attribute(groupIndex, 0, 903);
+-		int16_t* groupIndArr = loader::query_iattribute(groupIndex, 1027, &count);
++		// 903 is the group's default sweep interval. Absent means the group has no
++		// interval of its own; callers always pass an explicit time or get 0.
++		Timer1TimeDefault = loader::query_float_attribute(groupIndex, 0, 903, 0.0f);
++		int16_t* groupIndArr = loader::query_iattribute_opt(groupIndex, 1027, &count);
+ 		for (int index = 0; index < count; ++groupIndArr)
+ 		{
+ 			auto comp = dynamic_cast<TLight*>(table->find_component(*groupIndArr));
 diff --git a/SpaceCadetPinball/TLightGroup.h b/SpaceCadetPinball/TLightGroup.h
 index 17449a0..8cc6693 100644
 --- a/SpaceCadetPinball/TLightGroup.h
@@ -61,6 +620,38 @@ index 17449a0..8cc6693 100644
  	float Timer1Time{};
  	float Timer1TimeDefault;
  	MessageCode MessageField2{};
+diff --git a/SpaceCadetPinball/TLightRollover.cpp b/SpaceCadetPinball/TLightRollover.cpp
+index eee2900..3e64d03 100644
+--- a/SpaceCadetPinball/TLightRollover.cpp
++++ b/SpaceCadetPinball/TLightRollover.cpp
+@@ -15,7 +15,9 @@ TLightRollover::TLightRollover(TPinballTable* table, int groupIndex) : TRollover
+ 	Timer = 0;
+ 	SpriteSet(-1);
+ 	build_walls(groupIndex);
+-	FloatArr = *loader::query_float_attribute(groupIndex, 0, 407);
++	// 407 is the lit-state hold time. Several of Dragon's light rollovers omit it;
++	// absent means no hold, i.e. the sprite clears on the next tick.
++	FloatArr = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
+ }
+ 
+ int TLightRollover::Message(MessageCode code, float value)
+diff --git a/SpaceCadetPinball/TPinballComponent.cpp b/SpaceCadetPinball/TPinballComponent.cpp
+index 317be2c..d271e66 100644
+--- a/SpaceCadetPinball/TPinballComponent.cpp
++++ b/SpaceCadetPinball/TPinballComponent.cpp
+@@ -129,6 +129,12 @@ void TPinballComponent::SpriteSet(int index) const
+ 	int xPos, yPos;
+ 	gdrv_bitmap8* bmp;
+ 	zmap_header_type* zMap;
++	// Full Tilt's bonus tables have components with fewer visual states than Space
++	// Cadet's rules index -- spot targets with a single bitmap, blockers with none.
++	// at() would throw; an out-of-range state simply has no bitmap to show.
++	if (index >= static_cast<int>(ListBitmap->size()))
++		return;
++
+ 	if (index >= 0)
+ 	{
+ 		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
 index e0ccd71..2527a9b 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
@@ -85,7 +676,7 @@ index e0ccd71..2527a9b 100644
  	char ActiveFlag;
  	int MessageField;
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..3ea177d 100644
+index aa8551a..bd0135f 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
 @@ -178,9 +178,46 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
@@ -135,11 +726,161 @@ index aa8551a..3ea177d 100644
  		}
  	}
  
+@@ -290,9 +327,12 @@ void TPinballTable::tilt(float time)
+ {
+ 	if (!TiltLockFlag && !BallInDrainFlag)
+ 	{
+-		pb::InfoTextBox->Clear();
+-		pb::MissTextBox->Clear();
+-		pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING136), -1.0);
++		if (pb::InfoTextBox)
++			pb::InfoTextBox->Clear();
++		if (pb::MissTextBox)
++			pb::MissTextBox->Clear();
++		if (pb::InfoTextBox)
++			pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING136), -1.0);
+ 		loader::play_sound(SoundIndex3, nullptr, "TPinballTable1");
+ 		TiltTimeoutTimer = timer::set(30.0, this, tilt_timeout);
+ 
+@@ -315,6 +355,20 @@ void TPinballTable::port_draw()
+ 	}
+ }
+ 
++// Space Cadet has exactly one flipper a side, so the original kept one pointer each
++// and every construction overwrote it. Full Tilt's bonus tables do not: Dragon's Keep
++// has one left and two right, Skulduggery two of each. With single pointers only the
++// last-spawned flipper of a side responds, which is why the lower pair sat still.
++//
++// FlipperList already holds every flipper; the type code says which side, 1003 left
++// and 1004 right, the same codes the spawn switch above dispatches on.
++void TPinballTable::MessageFlippers(int typeCode, MessageCode code, float value)
++{
++	for (auto flipper : FlipperList)
++		if (flipper->GetComponentType() == typeCode)
++			flipper->Message(code, value);
++}
++
+ int TPinballTable::Message(MessageCode code, float value)
+ {
+ 	const char* rc_text;
+@@ -324,25 +378,25 @@ int TPinballTable::Message(MessageCode code, float value)
+ 	case MessageCode::LeftFlipperInputPressed:
+ 		if (!TiltLockFlag)
+ 		{
+-			FlipperL->Message(MessageCode::TFlipperExtend, value);
++			MessageFlippers(1003, MessageCode::TFlipperExtend, value);
+ 		}
+ 		break;
+ 	case MessageCode::LeftFlipperInputReleased:
+ 		if (!TiltLockFlag)
+ 		{
+-			FlipperL->Message(MessageCode::TFlipperRetract, value);
++			MessageFlippers(1003, MessageCode::TFlipperRetract, value);
+ 		}
+ 		break;
+ 	case MessageCode::RightFlipperInputPressed:
+ 		if (!TiltLockFlag)
+ 		{
+-			FlipperR->Message(MessageCode::TFlipperExtend, value);
++			MessageFlippers(1004, MessageCode::TFlipperExtend, value);
+ 		}
+ 		break;
+ 	case MessageCode::RightFlipperInputReleased:
+ 		if (!TiltLockFlag)
+ 		{
+-			FlipperR->Message(MessageCode::TFlipperRetract, value);
++			MessageFlippers(1004, MessageCode::TFlipperRetract, value);
+ 		}
+ 		break;
+ 	case MessageCode::PlungerInputPressed:
+@@ -375,7 +429,8 @@ int TPinballTable::Message(MessageCode code, float value)
+ 			rc_text = pb::get_rc_string(Msg::STRING131);
+ 		else
+ 			rc_text = pb::get_rc_string(Msg::STRING127);
+-		pb::InfoTextBox->Display(rc_text, -1.0);
++		if (pb::InfoTextBox)
++			pb::InfoTextBox->Display(rc_text, -1.0);
+ 		if (Demo)
+ 			Demo->Message(MessageCode::NewGame, 0.0);
+ 		break;
+@@ -447,8 +502,10 @@ int TPinballTable::Message(MessageCode code, float value)
+ 			JackpotScoreFlag = false;
+ 			BonusScoreFlag = false;
+ 			UnknownP71 = 0;
+-			pb::InfoTextBox->Clear();
+-			pb::MissTextBox->Clear();
++			if (pb::InfoTextBox)
++				pb::InfoTextBox->Clear();
++			if (pb::MissTextBox)
++				pb::MissTextBox->Clear();
+ 			LightGroup->Message(MessageCode::TLightGroupLightShowAnimation, 0.2f);
+ 			auto time = loader::play_sound(SoundIndex1, nullptr, "TPinballTable2");
+ 			if (time < 0)
+@@ -479,7 +536,8 @@ int TPinballTable::Message(MessageCode code, float value)
+ 					textboxText = pb::get_rc_string(Msg::STRING131);
+ 				else
+ 					textboxText = pb::get_rc_string(Msg::STRING127);
+-				pb::InfoTextBox->Display(textboxText, -1.0);
++				if (pb::InfoTextBox)
++					pb::InfoTextBox->Display(textboxText, -1.0);
+ 				break;
+ 			}
+ 
+@@ -547,7 +605,8 @@ int TPinballTable::Message(MessageCode code, float value)
+ 			}
+ 
+ 			if (textboxText != nullptr)
+-				pb::InfoTextBox->Display(textboxText, -1);
++				if (pb::InfoTextBox)
++					pb::InfoTextBox->Display(textboxText, -1);
+ 			JackpotScoreFlag = false;
+ 			BonusScoreFlag = false;
+ 			UnknownP71 = 0;
+@@ -556,8 +615,10 @@ int TPinballTable::Message(MessageCode code, float value)
+ 		break;
+ 	case MessageCode::GameOver:
+ 		loader::play_sound(SoundIndex2, nullptr, "TPinballTable3");
+-		pb::MissTextBox->Clear();
+-		pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING135), -1.0);
++		if (pb::MissTextBox)
++			pb::MissTextBox->Clear();
++		if (pb::InfoTextBox)
++			pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING135), -1.0);
+ 		EndGameTimeoutTimer = timer::set(3.0, this, EndGame_timeout);
+ 		break;
+ 	case MessageCode::Reset:
+@@ -680,8 +741,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
+ 	}
+ 	if (table->Demo)
+ 		table->Demo->Message(MessageCode::GameOver, 0.0);
+-	control::handler(MessageCode::ControlMissionStarted, pb::MissTextBox);
+-	pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING125), -1.0);
++	// Neither Full Tilt bonus table has a "mission_text_box" group, so MissTextBox is
++	// null there. control::handler dereferences the component it is given to find its
++	// control record; with no mission text box there is no mission display to notify.
++	if (pb::MissTextBox)
++		control::handler(MessageCode::ControlMissionStarted, pb::MissTextBox);
++	if (pb::InfoTextBox)
++		pb::InfoTextBox->Display(pb::get_rc_string(Msg::STRING125), -1.0);
+ }
+ 
+ void TPinballTable::LightShow_timeout(int timerId, void* caller)
 diff --git a/SpaceCadetPinball/TPinballTable.h b/SpaceCadetPinball/TPinballTable.h
-index c407fdc..8c872df 100644
+index c407fdc..6963c97 100644
 --- a/SpaceCadetPinball/TPinballTable.h
 +++ b/SpaceCadetPinball/TPinballTable.h
-@@ -85,6 +85,12 @@ public:
+@@ -44,6 +44,10 @@ public:
+ 	static void replay_timer_callback(int timerId, void* caller);
+ 	static void tilt_timeout(int timerId, void* caller);
+ 
++	void MessageFlippers(int typeCode, MessageCode code, float value);
++
++	// Kept for the code that reaches for "the" flipper; input goes through
++	// MessageFlippers so every flipper on a side responds.
+ 	TFlipper* FlipperL;
+ 	TFlipper* FlipperR;
+ 	scoreStruct* CurScoreStruct;
+@@ -85,6 +89,12 @@ public:
  	bool BonusScoreFlag{};
  	int JackpotScore{};
  	bool JackpotScoreFlag{};
@@ -152,8 +893,369 @@ index c407fdc..8c872df 100644
  	int UnknownP71{};
  	int BallCount{};
  	int MaxBallCount;
+diff --git a/SpaceCadetPinball/TPlunger.cpp b/SpaceCadetPinball/TPlunger.cpp
+index 6f0f48e..e159065 100644
+--- a/SpaceCadetPinball/TPlunger.cpp
++++ b/SpaceCadetPinball/TPlunger.cpp
+@@ -25,23 +25,34 @@ TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+ 	Threshold = 1000000000.0;
+ 
+     // FT:MaxPullback = 50; 3DPB: MaxPullback = 100, PullbackIncrement is floored.
++    // Skulduggery's ball launcher (object type 1034, mapped onto TPlunger) carries no
++    // sprite list, so ListBitmap is null. The increment is "one pullback step per
++    // eighth of a frame"; with no frames the smallest meaningful frame count is one,
++    // which is what an unanimated plunger is. Nothing else here can be derived.
++    auto bmpCount = ListBitmap ? ListBitmap->size() : 1u;
++    if (bmpCount == 0)
++        bmpCount = 1;
+     if (pb::FullTiltMode)
+     {
+         MaxPullback = 50;
+-        PullbackIncrement = MaxPullback / (ListBitmap->size() * 8.0f);
++        PullbackIncrement = MaxPullback / (bmpCount * 8.0f);
+     }
+     else
+     {
+         MaxPullback = 100;
+-        PullbackIncrement = std::floor(MaxPullback / (ListBitmap->size() * 8.0f));
++        PullbackIncrement = std::floor(MaxPullback / (bmpCount * 8.0f));
+     }
+ 
+ 	Elasticity = 0.5f;
+ 	Smoothness = 0.5f;
+ 	
+ 	PullbackDelay = 0.025f;
+-	float* floatArr = loader::query_float_attribute(groupIndex, 0, 601);
+-	table->PlungerPosition = {floatArr[0], floatArr[1]};
++	// 601 is where the plunger feeds the ball in. Skulduggery's launcher (object type
++	// 1034) is mapped onto TPlunger and need not carry one; absent means this component
++	// contributes no feed point, so leave the table's existing one alone.
++	float* floatArr = loader::query_float_attribute_opt(groupIndex, 0, 601);
++	if (floatArr)
++		table->PlungerPosition = {floatArr[0], floatArr[1]};
+ }
+ 
+ void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
+@@ -186,7 +197,9 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
+ 	}
+ 
+ 	int index = static_cast<int>(floor(
+-		static_cast<float>(plunger->ListBitmap->size() - 1) *
++		static_cast<float>(plunger->ListBitmap && !plunger->ListBitmap->empty()
++			                   ? plunger->ListBitmap->size() - 1
++			                   : 0) *
+ 		(plunger->Boost / plunger->MaxPullback)));
+ 	plunger->SpriteSet(index);
+ }
+diff --git a/SpaceCadetPinball/TPopupTarget.cpp b/SpaceCadetPinball/TPopupTarget.cpp
+index a2535c0..bae2e1b 100644
+--- a/SpaceCadetPinball/TPopupTarget.cpp
++++ b/SpaceCadetPinball/TPopupTarget.cpp
+@@ -11,7 +11,8 @@
+ TPopupTarget::TPopupTarget(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
+ {
+ 	Timer = 0;
+-	TimerTime = *loader::query_float_attribute(groupIndex, 0, 407);
++	// 407 is the re-arm delay after the target is knocked down. Absent means none.
++	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
+ }
+ 
+ int TPopupTarget::Message(MessageCode code, float value)
+diff --git a/SpaceCadetPinball/TRamp.cpp b/SpaceCadetPinball/TRamp.cpp
+index 795235d..cfc44a2 100644
+--- a/SpaceCadetPinball/TRamp.cpp
++++ b/SpaceCadetPinball/TRamp.cpp
+@@ -24,49 +24,90 @@ TRamp::TRamp(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	BallFieldMult = loader::query_float_attribute(groupIndex, 0, 701, 0.2f);
+ 	BallZOffsetFlag = static_cast<int>(loader::query_float_attribute(groupIndex, 0, 1305, 0));
+ 
+-	auto floatArr3Plane = loader::query_float_attribute(groupIndex, 0, 1300);
++	// Attribute 1300 is the ramp's plane list -- its entire geometry. Without it there
++	// is nothing to build: no planes to walk, no bounding box, no field to insert.
++	// Dragon's Keep and Skulduggery have no such ramp today, but the rest of this
++	// constructor is meaningless without planes, so bail out rather than guess.
++	auto floatArr3Plane = loader::query_float_attribute_opt(groupIndex, 0, 1300);
++	if (!floatArr3Plane)
++	{
++		RampPlaneCount = 0;
++		RampPlane = nullptr;
++		Line1 = Line2 = Line3 = nullptr;
++		Wall1CollisionGroup = Wall2CollisionGroup = 0;
++		Wall1BallOffset = Wall2BallOffset = 0.0f;
++		return;
++	}
+ 	RampPlaneCount = static_cast<int>(floor(*floatArr3Plane));
+ 	RampPlane = reinterpret_cast<ramp_plane_type*>(floatArr3Plane + 1);
+ 
+-	auto wall0Arr = loader::query_float_attribute(groupIndex, 0, 1303);
+-	auto wall0CollisionGroup = 1 << static_cast<int>(floor(wall0Arr[0]));
+-	auto wall0Pts = reinterpret_cast<wall_point_type*>(wall0Arr + 2);
+-	Line1 = new TLine(this, &ActiveFlag, wall0CollisionGroup, wall0Pts->Pt1, wall0Pts->Pt0);
+-	Line1->WallValue = nullptr;
+-	Line1->place_in_grid(&AABB);
+-	EdgeList.push_back(Line1);
+-
+-	auto wall1Arr = loader::query_float_attribute(groupIndex, 0, 1301);
+-	Wall1CollisionGroup = 1 << static_cast<int>(floor(wall1Arr[0]));
+-	auto wall1Enabled = static_cast<int>(floor(wall1Arr[1]));
+-	Wall1BallOffset = wall1Arr[7];
+-	maths::find_closest_edge(
+-		RampPlane,
+-		RampPlaneCount,
+-		reinterpret_cast<wall_point_type*>(wall1Arr + 3),
+-		wall1End,
+-		wall1Start);
+-
+-	Line2 = new TLine(this, &ActiveFlag, CollisionGroup, wall1Start, wall1End);
+-	Line2->WallValue = nullptr;
+-	Line2->place_in_grid(&AABB);
+-	EdgeList.push_back(Line2);
+-
+-	auto wall2Arr = loader::query_float_attribute(groupIndex, 0, 1302);
+-	Wall2CollisionGroup = 1 << static_cast<int>(floor(wall2Arr[0]));
+-	auto wall2Enabled = static_cast<int>(floor(wall2Arr[1]));
+-	Wall2BallOffset = wall2Arr[7];
+-	maths::find_closest_edge(
+-		RampPlane,
+-		RampPlaneCount,
+-		reinterpret_cast<wall_point_type*>(wall2Arr + 3),
+-		wall2End,
+-		wall2Start);
+-
+-	Line3 = new TLine(this, &ActiveFlag, CollisionGroup, wall2Start, wall2End);
+-	Line3->WallValue = nullptr;
+-	Line3->place_in_grid(&AABB);
+-	EdgeList.push_back(Line3);
++	// 1303 is the ramp's entry wall. Skulduggery's ramp exits (object type 1035) are
++	// ramps with only the one ramp wall and no entry wall; Dragon's a_rmp5 is the same.
++	// Absent means there is no entry edge -- install none.
++	auto wall0Arr = loader::query_float_attribute_opt(groupIndex, 0, 1303);
++	if (wall0Arr)
++	{
++		auto wall0CollisionGroup = 1 << static_cast<int>(floor(wall0Arr[0]));
++		auto wall0Pts = reinterpret_cast<wall_point_type*>(wall0Arr + 2);
++		Line1 = new TLine(this, &ActiveFlag, wall0CollisionGroup, wall0Pts->Pt1, wall0Pts->Pt0);
++		Line1->WallValue = nullptr;
++		Line1->place_in_grid(&AABB);
++		EdgeList.push_back(Line1);
++	}
++	else
++	{
++		Line1 = nullptr;
++	}
++
++	// 1301/1302 are the two switchable side walls. When one is absent the ramp has no
++	// such side: leave its collision group zero and its endpoints degenerate, so the
++	// per-plane edge loop below never matches it and the plane edge keeps the ramp's
++	// own collision group. Nothing is defaulted -- the wall simply does not exist.
++	auto wall1Arr = loader::query_float_attribute_opt(groupIndex, 0, 1301);
++	auto wall1Enabled = 0;
++	Wall1CollisionGroup = 0;
++	Wall1BallOffset = 0.0f;
++	Line2 = nullptr;
++	if (wall1Arr)
++	{
++		Wall1CollisionGroup = 1 << static_cast<int>(floor(wall1Arr[0]));
++		wall1Enabled = static_cast<int>(floor(wall1Arr[1]));
++		Wall1BallOffset = wall1Arr[7];
++		maths::find_closest_edge(
++			RampPlane,
++			RampPlaneCount,
++			reinterpret_cast<wall_point_type*>(wall1Arr + 3),
++			wall1End,
++			wall1Start);
++
++		Line2 = new TLine(this, &ActiveFlag, CollisionGroup, wall1Start, wall1End);
++		Line2->WallValue = nullptr;
++		Line2->place_in_grid(&AABB);
++		EdgeList.push_back(Line2);
++	}
++
++	auto wall2Arr = loader::query_float_attribute_opt(groupIndex, 0, 1302);
++	auto wall2Enabled = 0;
++	Wall2CollisionGroup = 0;
++	Wall2BallOffset = 0.0f;
++	Line3 = nullptr;
++	if (wall2Arr)
++	{
++		Wall2CollisionGroup = 1 << static_cast<int>(floor(wall2Arr[0]));
++		wall2Enabled = static_cast<int>(floor(wall2Arr[1]));
++		Wall2BallOffset = wall2Arr[7];
++		maths::find_closest_edge(
++			RampPlane,
++			RampPlaneCount,
++			reinterpret_cast<wall_point_type*>(wall2Arr + 3),
++			wall2End,
++			wall2Start);
++
++		Line3 = new TLine(this, &ActiveFlag, CollisionGroup, wall2Start, wall2End);
++		Line3->WallValue = nullptr;
++		Line3->place_in_grid(&AABB);
++		EdgeList.push_back(Line3);
++	}
+ 
+ 
+ 	auto xMin = 1000000000.0f;
+diff --git a/SpaceCadetPinball/TRollover.cpp b/SpaceCadetPinball/TRollover.cpp
+index 7ed23b4..455a548 100644
+--- a/SpaceCadetPinball/TRollover.cpp
++++ b/SpaceCadetPinball/TRollover.cpp
+@@ -65,10 +65,16 @@ void TRollover::build_walls(int groupIndex)
+ 	visualStruct visual{};
+ 
+ 	loader::query_visual(groupIndex, 0, &visual);
+-	float* arr1 = loader::query_float_attribute(groupIndex, 0, 600);
+-	TEdgeSegment::install_wall(arr1, this, &ActiveFlag, visual.CollisionGroup, 0.0, 600);
+-	float* arr2 = loader::query_float_attribute(groupIndex, 0, 603);
+-	TEdgeSegment::install_wall(arr2, this, &RolloverFlag, visual.CollisionGroup, 0.0, 603);
++	// 600 is the rollover's trip wall, 603 the second wall that only collides while the
++	// rollover is already tripped. Dragon's light rollovers carry one or neither, and
++	// install_wall reads *floatArr for the wall type. Absent means no such wall:
++	// install nothing.
++	float* arr1 = loader::query_float_attribute_opt(groupIndex, 0, 600);
++	if (arr1)
++		TEdgeSegment::install_wall(arr1, this, &ActiveFlag, visual.CollisionGroup, 0.0, 600);
++	float* arr2 = loader::query_float_attribute_opt(groupIndex, 0, 603);
++	if (arr2)
++		TEdgeSegment::install_wall(arr2, this, &RolloverFlag, visual.CollisionGroup, 0.0, 603);
+ }
+ 
+ void TRollover::TimerExpired(int timerId, void* caller)
+diff --git a/SpaceCadetPinball/TSink.cpp b/SpaceCadetPinball/TSink.cpp
+index 54539bb..4a5dc0e 100644
+--- a/SpaceCadetPinball/TSink.cpp
++++ b/SpaceCadetPinball/TSink.cpp
+@@ -22,10 +22,14 @@ TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
+ 	SoundIndex4 = visual.SoundIndex4;
+ 	SoundIndex3 = visual.SoundIndex3;
+-	auto floatArr = loader::query_float_attribute(groupIndex, 0, 601);
+-	BallPosition.X = floatArr[0];
+-	BallPosition.Y = floatArr[1];
+-	TimerTime = *loader::query_float_attribute(groupIndex, 0, 407);
++	// 601 is where the sink spits the ball back out. Absent means the sink has no
++	// return point of its own; leave it at the origin rather than invent one -- the
++	// ball will be fed from (0,0), which is wrong but not a crash, and no sink on
++	// either bonus table has been seen without it.
++	auto floatArr = loader::query_float_attribute_opt(groupIndex, 0, 601);
++	BallPosition = floatArr ? vector2{floatArr[0], floatArr[1]} : vector2{0.0f, 0.0f};
++	// 407 is the auto-eject delay; absent means eject on the next tick.
++	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
+ }
+ 
+ int TSink::Message(MessageCode code, float value)
+diff --git a/SpaceCadetPinball/TTableLayer.cpp b/SpaceCadetPinball/TTableLayer.cpp
+index 311a2e0..c196879 100644
+--- a/SpaceCadetPinball/TTableLayer.cpp
++++ b/SpaceCadetPinball/TTableLayer.cpp
+@@ -23,8 +23,12 @@ TTableLayer::TTableLayer(TPinballTable* table): TCollisionComponent(table, -1, f
+ 	auto spriteData = visual.Bitmap;
+ 
+ 	/*Full tilt: proj center first value is offset by resolution*/
+-	auto projCenter = loader::query_float_attribute(groupIndex, 0, 700 + fullscrn::GetResolution());
+-	proj::recenter(projCenter[0], projCenter[1]);
++	// 700+resolution is the projection centre for this resolution. Absent means the
++	// table authored none for it -- leave proj at whatever centre it already has
++	// rather than recentre on made-up coordinates.
++	auto projCenter = loader::query_float_attribute_opt(groupIndex, 0, 700 + fullscrn::GetResolution());
++	if (projCenter)
++		proj::recenter(projCenter[0], projCenter[1]);
+ 	render::set_background_zmap(spriteData.ZMap, 0, 0);
+ 
+ 	auto bmp = spriteData.Bmp;
+@@ -59,8 +63,11 @@ TTableLayer::TTableLayer(TPinballTable* table): TCollisionComponent(table, -1, f
+ 	/*Full tilt hack - GraityMult should be 0.2*/
+ 	if (!pb::FullTiltMode && !pb::FullTiltDemoMode)
+ 	{
++		// 701 only reached in 3DPB mode, where the table always has it; guarded so a
++		// malformed table reports the miss instead of faulting. 0.2f is not invented
++		// here -- it is the value the Full Tilt branch below already uses.
+ 		auto angleMultArr = loader::query_float_attribute(groupIndex, 0, 701);
+-		GraityMult = *angleMultArr;
++		GraityMult = angleMultArr ? *angleMultArr : 0.2f;
+ 	}
+ 	else
+ 		GraityMult = 0.2f;
+diff --git a/SpaceCadetPinball/TTextBox.cpp b/SpaceCadetPinball/TTextBox.cpp
+index 555c855..f28797a 100644
+--- a/SpaceCadetPinball/TTextBox.cpp
++++ b/SpaceCadetPinball/TTextBox.cpp
+@@ -26,11 +26,17 @@ TTextBox::TTextBox(TPinballTable* table, int groupIndex) : TPinballComponent(tab
+ 	{
+ 		/*Full tilt: text box dimensions index is offset by resolution*/
+ 		int arrLength;
+-		auto dimensions = loader::query_iattribute(groupIndex + fullscrn::GetResolution(), 1500, &arrLength);
+-		OffsetX = dimensions[0];
+-		OffsetY = dimensions[1];
+-		Width = dimensions[2];
+-		Height = dimensions[3];
++		// 1500 is the box rectangle for this resolution. Absent means the box has no
++		// authored geometry: keep the zero rect set above, which draws nothing, rather
++		// than invent a position on the playfield.
++		auto dimensions = loader::query_iattribute_opt(groupIndex + fullscrn::GetResolution(), 1500, &arrLength);
++		if (dimensions && arrLength >= 4)
++		{
++			OffsetX = dimensions[0];
++			OffsetY = dimensions[1];
++			Width = dimensions[2];
++			Height = dimensions[3];
++		}
+ 	}
+ }
+ 
+diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
+index 4b6377c..68c2c5a 100644
+--- a/SpaceCadetPinball/control.cpp
++++ b/SpaceCadetPinball/control.cpp
+@@ -1112,9 +1112,13 @@ void control::cheat_bump_rank()
+ 
+ void control::UnstuckBall(TBall& ball, int dt)
+ {
+-	if (!CheckBallInControlBounds(ball, *flip1) &&
+-		!CheckBallInControlBounds(ball, *flip2) &&
+-		!CheckBallInControlBounds(ball, *plunger))
++	// Space Cadet's rules bind these by the hardcoded group names "a_flip1", "a_flip2"
++	// and "plunger". Both Full Tilt bonus tables have the flippers but no group named
++	// "plunger" (Dragon's is named differently, Skulduggery launches with s_launcher1),
++	// so the tag is null. A component the table does not have cannot bound the ball.
++	if (!(flip1 && CheckBallInControlBounds(ball, *flip1)) &&
++		!(flip2 && CheckBallInControlBounds(ball, *flip2)) &&
++		!(plunger && CheckBallInControlBounds(ball, *plunger)))
+ 	{
+ 		if (ball.StuckCounter <= 20)
+ 		{
+diff --git a/SpaceCadetPinball/fullscrn.cpp b/SpaceCadetPinball/fullscrn.cpp
+index a6c31e7..87a6d69 100644
+--- a/SpaceCadetPinball/fullscrn.cpp
++++ b/SpaceCadetPinball/fullscrn.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "options.h"
+ #include "pb.h"
++#include "table_rules.h"
+ #include "render.h"
+ #include "winmain.h"
+ 
+@@ -95,7 +96,7 @@ int fullscrn::GetResolution()
+ 
+ void fullscrn::SetResolution(int value)
+ {
+-	if (!pb::FullTiltMode || pb::FullTiltDemoMode)
++	if (!CurrentTable->FullTiltData || CurrentTable->DemoData)
+ 		value = 0;
+ 	assertm(value >= 0 && value <= 2, "Resolution value out of bounds");
+ 	resolution = value;
+@@ -103,7 +104,7 @@ void fullscrn::SetResolution(int value)
+ 
+ int fullscrn::GetMaxResolution()
+ {
+-	return pb::FullTiltMode && !pb::FullTiltDemoMode ? 2 : 0;
++	return CurrentTable->FullTiltData && !CurrentTable->DemoData ? 2 : 0;
+ }
+ 
+ void fullscrn::window_size_changed()
 diff --git a/SpaceCadetPinball/loader.cpp b/SpaceCadetPinball/loader.cpp
-index 283e983..dc19cfd 100644
+index 283e983..627f069 100644
 --- a/SpaceCadetPinball/loader.cpp
 +++ b/SpaceCadetPinball/loader.cpp
 @@ -43,7 +43,7 @@ int loader::sound_count = 1;
@@ -165,19 +1267,132 @@ index 283e983..dc19cfd 100644
  
  int loader::error(int errorCode, int captionCode)
  {
-@@ -263,6 +263,11 @@ float* loader::query_float_attribute(int groupIndex, int groupIndexOffset, int f
+@@ -90,7 +90,10 @@ void loader::loadfrom(DatFile* datFile)
+ 		auto value = reinterpret_cast<int16_t*>(datFile->field(groupIndex, FieldTypes::ShortValue));
+ 		if (value && *value == 202)
+ 		{
+-			if (sound_count < 65)
++			// The array holds 129; the old cap of 65 was sized for Space Cadet's 64
++			// sound groups and silently dropped PIRATES.DAT's last three, which then
++			// failed every get_sound_id that referenced them.
++			if (sound_count < static_cast<int>(sizeof sound_list / sizeof sound_list[0]))
+ 			{
+ 				sound_list[sound_count] = {nullptr, groupIndex, 0, 0};
+ 				sound_count++;
+@@ -188,6 +191,8 @@ int loader::query_handle(LPCSTR lpString)
+ 	return loader_table->record_labeled(lpString);
+ }
+ 
++static bool query_report_missing = true;
++
+ short loader::query_visual_states(int groupIndex)
+ {
+ 	short result;
+@@ -216,7 +221,8 @@ int16_t* loader::query_iattribute(int groupIndex, int firstValue, int* arraySize
+ {
+ 	if (groupIndex < 0)
+ 	{
+-		error(0, 22);
++		if (query_report_missing)
++			error(0, 22);
+ 		return nullptr;
+ 	}
+ 
+@@ -233,23 +239,34 @@ int16_t* loader::query_iattribute(int groupIndex, int firstValue, int* arraySize
+ 		}
+ 	}
+ 
+-	error(2, 23);
++	if (query_report_missing)
++		error(2, 23);
+ 	*arraySize = 0;
+ 	return nullptr;
+ }
+ 
++int16_t* loader::query_iattribute_opt(int groupIndex, int firstValue, int* arraySize)
++{
++	query_report_missing = false;
++	auto result = query_iattribute(groupIndex, firstValue, arraySize);
++	query_report_missing = true;
++	return result;
++}
++
+ float* loader::query_float_attribute(int groupIndex, int groupIndexOffset, int firstValue)
+ {
+ 	if (groupIndex < 0)
+ 	{
+-		error(0, 22);
++		if (query_report_missing)
++			error(0, 22);
+ 		return nullptr;
+ 	}
+ 
+ 	int stateId = state_id(groupIndex, groupIndexOffset);
+ 	if (stateId < 0)
+ 	{
+-		error(16, 22);
++		if (query_report_missing)
++			error(16, 22);
+ 		return nullptr;
+ 	}
+ 
+@@ -263,10 +280,19 @@ float* loader::query_float_attribute(int groupIndex, int groupIndexOffset, int f
  			return floatArr + 1;
  	}
  
-+	// TEMP instrumentation: which group wanted which attribute.
-+	fprintf(stderr, "query_float_attribute: group %d (%s) offset %d wants %d\n",
-+	        groupIndex, loader_table->field(groupIndex, FieldTypes::String) ?
-+	        reinterpret_cast<char*>(loader_table->field(groupIndex, FieldTypes::String)) : "?",
-+	        groupIndexOffset, firstValue);
- 	error(13, 22);
+-	error(13, 22);
++	if (query_report_missing)
++		error(13, 22);
  	return nullptr;
  }
-@@ -405,10 +410,19 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
+ 
++float* loader::query_float_attribute_opt(int groupIndex, int groupIndexOffset, int firstValue)
++{
++	query_report_missing = false;
++	auto result = query_float_attribute(groupIndex, groupIndexOffset, firstValue);
++	query_report_missing = true;
++	return result;
++}
++
+ float loader::query_float_attribute(int groupIndex, int groupIndexOffset, int firstValue, float defVal)
+ {
+ 	if (groupIndex < 0)
+@@ -342,25 +368,28 @@ float loader::play_sound(int soundIndex, TPinballComponent *soundSource, const c
+ 
+ int loader::state_id(int groupIndex, int groupIndexOffset)
+ {
++	// quiet() is set while an _opt lookup is in flight: a group that has no state
++	// record at all is just another legitimate omission there.
++	auto fail = [](int code) { return query_report_missing ? error(code, 24) : -1; };
+ 	auto visualState = query_visual_states(groupIndex);
+ 	if (visualState <= 0)
+-		return error(12, 24);
++		return fail(12);
+ 	auto shortArr = reinterpret_cast<int16_t*>(loader_table->field(groupIndex, FieldTypes::ShortValue));
+ 	if (!shortArr)
+-		return error(1, 24);
++		return fail(1);
+ 	if (*shortArr != 200)
+-		return error(5, 24);
++		return fail(5);
+ 	if (groupIndexOffset > visualState)
+-		return error(12, 24);
++		return fail(12);
+ 	if (!groupIndexOffset)
+ 		return groupIndex;
+ 
+ 	groupIndex += groupIndexOffset;
+ 	shortArr = reinterpret_cast<int16_t*>(loader_table->field(groupIndex, FieldTypes::ShortValue));
+ 	if (!shortArr)
+-		return error(1, 24);
++		return fail(1);
+ 	if (*shortArr != 201)
+-		return error(6, 24);
++		return fail(6);
+ 	return groupIndex;
+ }
+ 
+@@ -405,10 +434,19 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
  		case 406:
  			kicker->HardHitSoundId = get_sound_id(static_cast<int>(floor(*floatArr)));
  			break;
@@ -199,7 +1414,7 @@ index 283e983..dc19cfd 100644
  			floatArr++;
  			index += 2;
 diff --git a/SpaceCadetPinball/loader.h b/SpaceCadetPinball/loader.h
-index ea4176c..fd382e5 100644
+index ea4176c..fc961ed 100644
 --- a/SpaceCadetPinball/loader.h
 +++ b/SpaceCadetPinball/loader.h
 @@ -29,6 +29,13 @@ struct visualKickerStruct
@@ -216,7 +1431,23 @@ index ea4176c..fd382e5 100644
  };
  
  struct SpriteData
-@@ -111,5 +118,7 @@ private:
+@@ -103,7 +110,15 @@ public:
+ 	static char* query_name(int groupIndex);
+ 	static float* query_float_attribute(int groupIndex, int groupIndexOffset, int firstValue);
+ 	static float query_float_attribute(int groupIndex, int groupIndexOffset, int firstValue, float defVal);
++	/* Same lookup, but a miss is not an error. Space Cadet's data always carries every
++	   attribute its component classes read, so the erroring form is right there. Full
++	   Tilt's bonus tables legitimately omit attributes -- a blocker with no wall, a ramp
++	   with no ramp wall, an accelerator with no z -- and raising a modal error dialog
++	   per omission makes those tables unloadable. Callers of these forms must handle
++	   null by skipping the feature. */
++	static float* query_float_attribute_opt(int groupIndex, int groupIndexOffset, int firstValue);
+ 	static int16_t* query_iattribute(int groupIndex, int firstValue, int* arraySize);
++	static int16_t* query_iattribute_opt(int groupIndex, int firstValue, int* arraySize);
+ 	static float play_sound(int soundIndex, TPinballComponent *soundSource, const char* info);
+ 	static DatFile* loader_table;
+ private:
+@@ -111,5 +126,7 @@ private:
  	static DatFile* sound_record_table;
  	static int sound_count;
  	static int loader_sound_count;
@@ -226,10 +1457,14 @@ index ea4176c..fd382e5 100644
 +	static soundListStruct sound_list[129];
  };
 diff --git a/SpaceCadetPinball/midi.cpp b/SpaceCadetPinball/midi.cpp
-index a90e8d1..b9d8143 100644
+index a90e8d1..0ecc550 100644
 --- a/SpaceCadetPinball/midi.cpp
 +++ b/SpaceCadetPinball/midi.cpp
-@@ -6,6 +6,8 @@
+@@ -3,9 +3,12 @@
+ 
+ 
+ #include "pb.h"
++#include "table_rules.h"
  
  
  std::vector<Mix_Music*> midi::LoadedTracks{};
@@ -238,7 +1473,43 @@ index a90e8d1..b9d8143 100644
  Mix_Music* midi::track1, * midi::track2, * midi::track3;
  MidiTracks midi::active_track, midi::NextTrack;
  int midi::Volume = MIX_MAX_VOLUME;
-@@ -89,6 +91,41 @@ int midi::music_init(bool mixOpen, int volume)
+@@ -70,25 +73,68 @@ int midi::music_init(bool mixOpen, int volume)
+ 	IsPlaying = false;
+ 	track1 = track2 = track3 = nullptr;
+ 
+-	if (pb::FullTiltMode)
++	// One load serving both views of the table's music: load_table_tracks fills the
++	// indexed list the bonus tables' rules select from, and track1..3 are Space
++	// Cadet's three-track window onto the same Mix_Music objects. Nothing is loaded
++	// twice and MidiTracks keeps working unchanged.
++	if (CurrentTable->MusicTrackCount > 0)
+ 	{
+-		track1 = load_track("TABA1");
+-		track2 = load_track("TABA2");
+-		track3 = load_track("TABA3");
+-
+-		// FT demo .006 has only one music track, but it is nearly 9 min. long
+-		if (!track1 && pb::FullTiltDemoMode)
+-			track1 = load_track("DEMO");
++		load_table_tracks(CurrentTable->MusicPrefix, CurrentTable->MusicTrackCount);
++		if (TableTracks.size() > 1)
++			track1 = TableTracks[1];
++		if (TableTracks.size() > 2)
++			track2 = TableTracks[2];
++		if (TableTracks.size() > 3)
++			track3 = TableTracks[3];
+ 	}
+ 	else
+ 	{
+ 		// 3DPB has only one music track. PINBALL2.MID is a bitmap font, in the same format as PB_MSGFT.bin
+-		track1 = load_track("PINBALL");
++		track1 = load_track(CurrentTable->MusicPrefix);
+ 	}
+ 
++	// FT demo .006 has only one music track, but it is nearly 9 min. long
++	if (!track1 && CurrentTable->DemoData)
++		track1 = load_track("DEMO");
++
  	return track1 != nullptr;
  }
  
@@ -280,6 +1551,15 @@ index a90e8d1..b9d8143 100644
  void midi::music_shutdown()
  {
  	music_stop();
+@@ -113,7 +159,7 @@ Mix_Music* midi::load_track(std::string fileName)
+ 	if (!MixOpen || pb::quickFlag)
+ 		return nullptr;
+ 
+-	if (pb::FullTiltMode)
++	if (CurrentTable->FullTiltData)
+ 	{
+ 		// FT sounds are in SOUND subfolder
+ 		fileName.insert(0, 1, PathSeparator);
 diff --git a/SpaceCadetPinball/midi.h b/SpaceCadetPinball/midi.h
 index 32a904a..c11026c 100644
 --- a/SpaceCadetPinball/midi.h
@@ -318,3 +1598,337 @@ index 32a904a..c11026c 100644
  	static Mix_Music* track1, * track2, * track3;
  	static MidiTracks active_track, NextTrack;
  	static int Volume;
+diff --git a/SpaceCadetPinball/pb.cpp b/SpaceCadetPinball/pb.cpp
+index 0762832..7a49d53 100644
+--- a/SpaceCadetPinball/pb.cpp
++++ b/SpaceCadetPinball/pb.cpp
+@@ -23,6 +23,7 @@
+ #include "GroupData.h"
+ #include "partman.h"
+ #include "score.h"
++#include "table_rules.h"
+ #include "TFlipper.h"
+ #include "TPinballTable.h"
+ #include "TTextBox.h"
+@@ -134,14 +135,12 @@ int pb::uninit()
+ void pb::SelectDatFile(const std::vector<const char*>& dataSearchPaths)
+ {
+ 	DatFileName.clear();
+-	FullTiltDemoMode = FullTiltMode = false;
+ 
+-	std::string datFileNames[3]
+-	{
+-		"CADET.DAT",
+-		"PINBALL.DAT",
+-		"DEMO.DAT",
+-	};
++	// The candidates are the table registry's DAT names, in registry order, so a new
++	// table is added by registering it and not by editing this list.
++	size_t datFileCount;
++	auto registryNames = TableDatSearchOrder(datFileCount);
++	std::vector<std::string> datFileNames(registryNames, registryNames + datFileCount);
+ 
+ 	// Default game data test order: CADET.DAT, PINBALL.DAT, DEMO.DAT
+ 	if (options::Options.Prefer3DPBGameData)
+@@ -169,11 +168,8 @@ void pb::SelectDatFile(const std::vector<const char*>& dataSearchPaths)
+ 				{
+ 					fclose(datFile);
+ 					DatFileName = fileName;
+-					if (datFileName == "CADET.DAT")
+-						FullTiltMode = true;
+-					if (datFileName == "DEMO.DAT")
+-						FullTiltDemoMode = FullTiltMode = true;
+-					printf("Loading game from: %s\n", datFilePath.c_str());
++					SetCurrentTable(FindTableRulesForDat(datFileName.c_str()));
++					printf("Loading %s from: %s\n", CurrentTable->Name, datFilePath.c_str());
+ 					return;
+ 				}
+ 			}
+@@ -181,6 +177,18 @@ void pb::SelectDatFile(const std::vector<const char*>& dataSearchPaths)
+ 	}
+ }
+ 
++void pb::SetCurrentTable(const TableRules* rules)
++{
++	// A DAT that matches no registry entry leaves the identity alone rather than
++	// nulling it: the engine would have nothing to ask about the table it loaded.
++	if (!rules)
++		return;
++
++	CurrentTable = rules;
++	FullTiltMode = rules->FullTiltData;
++	FullTiltDemoMode = rules->DemoData;
++}
++
+ void pb::reset_table()
+ {
+ 	if (MainTable)
+@@ -195,6 +203,10 @@ void pb::firsttime_setup()
+ 
+ void pb::mode_change(GameModes mode)
+ {
++	// pb::InfoTextBox / pb::MissTextBox are looked up by the hardcoded group names
++	// "info_text_box" and "mission_text_box". Dragon's Keep and Skulduggery have the
++	// first and not the second, so every use of either must tolerate a null: a table
++	// without that display simply shows no text there.
+ 	if (CreditsActive && MissTextBox)
+ 		MissTextBox->Clear(true);
+ 	CreditsActive = false;
+@@ -247,8 +259,10 @@ void pb::toggle_demo()
+ 		demo_mode = false;
+ 		MainTable->Message(MessageCode::Reset, 0.0);
+ 		mode_change(GameModes::GameOver);
+-		MissTextBox->Clear();
+-		InfoTextBox->Display(get_rc_string(Msg::STRING125), -1.0);
++		if (MissTextBox)
++			MissTextBox->Clear();
++		if (InfoTextBox)
++			InfoTextBox->Display(get_rc_string(Msg::STRING125), -1.0);
+ 	}
+ 	else
+ 	{
+@@ -326,7 +340,8 @@ void pb::frame(float dtMilliSec)
+ 	{
+ 		if (nudge::nudge_count > 0.5f)
+ 		{
+-			InfoTextBox->Display(get_rc_string(Msg::STRING126), 2.0);
++			if (InfoTextBox)
++				InfoTextBox->Display(get_rc_string(Msg::STRING126), 2.0);
+ 		}
+ 		if (nudge::nudge_count > 1.0f)
+ 			MainTable->tilt(time_now);
+@@ -486,13 +501,16 @@ void pb::timed_frame(float timeDelta)
+ void pb::pause_continue()
+ {
+ 	winmain::single_step ^= true;
+-	InfoTextBox->Clear();
+-	MissTextBox->Clear();
++	if (InfoTextBox)
++		InfoTextBox->Clear();
++	if (MissTextBox)
++		MissTextBox->Clear();
+ 	if (winmain::single_step)
+ 	{
+ 		if (MainTable)
+ 			MainTable->Message(MessageCode::Pause, time_now);
+-		InfoTextBox->Display(get_rc_string(Msg::STRING123), -1.0);
++		if (InfoTextBox)
++			InfoTextBox->Display(get_rc_string(Msg::STRING123), -1.0);
+ 		midi::music_stop();
+ 		Sound::Deactivate();
+ 	}
+@@ -514,7 +532,8 @@ void pb::pause_continue()
+ 				textTime = 5.0;
+ 				text = get_rc_string(Msg::STRING124);
+ 			}
+-			InfoTextBox->Display(text, textTime);
++			if (InfoTextBox)
++				InfoTextBox->Display(text, textTime);
+ 		}
+ 		if (options::Options.Music && !winmain::single_step)
+ 			midi::music_play();
+@@ -579,7 +598,8 @@ void pb::InputDown(GameInput input)
+ 		return;
+ 
+ 	if (CreditsActive)
+-		MissTextBox->Clear(true);
++		if (MissTextBox)
++			MissTextBox->Clear(true);
+ 	CreditsActive = false;
+ 	IdleTimerMs = 0;
+ 
+@@ -728,7 +748,8 @@ void pb::high_scores()
+ void pb::tilt_no_more()
+ {
+ 	if (MainTable->TiltLockFlag)
+-		InfoTextBox->Clear();
++		if (InfoTextBox)
++			InfoTextBox->Clear();
+ 	MainTable->TiltLockFlag = 0;
+ 	nudge::nudge_count = -2.0;
+ }
+diff --git a/SpaceCadetPinball/pb.h b/SpaceCadetPinball/pb.h
+index 3a01318..170e8e4 100644
+--- a/SpaceCadetPinball/pb.h
++++ b/SpaceCadetPinball/pb.h
+@@ -8,6 +8,7 @@ class TPinballTable;
+ class DatFile;
+ class TBall;
+ class TTextBox;
++struct TableRules;
+ enum class Msg : int;
+ 
+ enum class GameModes
+@@ -50,6 +51,10 @@ public:
+ 	static bool cheat_mode, CreditsActive;
+ 	static DatFile* record_table;
+ 	static TPinballTable* MainTable;
++	// Derived from CurrentTable's FullTiltData / DemoData, written only by
++	// SelectDatFile. They survive because ~25 sites read them and every one asks
++	// about the data format, not about which table is loaded -- a question that
++	// stays two-valued however many tables there are. CurrentTable is the identity.
+ 	static bool FullTiltMode, FullTiltDemoMode;
+ 	static std::string DatFileName, BasePath;
+ 	static ImU32 TextBoxColor;
+@@ -82,6 +87,9 @@ public:
+ 	static std::string make_path_name(const std::string& fileName);
+ 	static void ShowMessageBox(Uint32 flags, LPCSTR title, LPCSTR message);
+ private:
++	// The one writer of CurrentTable, and so of FullTiltMode / FullTiltDemoMode.
++	static void SetCurrentTable(const TableRules* rules);
++
+ 	static bool demo_mode;
+ 	static float IdleTimerMs;
+ 	static float BallToBallCollision(const ray_type& ray, const TBall& ball, TEdgeSegment** edge, float collisionDistance);
+diff --git a/SpaceCadetPinball/table_rules.cpp b/SpaceCadetPinball/table_rules.cpp
+new file mode 100644
+index 0000000..cc82c57
+--- /dev/null
++++ b/SpaceCadetPinball/table_rules.cpp
+@@ -0,0 +1,146 @@
++#include "pch.h"
++#include "table_rules.h"
++
++#include <cctype>
++
++#include "control.h"
++#include "TLight.h"
++
++// Space Cadet's mode register. control.cpp parks the mode in this dummy light's
++// MessageField; the tag is the only handle on it that survives outside that file.
++extern component_tag<TLight> control_lite198_tag;
++
++// The bonus tables' bindings live in src/, which CMake does not compile yet (the
++// handler bodies are stubs and the two skeletons collide at link time -- see the
++// comment on FULLTILT_HAVE_BONUS_RULES below). Declared, not linked.
++#ifndef FULLTILT_HAVE_BONUS_RULES
++#define FULLTILT_HAVE_BONUS_RULES 0
++#endif
++
++#if FULLTILT_HAVE_BONUS_RULES
++extern component_info dragon_score_components[75];
++extern component_tag_base* dragon_simple_components[150];
++extern component_info pirates_score_components[74];
++extern component_tag_base* pirates_simple_components[192];
++
++namespace dragon
++{
++	// The dispatcher, not the switch: it reads the mode register and calls
++	// MissionControl(mode, code, caller) itself. See TableRules::ModeControl.
++	void MissionHandler(MessageCode code, TPinballComponent* caller);
++}
++
++namespace pirates
++{
++	void Handler(MessageCode code, TPinballComponent* caller);
++}
++#endif
++
++// Field order, because C++11 has no designated initializers:
++//   Id, Name, DatFileName, FullTiltData, DemoData,
++//   ScoreComponents, ScoreComponentCount, SimpleComponents, SimpleComponentCount,
++//   ModeRegister, ModeControl, ResetRules, BallDrained, CurrentRank, CurrentMode,
++//   MusicPrefix, MusicTrackCount, SettingsPrefix
++static const TableRules TableRegistry[] =
++{
++	// The same table in three releases: one set of rules, three data files. The
++	// FullTiltData / DemoData pair is what the engine's ~25 era checks read.
++	//
++	// Registry order is the order pb::SelectDatFile probes, so these three lead and
++	// CADET.DAT is tried first -- upstream's default, preserved verbatim.
++	{
++		TableId::SpaceCadetFT, "Full Tilt! Space Cadet", "CADET.DAT", true, false,
++		control::score_components, 88, control::simple_components, 145,
++		&control_lite198_tag, &control::MissionControl, nullptr, nullptr, nullptr, nullptr,
++		"TABA", 3, "CADET",
++	},
++	{
++		TableId::SpaceCadet3DPB, "3D Pinball Space Cadet", "PINBALL.DAT", false, false,
++		control::score_components, 88, control::simple_components, 145,
++		&control_lite198_tag, &control::MissionControl, nullptr, nullptr, nullptr, nullptr,
++		"PINBALL", 0, "3DPB",
++	},
++	{
++		TableId::SpaceCadetDemo, "Full Tilt! Space Cadet (demo)", "DEMO.DAT", true, true,
++		control::score_components, 88, control::simple_components, 145,
++		&control_lite198_tag, &control::MissionControl, nullptr, nullptr, nullptr, nullptr,
++		"TABA", 3, "DEMO",
++	},
++
++	// The bonus tables are registered unconditionally so SelectDatFile can find
++	// their DAT and the identity is real; only the rule bindings wait on src/.
++	// With null bindings the playfield loads and nothing scores, which is the
++	// honest state of the port rather than a crash.
++	{
++		TableId::DragonsKeep, "Dragon's Keep", "DRAGON.DAT", true, false,
++#if FULLTILT_HAVE_BONUS_RULES
++		dragon_score_components, 75, dragon_simple_components, 150,
++		// ModeRegister stays null: both skeletons and both rule files define a
++		// global tag_info_text_box, so there is no unambiguous symbol to bind.
++		nullptr, &dragon::MissionHandler,
++#else
++		nullptr, 0, nullptr, 0,
++		nullptr, nullptr,
++#endif
++		nullptr, nullptr, nullptr, nullptr,
++		"TABC", 7, "DRAGON",
++	},
++	{
++		TableId::Skulduggery, "Skulduggery", "PIRATES.DAT", true, false,
++#if FULLTILT_HAVE_BONUS_RULES
++		pirates_score_components, 74, pirates_simple_components, 192,
++		nullptr, &pirates::Handler,
++#else
++		nullptr, 0, nullptr, 0,
++		nullptr, nullptr,
++#endif
++		nullptr, nullptr, nullptr, nullptr,
++		"TABB", 6, "PIRATES",
++	},
++};
++
++// 3D Pinball, not the first registry entry: an engine that has not yet run
++// SelectDatFile must read the same era flags upstream's `FullTiltMode =
++// FullTiltDemoMode = false` gave it. midi's music_init runs before pb::init, and
++// SelectDatFile leaves this alone when it finds no DAT at all, so it is never null.
++const TableRules* CurrentTable = FindTableRules(TableId::SpaceCadet3DPB);
++
++const TableRules* FindTableRules(TableId id)
++{
++	for (auto& rules : TableRegistry)
++		if (rules.Id == id)
++			return &rules;
++	return nullptr;
++}
++
++const TableRules* FindTableRulesForDat(const char* datFileName)
++{
++	if (!datFileName)
++		return nullptr;
++
++	for (auto& rules : TableRegistry)
++	{
++		// SelectDatFile probes each name lowercased as well, so the match cannot be
++		// case sensitive.
++		auto a = datFileName, b = rules.DatFileName;
++		for (; *a && *b; a++, b++)
++			if (std::tolower(static_cast<unsigned char>(*a)) !=
++				std::tolower(static_cast<unsigned char>(*b)))
++				break;
++		if (!*a && !*b)
++			return &rules;
++	}
++	return nullptr;
++}
++
++const char* const* TableDatSearchOrder(size_t& count)
++{
++	// Static, because the order is the registry's order and the caller iterates it.
++	// Space Cadet's three come first, so a drive holding both CADET.DAT and
++	// DRAGON.DAT still boots Space Cadet exactly as before.
++	static const char* names[sizeof TableRegistry / sizeof TableRegistry[0]];
++	count = sizeof names / sizeof names[0];
++	for (size_t i = 0; i < count; i++)
++		names[i] = TableRegistry[i].DatFileName;
++	return names;
++}
