@@ -15,6 +15,10 @@
 //
 // This header is the seam. Each table supplies one `TableRules` and the engine
 // stops knowing which table it is running.
+//
+// It lives in the engine tree rather than src/ because the engine includes it --
+// pb.cpp, midi.cpp and table_rules.cpp all do -- and src/ already compiles with
+// -I on this directory, so one copy serves both sides.
 
 #include "control.h"
 
@@ -36,6 +40,14 @@ struct TableRules
 	TableId Id;
 	const char* Name;        // window title and About text
 	const char* DatFileName; // selects the data file, replacing pb::SelectDatFile's fixed list
+
+	// Which era the DAT is from, and whether it is a demo cut of it. These are not
+	// derivable from `Id` by anything but a switch, and the engine asks about them
+	// constantly -- resolution count, SOUND/ subfolder, kicker Z attribute, plunger
+	// and hole timings. `pb::FullTiltMode` / `pb::FullTiltDemoMode` are now views of
+	// these two fields, which is what keeps ~25 existing call sites honest.
+	bool FullTiltData;
+	bool DemoData;
 
 	// The bindings `control::make_links` walks. Space Cadet's are
 	// score_components[88] / simple_components[145]; the bonus tables have their
@@ -63,9 +75,15 @@ struct TableRules
 	// engine only needs to read and write it, not know which object it is.
 	component_tag_base* ModeRegister;
 
-	// The mode machine. Space Cadet's is MissionControl over 17 missions and 9
-	// ranks; Dragon's Keep has 6 quests and no ranks at all, so the rank hooks
-	// below are allowed to be null.
+	// The mode machine, as `control::handler` calls it: after the component's own
+	// handler, with no mode argument. Space Cadet's is `control::MissionControl`
+	// over 17 missions and 9 ranks; Dragon's Keep has 6 quests and no ranks at all,
+	// so the rank hooks below are allowed to be null.
+	//
+	// The bonus tables split this in two -- a `(Mode, MessageCode, caller)` switch
+	// plus a dispatcher that reads the mode register and calls it -- so the entry
+	// point bound here is the dispatcher (`dragon::MissionHandler`,
+	// `pirates::Handler`), not the switch.
 	void (*ModeControl)(MessageCode code, TPinballComponent* caller);
 	void (*ResetRules)(TPinballTable* table);
 	void (*BallDrained)(TPinballTable* table);
@@ -77,6 +95,10 @@ struct TableRules
 
 	// midi.cpp loads TABA1..TABA3 for Space Cadet. Skulduggery ships TABB1..TABB6
 	// and Dragon's Keep TABC1..TABC7, so the count is per table.
+	//
+	// A count of 0 means the prefix is the whole file name and there is no index:
+	// 3D Pinball ships one track called PINBALL.MID, not PINBALL1.MID, so it cannot
+	// be expressed as a one-entry indexed set.
 	const char* MusicPrefix;
 	int MusicTrackCount;
 
@@ -91,6 +113,10 @@ extern const TableRules* CurrentTable;
 
 const TableRules* FindTableRules(TableId id);
 const TableRules* FindTableRulesForDat(const char* datFileName);
+
+// The DAT names pb::SelectDatFile probes, in registry order. Space Cadet's three
+// come first, so a directory holding several DATs still picks Space Cadet.
+const char* const* TableDatSearchOrder(size_t& count);
 
 // Message codes the Full Tilt binaries use and 3D Pinball does not, so upstream's
 // enum has no name for them. Numbering here follows upstream's own scheme; these

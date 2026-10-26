@@ -37,6 +37,13 @@ HEADER = """// control_{lower}.cpp -- rules for Full Tilt! Pinball's {title} tab
 #include "pb.h"
 #include "TPinballTable.h"
 
+// The rules declare some tags with their concrete type, and component_tag<T>
+// instantiates std::is_base_of<TPinballComponent, T>, which needs T complete.
+#include "TLight.h"
+#include "TLightGroup.h"
+#include "TSound.h"
+#include "TTextBox.h"
+
 namespace {lower} {{
 """
 
@@ -80,6 +87,26 @@ def ident(name):
     return re.sub(r"\W", "_", name)
 
 
+def tags_defined_in_src(prefix):
+    """{group name: declared type} for tags the hand-written rules already define.
+
+    Both halves of a table declare the same components: the generated table needs
+    every tag, and the rule files need the ones they touch -- with the real type, so
+    `component_tag<TTextBox>` rather than the generic base. Emitting a second
+    definition here would be a redefinition, and emitting it with the generic type
+    would be a redefinition with a conflicting type, which is worse. So scan and
+    declare those `extern` instead, matching the type the rules chose.
+    """
+    out = {}
+    src = Path(__file__).resolve().parent.parent / "src"
+    for f in sorted(src.glob(f"{prefix}_*.cpp")):
+        for m in re.finditer(
+            r"^component_tag<(\w+)>\s+tag_(\w+)\s*=", f.read_text(), re.M
+        ):
+            out.setdefault(m.group(2), m.group(1))
+    return out
+
+
 def main(exe, matches_txt, out_path):
     rows = table(exe)
     near = matches(matches_txt)
@@ -112,6 +139,22 @@ def main(exe, matches_txt, out_path):
     for scores, nm in arrays.items():
         L.append(f"int {nm}[{len(scores)}] = {{{', '.join(str(x) for x in scores)}}};")
 
+    # Tags live inside the table's namespace: two tables both have an info_text_box,
+    # and at global scope the second definition collides with the first.
+    existing = tags_defined_in_src(lower)
+    simple = [nm for _addr, _ptr, nm in simple_components(exe)]
+    all_tags = list(OrderedDict((n, None) for n, _v, _s in rows))
+    all_tags += [n for n in simple if n not in set(all_tags)]
+
+    L.append("// Component tags. Names are the group names stored in the DAT. Both the")
+    L.append("// scoring table and simple_components below bind through these.")
+    for name in all_tags:
+        key = ident(name)
+        if key in existing:
+            L.append(f"extern component_tag<{existing[key]}> tag_{key};")
+        else:
+            L.append(f'component_tag<TPinballComponent> tag_{key} = {{"{name}"}};')
+
     L.append("\n// Handlers. Bodies are TODO; see the address and the reference handler.")
     for va, nm in handlers.items():
         ref, score = near.get(va, (None, 0.0))
@@ -130,32 +173,17 @@ def main(exe, matches_txt, out_path):
 
     L.append(f"\n}} // namespace {lower}\n")
 
-    # Tags sit outside the namespace: the component table below names them
-    # unqualified, and they are the binding surface control::make_links walks.
-    L.append("// Component tags. Names are the group names stored in the DAT.")
-    for name in OrderedDict((n, None) for n, _v, _s in rows):
-        L.append(f'component_tag<TPinballComponent> tag_{ident(name)} = {{"{name}"}};')
-
-    # Components bound by name but with no handler of their own. The rules still
-    # need live pointers to them, so make_links walks this array too; a component
-    # in neither array is not bound at all.
-    simple = [nm for _addr, _ptr, nm in simple_components(exe)]
-    seen = {n for n, _v, _s in rows}
-    extra = [n for n in simple if n not in seen]
-    for n in extra:
-        L.append(f'component_tag<TPinballComponent> tag_{ident(n)} = {{"{n}"}};')
-
     L.append(f"\ncomponent_info {lower}_score_components[{len(rows)}]\n{{")
     for name, va, scores in rows:
         fn = f"{lower}::{handlers[va]}Control"
         arr = arrays.get(scores)
-        tail = f"{len(scores)}, {arr}" if scores else "0, nullptr"
-        L.append(f"\tcomponent_info{{tag_{ident(name)}, {{{fn}, {tail}}}}},")
+        tail = f"{len(scores)}, {lower}::{arr}" if scores else "0, nullptr"
+        L.append(f"\tcomponent_info{{{lower}::tag_{ident(name)}, {{{fn}, {tail}}}}},")
     L.append("};")
 
     L.append(f"\ncomponent_tag_base* {lower}_simple_components[{len(simple)}]\n{{")
     for n in simple:
-        L.append(f"\t&tag_{ident(n)},")
+        L.append(f"\t&{lower}::tag_{ident(n)},")
     L.append("};")
 
     Path(out_path).write_text("\n".join(L) + "\n")
@@ -163,7 +191,7 @@ def main(exe, matches_txt, out_path):
     print(f"  -> {out_path}")
     unknown = sum(1 for va in handlers if near.get(va, ("", 0))[1] < 0.55)
     print(f"  {len(handlers) - unknown} stubs have a Space Cadet reference, {unknown} do not")
-    print(f"  simple_components[{len(simple)}], {len(extra)} of them not in the score table")
+    print(f"  simple_components[{len(simple)}], {len(all_tags)} distinct tags")
 
 
 if __name__ == "__main__":

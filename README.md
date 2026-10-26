@@ -144,7 +144,7 @@ listed, derived from compile errors rather than guessed, in `docs/engine-changes
 - [x] Build upstream from source (`nix-build build.nix`)
 - [ ] The last six Skulduggery handlers
 - [ ] The engine changes in `docs/engine-changes.md`
-- [ ] Wire `src/table_rules.h` into the engine and actually play a ball
+- [ ] Wire `reference/SpaceCadetPinball/table_rules.h` into the engine and actually play a ball
 
 ### What the compiler says
 

@@ -47,7 +47,7 @@ slot a destructor.
 a track per quest, so the rules need a `midi_track` handle and a `PlayMusic(track)` the
 current API does not expose.
 
-This is the music half of the per-table identity that `src/table_rules.h` describes;
+This is the music half of the per-table identity that `reference/SpaceCadetPinball/table_rules.h` describes;
 `MusicPrefix` and `MusicTrackCount` are there for it.
 
 ## 3. Super jackpot — 1 use
@@ -102,7 +102,7 @@ the loader side independently, plus this project's own component analysis:
   and `TKickout` dereferences a null `FloatArr`. 18 kickers in `DRAGON.DAT` use it.
 - **`ScoreMultiplier` is an index upstream and a value in Full Tilt.** `AddScore` in these
   binaries is `field * score + ScoreAdded` with no indexed load, and the callers write
-  1/2/3/5/10 directly. See `src/table_rules.h`.
+  1/2/3/5/10 directly. See `reference/SpaceCadetPinball/table_rules.h`.
 - **A negative timeout means *cancel*** in Full Tilt, where `TBlocker::Message` clamps with
   `std::max(value, 0.0f)` and would trip the timer instead.
 - **Text-box tokens.** Several displays pass one-character strings (`"!"`, `"#"`, `"##"`,
