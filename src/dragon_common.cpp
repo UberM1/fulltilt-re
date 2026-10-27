@@ -65,8 +65,9 @@ extern component_tag<TPinballComponent> tag_a_sink9;
 // tokens in the table's symbol font, stored as a run of 2-byte strings, which is
 // why consecutive entries are two bytes apart.
 //
-// The port has no symbol font -- see docs/engine-changes.md -- so DisplayGlyph
-// renders them as ASCII and these characters appear literally on the playfield.
+// They are drawn in the table's own symbol font, which the port now loads: it is
+// the "font2" group of DRAGON.DAT, 20 glyph bitmaps starting at the space, so the
+// characters below index it as 'char - 32'. See score::glyph_fontp.
 
 const char* GlyphSpell = "$";                                      // 0x439ab4
 const char* GlyphWeapon[4] = {"%", "&", "'", "("};                 // 0x439ab8
@@ -94,8 +95,9 @@ const char* GetRcString(int id)
 	return pb::get_rc_string(static_cast<Msg>(id));
 }
 
-// 0x41de40 with font 0 and font 1. Upstream's TTextBox has one font, so the glyph
-// form differs from the text form only in what it is handed.
+// 0x41de40 with font 0 and font 1 -- the original's fourth argument selects which.
+// The port's TTextBox now carries the same distinction, so the two forms differ in
+// the font as well as in what they are handed.
 void Display(TTextBox* box, const char* text, float time)
 {
 	if (box && text)
@@ -104,10 +106,8 @@ void Display(TTextBox* box, const char* text, float time)
 
 void DisplayGlyph(TTextBox* box, const char* glyph, float time)
 {
-	// UNVERIFIED rendering, not an unverified call: the token is right, the symbol
-	// font it should be drawn in does not exist in the port yet.
 	if (box && glyph)
-		box->Display(glyph, time);
+		box->DisplayGlyph(glyph, time);
 }
 
 // 0x41d930

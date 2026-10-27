@@ -171,8 +171,55 @@ and the multiplier are now done; the rest stand.
   section 7.
 - **A negative timeout means *cancel*** in Full Tilt, where `TBlocker::Message` clamps with
   `std::max(value, 0.0f)` and would trip the timer instead.
-- **Text-box tokens.** Several displays pass one-character strings (`"!"`, `"#"`, `"##"`,
-  `"###"`, `"####"`) with a fourth `Display` argument of 1. They are glyph tokens, not
-  text; rendering them as ASCII shows hashes on the playfield. The tokens themselves
-  are now read out of both binaries' `.rdata` and are exact (`src/dragon_common.cpp`,
-  `src/pirates_common.cpp`); what is missing is the symbol font to draw them in.
+- **Text-box tokens.** *Done* -- see section 10.
+
+## 10. The symbol font
+
+Several displays on both bonus tables pass one-character strings (`"!"`, `"#"`, `"##"`,
+`"K"`, `"KKKK"`, `"333"`) with a fourth `Display` argument of 1. They are glyph tokens,
+not text, and the port drew them as ASCII: literal hashes and K's on the playfield, which
+is what "the mission text looks wrong" was partly about.
+
+The fourth argument selects a font, and the font it selects is **in the table's own DAT,
+under the group name `font2`**. The evidence is not the name:
+
+| DAT | `pbmsg_ft` | `font1` | `font2` |
+|---|---|---|---|
+| `CADET.DAT` | 96 | 10 | **absent** |
+| `DRAGON.DAT` | 96 | 10 | **20** |
+| `PIRATES.DAT` | 96 | 10 | **52** |
+
+`font2` exists on exactly the two tables that use glyph tokens and on neither Space Cadet
+table. The counts are the first confirmation: loaded the way `load_msg_font` already loads
+a font -- a run of bitmaps starting at the space -- 20 glyphs covers `' '`..`'3'` and 52
+covers `' '`..`'S'`, and every token character the rules were reconstructed with falls
+inside its table's range, `'S'` (83) being the highest Skulduggery uses.
+
+The geometry is the second, and it is the decisive one. The glyphs are not letters; they
+are box-sized artwork, and every reconstructed run fits its box exactly:
+
+| run | glyph | widest use | box |
+|---|---|---|---|
+| Dragon `EggGlyphs` | `'#'` 33x153 | 8 x 33 = 264 | `info_text_box` 288x155 |
+| Dragon `GlyphDragonDeath` | 213x153 | 213 | 288x155 |
+| Skulduggery `StormGlyphs` | `'K'` 35x133 | 8 x 35 = 280 | `info_text_box` 320x140 |
+| Skulduggery `SkillShotGlyphs` | 42x133 | 7 x 42 = 294 | 320x140 |
+| Skulduggery `TavernWindowGlyphs` | 97x133 | 3 x 97 = 291 | 320x140 |
+| Skulduggery `PegLegGlyphs` | 260x133 | 260 | 320x140 |
+
+A counter bar of eight `K`s is 280 wide in a 320-wide box. That is not a coincidence that
+survives a wrong hypothesis, and it cross-checks the token tables themselves: they were
+read out of `.rdata` independently, months before this font was found, and they land on
+exactly the glyphs that fit.
+
+What changed: `score::load_msg_font` was split so the same loader can serve a second font
+(`score::load_font`), `score::glyph_fontp` holds it, `pb::init` loads `"font2"` next to
+`"pbmsg_ft"`, `TTextBoxMessage` carries a `Glyph` flag, and `TTextBox::DisplayGlyph`
+queues a message with it set. `TTextBox::Draw` and `LayoutTextLine` take the font per
+*message* rather than per box, because the same box alternates between announcements and
+glyph runs.
+
+Space Cadet is untouched by construction: its DAT has no `font2`, `glyph_fontp` stays
+null, and `FontFor` falls back to the text font -- which is also the behaviour if a
+future DAT has the group but no bitmaps in it, guarded on `Height > 0` so the layout
+loop cannot spin.
