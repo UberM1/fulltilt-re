@@ -648,7 +648,7 @@ extern const char* StormGlyphs[];
 extern const char* PegLegGlyphs[];
 extern const char* SkillShotGlyphs[];
 
-// `caller->GetComponentType()` stands for vtable slot 0 (see namespace `type`).
+// `ComponentTypeOf(caller)` stands for vtable slot 0 (see namespace `type`).
 // Upstream has no such method -- it dispatches on dynamic_cast -- so this is
 // the one thing a port has to add to TPinballComponent.
 //
@@ -1206,7 +1206,7 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			ModeSweepFinished(TimeAttackShip);
@@ -1287,7 +1287,7 @@ void BermudaController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			// Bermuda is the only mode that arms its playfield in the
@@ -1376,7 +1376,7 @@ void StormController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			ModeSweepFinished(TimeStorm);
@@ -1396,7 +1396,7 @@ void StormController(MessageCode code, TPinballComponent* caller)
 		}
 
 	case ft::Collision:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::PopupTarget:
 		{
@@ -1617,7 +1617,7 @@ void TavernController(MessageCode code, TPinballComponent* caller)
 			return;
 		}
 
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::Light:
 		{
@@ -1679,7 +1679,7 @@ void TreasureHuntController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			ModeSweepFinished(TimeTreasureHunt);
@@ -1693,7 +1693,7 @@ void TreasureHuntController(MessageCode code, TPinballComponent* caller)
 		}
 
 	case ft::Collision:
-		if (caller->GetComponentType() == type::Unknown1020)
+		if (ComponentTypeOf(caller) == type::Unknown1020)
 			AddToJackpot(20000);
 		return;
 
@@ -1783,7 +1783,7 @@ void MutinyController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			ModeSweepFinished(TimeMutiny);
@@ -1846,7 +1846,7 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			ModeSweepFinished(TimeSwordFight);
@@ -1919,7 +1919,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::LightSweeps:
 			// CORRECTION to analysis/pirates-rules.md §2.3, which says Peg
@@ -1941,7 +1941,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		}
 
 	case ft::Collision:
-		if (caller->GetComponentType() == type::Unknown1020)
+		if (ComponentTypeOf(caller) == type::Unknown1020)
 			AddToJackpot(50000);
 		return;
 
@@ -2372,7 +2372,7 @@ void Handler(MessageCode code, TPinballComponent* caller)
 		if (caller)
 		{
 			int toJackpot = 0;
-			switch (caller->GetComponentType())
+			switch (ComponentTypeOf(caller))
 			{
 			case type::PopupTarget:
 				// The drain bonus's "Target Bonus" term really counts

@@ -499,7 +499,7 @@ void CenterPostControl(MessageCode code, TPinballComponent* caller);  // 0x42591
 void RightOutlaneBlockerControl(MessageCode code, TPinballComponent* caller);        // 0x425a10
 void MoatBlockerControl(MessageCode code, TPinballComponent* caller);        // 0x425b10
 
-// `caller->GetComponentType()` stands for vtable slot 0, which in Full Tilt
+// `ComponentTypeOf(caller)` stands for vtable slot 0, which in Full Tilt
 // returns the component's type id (1005 bumper, 1017 sink, ...). Upstream has
 // no such method -- it dispatches on dynamic_cast instead -- so this is the one
 // place a port has to add something to TPinballComponent.
@@ -1322,7 +1322,7 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 		return;
 
 	case ft::Collision:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::SoloTarget:
 			if (caller == tag_a_spot4.Component)
@@ -1411,7 +1411,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			// The intro sweep finished: only now does the clock start. Doing
 			// it here rather than at MissionComplete is why the player is not
@@ -1422,7 +1422,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller == tag_mode_timer.Component)
 		{
@@ -1436,7 +1436,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ft::Collision:
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::Bumper:
 			collect({tag_v_lite88.Component, 10000, STR_GEM_GOLD, 0x001});
@@ -1570,7 +1570,7 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			BeginQuestPlay();
 			ArmQuestTarget(tag_a_sink1.Component);
@@ -1578,7 +1578,7 @@ void FireLizardsController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller == tag_mode_timer.Component)
 		{
@@ -1760,7 +1760,7 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			BeginQuestPlay();
 			tag_v_lite48.Component->Message(ft::LightFlasherStartTimed, Forever);
@@ -1774,7 +1774,7 @@ void RescueMaidenController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller == tag_mode_timer.Component)
 		{
@@ -1912,7 +1912,7 @@ void DragonPassController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			BeginQuestPlay();
 			tag_v_lite14.Component->Message(ft::LightResetAndTurnOn, 0.0f);
@@ -1922,7 +1922,7 @@ void DragonPassController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller == tag_mode_timer.Component)
 		{
@@ -2023,7 +2023,7 @@ void WizardsFuryController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			BeginQuestPlay();
 			ArmQuestTarget(tag_a_sink4.Component);
@@ -2031,7 +2031,7 @@ void WizardsFuryController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller == tag_mode_timer.Component)
 		{
@@ -2319,7 +2319,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 		return;
 
 	case ft::TimerExpired:
-		if (caller->GetComponentType() == type::LightSweeps)
+		if (ComponentTypeOf(caller) == type::LightSweeps)
 		{
 			SlayDragonIntro = false;
 			BeginQuestPlay();
@@ -2335,7 +2335,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 			}
 			return;
 		}
-		if (caller->GetComponentType() != type::Timer)
+		if (ComponentTypeOf(caller) != type::Timer)
 			return;
 		if (caller != tag_mode_timer.Component)
 			return;
@@ -2361,7 +2361,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 	case ft::Collision:
 		// Super-jackpot accrual, by what was hit. These are on top of the
 		// global accrual in MissionHandler and are unique to this mode.
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::Bumper:
 			AddToSuperJackpot(50000);
@@ -2714,11 +2714,11 @@ void MissionHandler(MessageCode code, TPinballComponent* caller)
 		// Dragon Breath (spell slot 0): while lit, every solo target pays
 		// 100,000 into the super jackpot. The manual claims bumpers and
 		// rebounds too; the binary gates strictly on TSoloTarget.
-		if (Owned(tag_v_lite28.Component) && caller->GetComponentType() == type::SoloTarget)
+		if (Owned(tag_v_lite28.Component) && ComponentTypeOf(caller) == type::SoloTarget)
 			AddToSuperJackpot(100000);
 
 		int toJackpot = 0;
-		switch (caller->GetComponentType())
+		switch (ComponentTypeOf(caller))
 		{
 		case type::PopupTarget:
 		case type::SoloTarget:

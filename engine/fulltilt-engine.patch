@@ -1,8 +1,265 @@
 diff --git a/SpaceCadetPinball/FtAccelDebug.cpp b/SpaceCadetPinball/FtAccelDebug.cpp
-index 94bd398..a216cc1 100644
+index 94bd398..dfc9344 100644
 --- a/SpaceCadetPinball/FtAccelDebug.cpp
 +++ b/SpaceCadetPinball/FtAccelDebug.cpp
-@@ -61,10 +61,10 @@ static void trace(const char* tag, TPinballTable* t)
+@@ -8,6 +8,11 @@
+ #include "TEdgeManager.h"
+ #include <vector>
+ 
++static TBall* active_ball(TPinballTable* t);
++struct FtHoleDbgEntry { const char* Name; vector2 Center; float RadiusSq; int Group; int ReleaseMask; float Z; };
++static std::vector<FtHoleDbgEntry> gHoles;
++struct FtSinkDbgEntry { const char* Name; void* Comp; RectF AABB; int Group; float TimerTime; vector2 BallPos; };
++static std::vector<FtSinkDbgEntry> gSinks;
+ static std::vector<FtAccelDbgEntry> gAccels;
+ static std::vector<FtRexitDbgEntry> gRexits;
+ 
+@@ -19,6 +24,244 @@ bool ft_accel_enabled()
+ 	return enabled != 0;
+ }
+ 
++bool ft_autoplay_enabled()
++{
++	static int enabled = -1;
++	if (enabled < 0)
++		enabled = getenv("FT_AUTOPLAY") ? 1 : 0;
++	return enabled != 0;
++}
++
++struct HitCount
++{
++	const char* Name;
++	int Count;
++	float Last;
++	float WindowStart;
++	int WindowCount;
++};
++static std::vector<HitCount> gAccelHits, gRexitHits;
++static float gNow = 0.0f;
++
++static void note(std::vector<HitCount>& v, const char* kind, const char* name, const char* extra)
++{
++	HitCount* h = nullptr;
++	for (auto& e : v)
++		if (e.Name == name)
++			h = &e;
++	if (!h)
++	{
++		v.push_back(HitCount{name, 0, gNow, gNow, 0});
++		h = &v.back();
++	}
++	h->Count++;
++	if (gNow - h->WindowStart > 2.0f)
++	{
++		h->WindowStart = gNow;
++		h->WindowCount = 0;
++	}
++	h->WindowCount++;
++	h->Last = gNow;
++	fprintf(stderr, "DBG-hit   t=%7.2f %s %-12s total=%-4d in2s=%-3d %s\n",
++	        gNow, kind, name ? name : "?", h->Count, h->WindowCount, extra);
++	if (h->WindowCount == 15)
++		fprintf(stderr, "DBG-LOOP  t=%7.2f !!! %s %s hit 15 times in 2s -- sound would be looping\n",
++		        gNow, kind, name ? name : "?");
++}
++
++void ft_accel_note_hit(const char* name)
++{
++	if (ft_autoplay_enabled())
++		note(gAccelHits, "accel", name, "");
++}
++
++void ft_rexit_note_hit(const char* name, int maskIn, int maskOut)
++{
++	if (!ft_autoplay_enabled())
++		return;
++	char buf[64];
++	snprintf(buf, sizeof buf, "mask 0x%x -> 0x%x", maskIn, maskOut);
++	note(gRexitHits, "rexit", name, buf);
++}
++
++static void autoplay(float dtSec)
++{
++	auto table = pb::MainTable;
++	if (!table)
++		return;
++	gNow += dtSec;
++
++	static int stage = 0;
++	static float lastFlip = 0.0f;
++	static bool flipDown = false;
++	static float noBallSince = -1.0f;
++	static int maskRun = 0;
++	static int lastMask = 1;
++	static float maskRunStart = 0.0f;
++	static float lastReport = 0.0f;
++
++	if (stage == 0 && gNow > 1.0f)
++	{
++		fprintf(stderr, "DBG-auto2 new game; %zu accelerators, %zu ramp exits\n", gAccels.size(), gRexits.size());
++		pb::replay_level(false);
++		stage = 1;
++		return;
++	}
++	if (stage == 1 && gNow > 2.0f)
++	{
++		pb::launch_ball();
++		stage = 2;
++		return;
++	}
++	if (stage < 2)
++		return;
++
++	// FT_HOLETEST=<n>: drive the ball into hole n and then trace the layer chain.
++	static int holeTest = -2;
++	static bool holeDriven = false;
++	if (holeTest == -2)
++	{
++		auto e = getenv("FT_HOLETEST");
++		holeTest = e ? atoi(e) : -1;
++	}
++	if (holeTest >= 0)
++	{
++		auto bb = active_ball(table);
++		if (bb && !holeDriven && gNow > 3.0f && static_cast<size_t>(holeTest) < gHoles.size())
++		{
++			auto& h = gHoles[holeTest];
++			fprintf(stderr, "DBG-chain drive into hole[%d] %s center=(%.2f,%.2f) group=0x%x release=0x%x\n",
++			        holeTest, h.Name ? h.Name : "?", h.Center.X, h.Center.Y, h.Group, h.ReleaseMask);
++			bb->Position.X = h.Center.X;
++			bb->Position.Y = h.Center.Y;
++			bb->Position.Z = getenv("FT_LAYERTEST") ? h.Z : bb->Position.Z;
++			bb->PrevPosition = bb->Position;
++			bb->Direction = {0.0f, 0.3f, 0.0f};
++			bb->Speed = 2.0f;
++			bb->CollisionMask = getenv("FT_LAYERTEST") ? h.ReleaseMask : h.Group;
++			bb->CollisionComp = nullptr;
++			bb->StuckCounter = 0;
++			holeDriven = true;
++		}
++		if (bb)
++		{
++			static int n = 0;
++			if ((n++ % 8) == 0)
++				fprintf(stderr, "DBG-chain t=%7.2f pos=(%.3f,%.3f,%.3f) spd=%.3f mask=0x%x comp=%p stuck=%d\n",
++				        gNow, bb->Position.X, bb->Position.Y, bb->Position.Z, bb->Speed,
++				        bb->CollisionMask, static_cast<void*>(bb->CollisionComp), bb->StuckCounter);
++		}
++	}
++
++	// FT_SINKTEST=<n>: drop the ball into sink n and watch for the eject.
++	static int sinkTest = -2;
++	static bool sinkDriven = false;
++	if (sinkTest == -2)
++	{
++		auto e = getenv("FT_SINKTEST");
++		sinkTest = e ? atoi(e) : -1;
++	}
++	if (sinkTest >= 0)
++	{
++		auto bb = active_ball(table);
++		if (bb && !sinkDriven && gNow > 3.0f && static_cast<size_t>(sinkTest) < gSinks.size())
++		{
++			auto& k = gSinks[sinkTest];
++			fprintf(stderr, "DBG-chain drive into sink[%d] %s\n", sinkTest, k.Name ? k.Name : "?");
++			bb->Position.X = (k.AABB.XMin + k.AABB.XMax) / 2.0f;
++			bb->Position.Y = (k.AABB.YMin + k.AABB.YMax) / 2.0f + 0.6f;
++			bb->PrevPosition = bb->Position;
++			bb->Direction = {0.0f, -1.0f, 0.0f};
++			bb->Speed = 8.0f;
++			bb->CollisionMask = k.Group;
++			bb->CollisionComp = nullptr;
++			bb->StuckCounter = 0;
++			sinkDriven = true;
++		}
++		static int m = 0;
++		if ((m++ % 16) == 0)
++		{
++			int n = 0;
++			for (auto bl : table->BallList)
++				if (bl->ActiveFlag)
++				{
++					fprintf(stderr, "DBG-chain t=%7.2f ball%d pos=(%.3f,%.3f) spd=%.3f mask=0x%x\n",
++					        gNow, n, bl->Position.X, bl->Position.Y, bl->Speed, bl->CollisionMask);
++					n++;
++				}
++			if (n == 0)
++				fprintf(stderr, "DBG-chain t=%7.2f NO ACTIVE BALL (balls=%zu)\n", gNow, table->BallList.size());
++		}
++		return;
++	}
++
++	// Keep a ball in play.
++	auto b = active_ball(table);
++	if (!b)
++	{
++		if (noBallSince < 0.0f)
++			noBallSince = gNow;
++		else if (gNow - noBallSince > 1.0f)
++		{
++			noBallSince = -1.0f;
++			pb::replay_level(false);
++			pb::launch_ball();
++			fprintf(stderr, "DBG-auto2 t=%7.2f relaunch\n", gNow);
++		}
++		return;
++	}
++	noBallSince = -1.0f;
++
++	// Flap both flippers.
++	if (gNow - lastFlip > 0.2f)
++	{
++		lastFlip = gNow;
++		flipDown = !flipDown;
++		table->Message(flipDown ? MessageCode::LeftFlipperInputPressed : MessageCode::LeftFlipperInputReleased,
++		               pb::time_now);
++		table->Message(flipDown ? MessageCode::RightFlipperInputPressed : MessageCode::RightFlipperInputReleased,
++		               pb::time_now);
++	}
++
++	// Watch for a ball parked off the main collision layer.
++	if (b->CollisionMask != lastMask)
++	{
++		if (maskRun > 0 && lastMask != 1)
++			fprintf(stderr, "DBG-layer t=%7.2f left mask 0x%x after %.2fs (%d frames)\n",
++			        gNow, lastMask, gNow - maskRunStart, maskRun);
++		lastMask = b->CollisionMask;
++		maskRun = 0;
++		maskRunStart = gNow;
++	}
++	maskRun++;
++	if (lastMask != 1 && gNow - maskRunStart > 5.0f && gNow - lastReport > 5.0f)
++	{
++		lastReport = gNow;
++		fprintf(stderr, "DBG-STUCK t=%7.2f !!! ball on mask 0x%x for %.2fs pos=(%.3f,%.3f,%.3f) spd=%.3f comp=%p stuck=%d\n",
++		        gNow, lastMask, gNow - maskRunStart, b->Position.X, b->Position.Y, b->Position.Z,
++		        b->Speed, static_cast<void*>(b->CollisionComp), b->StuckCounter);
++	}
++}
++
++void ft_sink_register(const char* name, void* comp, RectF aabb, int group, float timerTime,
++                      vector2 ballPos, int s3, int s4)
++{
++	gSinks.push_back(FtSinkDbgEntry{name, comp, aabb, group, timerTime, ballPos});
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-sink  reg %-12s comp=%p aabb[x %.2f..%.2f y %.2f..%.2f] group=0x%x"
++		        " timerTime=%.4f ballPos=(%.3f,%.3f) s3=%d s4=%d\n",
++		        name ? name : "?", comp, aabb.XMin, aabb.XMax, aabb.YMin, aabb.YMax, group,
++		        timerTime, ballPos.X, ballPos.Y, s3, s4);
++}
++
++void ft_hole_register(const char* name, vector2 center, float radiusSq, int group, int releaseMask, float z)
++{
++	gHoles.push_back(FtHoleDbgEntry{name, center, radiusSq, group, releaseMask, z});
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-hole  reg %-12s center=(%.3f,%.3f) r=%.3f group=0x%x release=0x%x z=%.3f\n",
++		        name ? name : "?", center.X, center.Y, sqrtf(radiusSq), group, releaseMask, z);
++}
++
+ void ft_accel_register(const FtAccelDbgEntry& e)
+ {
+ 	gAccels.push_back(e);
+@@ -61,14 +304,19 @@ static void trace(const char* tag, TPinballTable* t)
  	int bx = em->box_x(b->Position.X), by = em->box_y(b->Position.Y);
  	fprintf(stderr,
  	        "DBG-trace %-6s pos=(%.3f,%.3f,%.3f) dir=(%.3f,%.3f) spd=%.3f mask=0x%x comp=%p"
@@ -15,7 +272,16 @@ index 94bd398..a216cc1 100644
  }
  
  void ft_accel_tick(float dtSec)
-@@ -138,13 +138,13 @@ void ft_accel_tick(float dtSec)
+ {
++	if (ft_autoplay_enabled())
++	{
++		autoplay(dtSec);
++		return;
++	}
+ 	if (!ft_accel_enabled())
+ 		return;
+ 	auto table = pb::MainTable;
+@@ -138,13 +386,13 @@ void ft_accel_tick(float dtSec)
  		fprintf(stderr, "\nDBG-accel ==== inject accel[%zu] %s center=(%.2f,%.2f) r=%.3f group=0x%x "
  		        "approach dir=(%.3f,%.3f) ====\n",
  		        target, a.Name ? a.Name : "?", a.Center.X, a.Center.Y, r, a.Group, d.X, d.Y);
@@ -32,7 +298,7 @@ index 94bd398..a216cc1 100644
  		b->CollisionComp = nullptr;
  		b->CollisionMask = a.Group;
  		b->StuckCounter = 0;
-@@ -187,7 +187,7 @@ void ft_accel_tick(float dtSec)
+@@ -187,7 +435,7 @@ void ft_accel_tick(float dtSec)
  	b->Direction.X = n.X;
  	b->Direction.Y = n.Y;
  	b->Direction.Z = 0.0f;
@@ -41,8 +307,62 @@ index 94bd398..a216cc1 100644
  	b->CollisionComp = nullptr;
  	b->CollisionMask = x.Group1;
  	b->StuckCounter = 0;
+diff --git a/SpaceCadetPinball/FtAccelDebug.h b/SpaceCadetPinball/FtAccelDebug.h
+index 036dfdd..d917b81 100644
+--- a/SpaceCadetPinball/FtAccelDebug.h
++++ b/SpaceCadetPinball/FtAccelDebug.h
+@@ -19,7 +19,13 @@ struct FtRexitDbgEntry
+ 	vector2 Start, End;
+ 	bool Built;
+ };
++void ft_hole_register(const char* name, vector2 center, float radiusSq, int group, int releaseMask, float z);
++void ft_sink_register(const char* name, void* comp, RectF aabb, int group, float timerTime,
++                      vector2 ballPos, int s3, int s4);
+ void ft_accel_register(const FtAccelDbgEntry& e);
+ void ft_rexit_register(const FtRexitDbgEntry& e);
+ void ft_accel_tick(float dtSec);
+ bool ft_accel_enabled();
++bool ft_autoplay_enabled();
++void ft_accel_note_hit(const char* name);
++void ft_rexit_note_hit(const char* name, int maskIn, int maskOut);
+diff --git a/SpaceCadetPinball/TAccelerator.cpp b/SpaceCadetPinball/TAccelerator.cpp
+index 78dac54..642af51 100644
+--- a/SpaceCadetPinball/TAccelerator.cpp
++++ b/SpaceCadetPinball/TAccelerator.cpp
+@@ -59,6 +59,7 @@ void TAccelerator::Collision(TBall* ball, vector2* nextPosition, vector2* direct
+ 		        GroupName ? GroupName : "?", this, static_cast<void*>(ball), ball->Position.X,
+ 		        ball->Position.Y, ball->CollisionMask, distance, static_cast<void*>(edge)); // FTDBG
+ 
++	ft_accel_note_hit(GroupName); // FTDBG
+ 	Ball = ball;
+ 	ball->CollisionDisabledFlag = true;
+ 	loader::play_sound(SoundIndex4, ball, "TAccelerator");
+diff --git a/SpaceCadetPinball/TBlocker.cpp b/SpaceCadetPinball/TBlocker.cpp
+index d0d77ce..9f0b3d0 100644
+--- a/SpaceCadetPinball/TBlocker.cpp
++++ b/SpaceCadetPinball/TBlocker.cpp
+@@ -49,7 +49,18 @@ int TBlocker::Message(MessageCode code, float value)
+ 		if (Timer)
+ 			timer::kill(Timer);
+ 		Timer = 0;
+-		if (value >= 0)
++		// Strictly positive, not >= 0. The originals' moving-part Message (0x414f80
++		// case 0x38) guards this with `if (0.0 < param_2)` and sends itself 0x3a --
++		// walk to the last frame -- otherwise, which arms the *motion* timer and
++		// raises 0x3d, not 0x46. With >= 0, a close with value 0 armed a zero-delay
++		// ControlTimerExpired instead, and Dragon's Keep's moat blocker then span:
++		// its own handler answers that expiry with another TBlockerEnable(0.0).
++		// timer::check only ever fires the two timers at the head of its sorted list
++		// per frame, so a component re-arming at zero delay starves every other
++		// timer in the game -- including the end-of-ball text box, which is what hung
++		// the drain bonus count-up and with it the next ball. Space Cadet is
++		// unaffected: DrainBallBlockerControl passes InitialDuration or -1, never 0.
++		if (value > 0)
+ 			Timer = timer::set(value, this, TimerExpired);
+ 		break;
+ 	case MessageCode::TBlockerRestartTimeout:
 diff --git a/SpaceCadetPinball/THole.cpp b/SpaceCadetPinball/THole.cpp
-index d5820f8..ee0530f 100644
+index d5820f8..c1ad2dc 100644
 --- a/SpaceCadetPinball/THole.cpp
 +++ b/SpaceCadetPinball/THole.cpp
 @@ -9,6 +9,7 @@
@@ -53,16 +373,91 @@ index d5820f8..ee0530f 100644
  
  THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, false)
  {
-@@ -68,6 +69,9 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+@@ -25,6 +26,10 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	GravityPull = loader::query_float_attribute(groupIndex, 0, 305, 0.0f);
+ 
+ 	loader::query_visual(groupIndex, 0, &visual);
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-hole  %-12s visGroup=0x%x floatArr=%p 1304=%.2f\n",
++		        GroupName ? GroupName : "?", visual.CollisionGroup, static_cast<void*>(visual.FloatArr),
++		        loader::query_float_attribute(groupIndex, 0, 1304, -1.0f)); // FTDBG
+ 	// query_visual leaves FloatArr null when the group's float record does not start
+ 	// with 600, i.e. the hole has no circle geometry at all. Everything below -- the
+ 	// centre, the collision circle, the field insert -- is that geometry, so there is
+@@ -35,6 +40,7 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 		Circle.RadiusSq = 0.001f;
+ 		ZSetValue = 0.0f;
+ 		CollisionMask = 0;
++		ft_hole_register(GroupName, {}, 0.0f, visual.CollisionGroup, 0, 0.0f); // FTDBG
+ 		return;
+ 	}
+ 	Circle.Center.X = visual.FloatArr[0];
+@@ -68,6 +74,10 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
  	circle.Center.X = Circle.Center.X;
  	circle.Center.Y = Circle.Center.Y;
  
 +	if (ft_accel_enabled())
 +		fprintf(stderr, "DBG-hole  %-12s visGroup=0x%x releaseMask=0x%x\n",
 +		        GroupName ? GroupName : "?", visual.CollisionGroup, CollisionMask); // FTDBG
++	ft_hole_register(GroupName, Circle.Center, Circle.RadiusSq, visual.CollisionGroup, CollisionMask, ZSetValue); // FTDBG
  	Field.ActiveFlag = &ActiveFlag;
  	Field.CollisionComp = this;
  	Field.CollisionGroup = visual.CollisionGroup;
+@@ -102,6 +112,9 @@ int THole::Message(MessageCode code, float value)
+ 
+ void THole::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
+ {
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-hole  HIT %-12s captured=%d ball=%p mask=0x%x\n",
++		        GroupName ? GroupName : "?", BallCapturedFlag, static_cast<void*>(ball), ball->CollisionMask); // FTDBG
+ 	if (!BallCapturedFlag)
+ 	{
+ 		BallCapturedSecondStage = false;
+@@ -145,6 +158,9 @@ int THole::FieldEffect(TBall* ball, vector2* vecDst)
+ 				BallCapturedFlag = false;
+ 				BallCapturedSecondStage = false;
+ 				ball->Position.Z = ZSetValue;
++				if (ft_accel_enabled() || ft_autoplay_enabled())
++					fprintf(stderr, "DBG-holerel %-12s mask 0x%x -> 0x%x z=%.3f\n",
++					        GroupName ? GroupName : "?", ball->CollisionMask, CollisionMask, ZSetValue); // FTDBG
+ 				ball->CollisionMask = CollisionMask;
+ 				ball->CollisionComp = nullptr;
+ 				ball->Direction = {};
+diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
+index 0c0302b..5c10c59 100644
+--- a/SpaceCadetPinball/TPinballComponent.h
++++ b/SpaceCadetPinball/TPinballComponent.h
+@@ -164,6 +164,21 @@ enum class MessageCode
+ 	Reset = 1024,
+ };
+ 
++// Null-safe component type.
++//
++// The mode machines dispatch two kinds of message through one entry point: a real
++// collision or timer, which carries the component it came from, and a mode-level
++// notification like "this mode just started", which has no component and passes
++// nullptr. The controllers then branch on the caller's type -- and a controller that
++// does so unguarded crashes the moment a notification reaches it. Dragon's Keep
++// segfaulted exactly there, in RescueMaidenController, on a flipper press during the
++// egg exchange.
++//
++// Returning 0 is safe because it is not a type code: the DAT's object types start at
++// 1000, so no branch can match it.
++class TPinballComponent;
++inline int ComponentTypeOf(const TPinballComponent* component);
++
+ class TPinballComponent
+ {
+ public:
+@@ -201,3 +216,8 @@ private:
+ 	float VisualPosNormX;
+ 	float VisualPosNormY;
+ };
++
++inline int ComponentTypeOf(const TPinballComponent* component)
++{
++	return component ? component->GetComponentType() : 0;
++}
 diff --git a/SpaceCadetPinball/TRamp.cpp b/SpaceCadetPinball/TRamp.cpp
 index 3755fdd..7b2e8b5 100644
 --- a/SpaceCadetPinball/TRamp.cpp
@@ -86,6 +481,90 @@ index 3755fdd..7b2e8b5 100644
  	TTableLayer::edges_insert_square(y0, x0, y1, x1, nullptr, &Field);
  }
  
+diff --git a/SpaceCadetPinball/TRampExit.cpp b/SpaceCadetPinball/TRampExit.cpp
+index 4cc821b..bc23290 100644
+--- a/SpaceCadetPinball/TRampExit.cpp
++++ b/SpaceCadetPinball/TRampExit.cpp
+@@ -77,6 +77,8 @@ void TRampExit::Collision(TBall* ball, vector2* nextPosition, vector2* direction
+ 		        ball->CollisionMask, static_cast<void*>(edge), static_cast<void*>(Edge1),
+ 		        static_cast<void*>(Edge2), edge == Edge1 ? CollisionGroup2 : CollisionGroup1); // FTDBG
+ 
++	ft_rexit_note_hit(GroupName, ball->CollisionMask, edge == Edge1 ? CollisionGroup2 : CollisionGroup1); // FTDBG
++
+ 	if (edge == Edge1)
+ 	{
+ 		control::handler(MessageCode::ControlRampWall2Crossed, this);
+diff --git a/SpaceCadetPinball/TSink.cpp b/SpaceCadetPinball/TSink.cpp
+index 4a5dc0e..e492cf7 100644
+--- a/SpaceCadetPinball/TSink.cpp
++++ b/SpaceCadetPinball/TSink.cpp
+@@ -9,6 +9,7 @@
+ #include "TBall.h"
+ #include "TDrain.h"
+ #include "timer.h"
++#include "FtAccelDebug.h" // FTDBG
+ 
+ TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
+ {
+@@ -30,6 +31,8 @@ TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+ 	BallPosition = floatArr ? vector2{floatArr[0], floatArr[1]} : vector2{0.0f, 0.0f};
+ 	// 407 is the auto-eject delay; absent means eject on the next tick.
+ 	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
++	ft_sink_register(GroupName, this, AABB, visual.CollisionGroup, TimerTime, BallPosition,
++	                 SoundIndex3, SoundIndex4); // FTDBG
+ }
+ 
+ int TSink::Message(MessageCode code, float value)
+@@ -37,10 +40,15 @@ int TSink::Message(MessageCode code, float value)
+ 	switch (code)
+ 	{
+ 	case MessageCode::TSinkResetTimer:
++	{
+ 		if (value < 0.0f)
+ 			value = TimerTime;
+-		timer::set(value, this, TimerExpired);
++		auto id = timer::set(value, this, TimerExpired);
++		if (ft_accel_enabled() || ft_autoplay_enabled())
++			fprintf(stderr, "DBG-sink  MSG %-12s TSinkResetTimer value=%.4f timerTime=%.4f -> id=%d\n",
++			        GroupName ? GroupName : "?", value, TimerTime, id); // FTDBG
+ 		break;
++	}
+ 	case MessageCode::PlayerChanged:
+ 		timer::kill(TimerExpired);
+ 		PlayerMessagefieldBackup[PinballTable->CurrentPlayer] = MessageField;
+@@ -68,6 +76,9 @@ void TSink::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
+ 	}
+ 	else
+ 	{
++		if (ft_accel_enabled() || ft_autoplay_enabled())
++			fprintf(stderr, "DBG-sink  HIT %-12s swallow ball=%p\n",
++			        GroupName ? GroupName : "?", static_cast<void*>(ball)); // FTDBG
+ 		ball->Disable();
+ 		loader::play_sound(SoundIndex4, ball, "TSink1");
+ 		control::handler(MessageCode::ControlCollision, this);
+@@ -78,6 +89,10 @@ void TSink::TimerExpired(int timerId, void* caller)
+ {
+ 	auto sink = static_cast<TSink*>(caller);
+ 	auto table = sink->PinballTable;
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-sink  EXP %-12s ballPos=(%.3f,%.3f) occupied=%d\n",
++		        sink->GroupName ? sink->GroupName : "?", sink->BallPosition.X, sink->BallPosition.Y,
++		        table->BallCountInRect(sink->BallPosition, table->CollisionCompOffset * 2.0f)); // FTDBG
+ 	if (table->BallCountInRect(sink->BallPosition, table->CollisionCompOffset * 2.0f))
+ 	{
+ 		timer::set(0.5f, sink, TimerExpired);
+@@ -85,6 +100,11 @@ void TSink::TimerExpired(int timerId, void* caller)
+ 	else 
+ 	{
+ 		auto ball = table->AddBall(sink->BallPosition);
++		if (ft_accel_enabled() || ft_autoplay_enabled())
++			fprintf(stderr, "DBG-sink  EJECT %-12s ball=%p dir=(%.3f,%.3f,%.3f) s1=%.3f s2=%.4f\n",
++			        sink->GroupName ? sink->GroupName : "?", static_cast<void*>(ball),
++			        sink->BallThrowDirection.X, sink->BallThrowDirection.Y, sink->BallThrowDirection.Z,
++			        sink->ThrowSpeedMult1, sink->ThrowSpeedMult2); // FTDBG
+ 		assertm(ball, "Failure to create ball in sink");
+ 		ball->CollisionDisabledFlag = true;
+ 		ball->throw_ball(&sink->BallThrowDirection, sink->ThrowAngleMult, sink->ThrowSpeedMult1,
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
 index 579644f..d742785 100644
 --- a/SpaceCadetPinball/control.cpp
