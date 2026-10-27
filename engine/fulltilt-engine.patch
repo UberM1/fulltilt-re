@@ -123,10 +123,10 @@ index 7e22d08..2b887e2 100644
  	auto zMap = ZMaps[bmp->Resolution];
 diff --git a/SpaceCadetPinball/TAccelerator.cpp b/SpaceCadetPinball/TAccelerator.cpp
 new file mode 100644
-index 0000000..187cdb9
+index 0000000..b9c2a93
 --- /dev/null
 +++ b/SpaceCadetPinball/TAccelerator.cpp
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,71 @@
 +#include "pch.h"
 +#include "TAccelerator.h"
 +
@@ -157,7 +157,6 @@ index 0000000..187cdb9
 +	auto radius = std::max((AABB.YMax - AABB.YMin) / 1.8f, (AABB.XMax - AABB.XMin) / 1.8f);
 +	circle.RadiusSq = radius * radius;
 +
-+	fprintf(stderr, "DBG-accl grp=%d edges=%zu aabb=%g %g %g %g rsq=%g dir=%g %g %g ang=%g b=%g m=%g snd=%d\n", groupIndex, EdgeList.size(), AABB.XMin, AABB.YMin, AABB.XMax, AABB.YMax, circle.RadiusSq, ThrowDirection.X, ThrowDirection.Y, ThrowDirection.Z, ThrowAngleMult, ThrowSpeedMult1, ThrowSpeedMult2, SoundIndex4);
 +	Field.ActiveFlag = &ActiveFlag;
 +	Field.CollisionComp = this;
 +	Field.CollisionGroup = visual.CollisionGroup;
@@ -459,36 +458,110 @@ index 42b7632..568ba5a 100644
  int TDemo::Message(MessageCode code, float value)
 diff --git a/SpaceCadetPinball/TDiverter.cpp b/SpaceCadetPinball/TDiverter.cpp
 new file mode 100644
-index 0000000..9a164e2
+index 0000000..f0d415b
 --- /dev/null
 +++ b/SpaceCadetPinball/TDiverter.cpp
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,146 @@
 +#include "pch.h"
 +#include "TDiverter.h"
 +
++#include "control.h"
 +#include "loader.h"
++#include "maths.h"
 +#include "render.h"
++#include "TBall.h"
++#include "TLine.h"
 +#include "TPinballTable.h"
 +
-+// The original builds its own edges rather than letting TCollisionComponent do it:
-+// it passes createWall = false, then installs walls from attribute 604 (a list of
-+// line segments, walked until a terminator) at offset 0 with the "one-sided" flag
-+// set, falling back to the visual's own line when the visual says it has one.
++// The original builds its own edges rather than letting TCollisionComponent do it: it
++// passes createWall = false and then calls its own wall builder (DRAGON.EXE 0x41ba30)
++// with the attribute-600 payload, the component's collision group, and the two marker
++// values 0 and 1. That builder puts TWO one-sided TLines on the one segment -- the same
++// endpoints wound in opposite directions, so each is only reachable from its own side --
++// offset by +CollisionCompOffset and -0.8 * CollisionCompOffset, and tags them with the
++// two markers so Collision can tell front from back. Both carry &ActiveFlag, so a
++// disabled diverter is simply not in the world.
 +//
-+// STAND-IN, documented: this uses the engine's standard createWall = true path, which
-+// installs attribute 600 with the table's collision offset. Both produce a wall gated
-+// on &ActiveFlag, which is the part the rules and the ball care about; what is not
-+// reproduced is multi-segment diverters and the one-sidedness, so a ball may bounce
-+// off the back of a closed diverter where the original would let it through. Fixing
-+// that means teaching TEdgeSegment::install_wall the 604 list form, which is a change
-+// to shared engine geometry code rather than to this class.
-+TDiverter::TDiverter(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
++// (An earlier note here guessed attribute 604 and a segment list. It is 600, a single
++// line, doubled: the builder is gated on visual.FloatArrCount == 2, which is exactly
++// query_visual's encoding of "600 describes one line".)
++TDiverter::TDiverter(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, false)
 +{
 +	visualStruct visual{};
 +	loader::query_visual(groupIndex, 0, &visual);
 +	SoundIndex4 = visual.SoundIndex4;
 +	SoundIndex3 = visual.SoundIndex3;
 +	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.1f);
++
++	// Anything but a single line and the original installs nothing -- Dragon's props with
++	// no wall at all take this path.
++	if (visual.FloatArrCount != 2 || !visual.FloatArr)
++		return;
++
++	vector2 p0{visual.FloatArr[0], visual.FloatArr[1]};
++	vector2 p1{visual.FloatArr[2], visual.FloatArr[3]};
++
++	InstallFace(p0, p1, visual.CollisionGroup, table->CollisionCompOffset, nullptr);
++	// 0.8 is the original's constant, and the asymmetry is the point: the back face sits
++	// closer to the segment than the front one, so a ball arriving from behind reaches it
++	// first and is let through rather than bounced.
++	InstallFace(p1, p0, visual.CollisionGroup, -table->CollisionCompOffset * 0.8f, BackFaceMarker());
++}
++
++void TDiverter::InstallFace(const vector2& start, const vector2& end, int collisionGroup, float offset,
++                            void* wallValue)
++{
++	auto line = new TLine(this, &ActiveFlag, collisionGroup, start, end);
++	line->WallValue = wallValue;
++	line->Offset(offset);
++	line->place_in_grid(&AABB);
++	EdgeList.push_back(line);
++}
++
++void TDiverter::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++                          TEdgeSegment* edge)
++{
++	if (!edge->WallValue)
++	{
++		// The front face is an ordinary wall, except that the original never reaches
++		// TCollisionComponent::Collision's hard-hit branch: it plays only the soft hit
++		// sound, and only above the same 0.2 threshold the base class uses.
++		if (PinballTable->TiltLockFlag)
++		{
++			maths::basic_collision(ball, nextPosition, direction, Elasticity, Smoothness, 1000000000.0, 0.0);
++			return;
++		}
++
++		auto projSpeed = maths::basic_collision(ball, nextPosition, direction, Elasticity, Smoothness,
++		                                        Threshold, Boost);
++		if (projSpeed > 0.2f && SoftHitSoundId)
++			loader::play_sound(SoftHitSoundId, ball, "TDiverter3");
++		return;
++	}
++
++	// The back face lets the ball through -- this is the one-sidedness, and it is why a
++	// ball coming the wrong way down a closed chute is not bounced back up it.
++	ball->not_again(edge);
++	ball->RayMaxDistance -= distance;
++	ball->Position.X = nextPosition->X;
++	ball->Position.Y = nextPosition->Y;
++
++	if (PinballTable->TiltLockFlag)
++		return;
++
++	if (HardHitSoundId)
++		loader::play_sound(HardHitSoundId, ball, "TDiverter4");
++	// No diverter in either table has a control function, so this reaches nothing today;
++	// it is here because the original sends it, and because it corrects the note that
++	// used to stand in TDiverter.h claiming a diverter never reports.
++	control::handler(MessageCode::ControlCollision, this);
++
++	// NOT REPRODUCED: the original follows this with a sprite flip -- when the component
++	// has more than one bitmap it sets the second for TimerTime seconds and a timer
++	// callback (0x41bc50) puts the first back, i.e. the flap visibly kicks as the ball
++	// crosses it. Left out because SetActive below drives the same sprite from the
++	// enable/disable state, and the two would have to be reconciled; the ball's path is
++	// unaffected either way.
 +}
 +
 +void TDiverter::SetActive(bool active, bool withSound)
@@ -537,10 +610,10 @@ index 0000000..9a164e2
 +}
 diff --git a/SpaceCadetPinball/TDiverter.h b/SpaceCadetPinball/TDiverter.h
 new file mode 100644
-index 0000000..dd4a089
+index 0000000..989f9dc
 --- /dev/null
 +++ b/SpaceCadetPinball/TDiverter.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,50 @@
 +#pragma once
 +#include "TCollisionComponent.h"
 +
@@ -561,22 +634,33 @@ index 0000000..dd4a089
 +//     pair and the Full-Tilt-only 0x4b/0x4c pair the magnets use. Dragon's Keep drives
 +//     them with the gate pair, which is why the TBlocker stand-in never moved them.
 +//   * it keeps ActiveFlag per player, and restores it on PlayerChanged.
-+// It sends no message to the rules; a diverter is told what to do, it never reports.
++// Its geometry is one segment doubled into a front and a back face, and the back face
++// lets the ball through: see the comment on the constructor in TDiverter.cpp. The one
++// message it sends is ControlCollision from that back face; no diverter in either table
++// has a control function, so nothing listens today.
 +class TDiverter : public TCollisionComponent
 +{
 +public:
 +	TDiverter(TPinballTable* table, int groupIndex);
 +	int Message(MessageCode code, float value) override;
++	void Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++	               TEdgeSegment* edge) override;
 +
 +	int SoundIndex4;
 +	int SoundIndex3;
-+	// 407, default 0.1 s. The original stores it and this corpus never shows it used;
-+	// by analogy with every other component's 407 it is a timeout the diverter does not
-+	// arm itself. Kept so the value is not silently lost.
++	// 407, default 0.1 s. It is how long the original holds its second bitmap after the
++	// ball crosses the back face -- the flap's visible kick, which Collision does not
++	// reproduce. Kept so the value is not silently lost.
 +	float TimerTime;
 +
 +private:
 +	void SetActive(bool active, bool withSound);
++	void InstallFace(const vector2& start, const vector2& end, int collisionGroup, float offset,
++	                 void* wallValue);
++
++	// The original tags its two faces with the literal markers 0 and 1 rather than with
++	// a pointer; any non-null value does, so long as Collision only ever tests it.
++	static void* BackFaceMarker() { return reinterpret_cast<void*>(1); }
 +
 +	char PlayerActiveFlag[4]{};
 +};
@@ -2123,10 +2207,10 @@ index 795235d..cfc44a2 100644
  	auto xMin = 1000000000.0f;
 diff --git a/SpaceCadetPinball/TRampExit.cpp b/SpaceCadetPinball/TRampExit.cpp
 new file mode 100644
-index 0000000..1815ac1
+index 0000000..503f1db
 --- /dev/null
 +++ b/SpaceCadetPinball/TRampExit.cpp
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,69 @@
 +#include "pch.h"
 +#include "TRampExit.h"
 +
@@ -2156,7 +2240,6 @@ index 0000000..1815ac1
 +
 +	// Two edges on one segment, each offset to its own side by the ball's collision
 +	// radius, so neither can be hit from behind the other.
-+	fprintf(stderr, "DBG-rexit grp=%d g1=%d g2=%d seg=%g,%g -> %g,%g off=%g\n", groupIndex, CollisionGroup1, CollisionGroup2, start.X, start.Y, end.X, end.Y, table->CollisionCompOffset);
 +	Edge1 = InstallEdge(start, end, CollisionGroup1, table->CollisionCompOffset);
 +	Edge2 = InstallEdge(end, start, CollisionGroup2, -table->CollisionCompOffset);
 +}
@@ -2358,7 +2441,7 @@ index 555c855..f28797a 100644
  }
  
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
-index 4b6377c..da027e7 100644
+index 4b6377c..579644f 100644
 --- a/SpaceCadetPinball/control.cpp
 +++ b/SpaceCadetPinball/control.cpp
 @@ -3,6 +3,7 @@
@@ -2369,7 +2452,7 @@ index 4b6377c..da027e7 100644
  #include "TBall.h"
  #include "TBlocker.h"
  #include "TBumper.h"
-@@ -843,26 +844,47 @@ std::reference_wrapper<TLight*> control::WormholeLightArray2[3] =
+@@ -843,26 +844,56 @@ std::reference_wrapper<TLight*> control::WormholeLightArray2[3] =
  };
  
  
@@ -2400,6 +2483,15 @@ index 4b6377c..da027e7 100644
 +	for (size_t i = 0; i < CurrentTable->SimpleComponentCount && simples; i++)
 +		if (simples[i])
 +			make_component_link(*simples[i]);
++
++	// Neither bonus table has a "mission_text_box" group -- both send every message to
++	// their single TTextBox. This file's 88 mission_text_box->Display() calls are
++	// unguarded because Space Cadet always has one, so on a bonus table any of them is
++	// a null dereference; the backdoor's idle "credits" scroll reached one and crashed
++	// Dragon's Keep. Pointing the tag at the info box here matches what those tables do
++	// anyway and fixes all 88 at once. Space Cadet has both, so this never fires for it.
++	if (!control_mission_text_box_tag.Component)
++		control_mission_text_box_tag.Component = control_info_text_box_tag.Component;
  }
  
  void control::ClearLinks()
@@ -2422,7 +2514,7 @@ index 4b6377c..da027e7 100644
  	for (auto& component : score_components)
  		component.Tag.SetComponent(nullptr);
  	for (auto& component : simple_components)
-@@ -889,15 +911,33 @@ TPinballComponent* control::make_component_link(component_tag_base& tag)
+@@ -889,15 +920,33 @@ TPinballComponent* control::make_component_link(component_tag_base& tag)
  	return nullptr;
  }
  
@@ -2459,7 +2551,7 @@ index 4b6377c..da027e7 100644
  }
  
  void control::pbctrl_bdoor_controller(char key)
-@@ -1112,9 +1152,13 @@ void control::cheat_bump_rank()
+@@ -1112,9 +1161,13 @@ void control::cheat_bump_rank()
  
  void control::UnstuckBall(TBall& ball, int dt)
  {
@@ -2476,7 +2568,7 @@ index 4b6377c..da027e7 100644
  	{
  		if (ball.StuckCounter <= 20)
  		{
-@@ -1125,7 +1169,13 @@ void control::UnstuckBall(TBall& ball, int dt)
+@@ -1125,7 +1178,13 @@ void control::UnstuckBall(TBall& ball, int dt)
  		{
  			ball.Disable();
  			TableG->MultiballCount--;
@@ -2522,7 +2614,7 @@ index a6c31e7..87a6d69 100644
  
  void fullscrn::window_size_changed()
 diff --git a/SpaceCadetPinball/loader.cpp b/SpaceCadetPinball/loader.cpp
-index 283e983..80110ce 100644
+index 283e983..50710dc 100644
 --- a/SpaceCadetPinball/loader.cpp
 +++ b/SpaceCadetPinball/loader.cpp
 @@ -43,7 +43,7 @@ int loader::sound_count = 1;
@@ -2659,7 +2751,7 @@ index 283e983..80110ce 100644
  	return groupIndex;
  }
  
-@@ -405,10 +434,36 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
+@@ -405,10 +434,35 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
  		case 406:
  			kicker->HardHitSoundId = get_sound_id(static_cast<int>(floor(*floatArr)));
  			break;
@@ -2679,7 +2771,6 @@ index 283e983..80110ce 100644
 +			for (auto i = 0; i < 8; i++)
 +				kicker->ThrowPath[i] = floatArr[i];
 +			kicker->HasThrowPath = true;
-+			fprintf(stderr, "DBG-410 grp=%d had404=%d\n", groupIndex, (int)(kicker->ThrowBallDirection.X!=0.0f||kicker->ThrowBallDirection.Y!=0.0f||kicker->ThrowBallDirection.Z!=0.0f));
 +			kicker->ThrowBallDirection = {
 +				floatArr[4] - floatArr[0],
 +				floatArr[5] - floatArr[1],
