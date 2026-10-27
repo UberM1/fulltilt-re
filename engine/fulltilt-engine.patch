@@ -2071,7 +2071,7 @@ index a2535c0..bae2e1b 100644
  
  int TPopupTarget::Message(MessageCode code, float value)
 diff --git a/SpaceCadetPinball/TRamp.cpp b/SpaceCadetPinball/TRamp.cpp
-index 795235d..cfc44a2 100644
+index 795235d..3755fdd 100644
 --- a/SpaceCadetPinball/TRamp.cpp
 +++ b/SpaceCadetPinball/TRamp.cpp
 @@ -24,49 +24,90 @@ TRamp::TRamp(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
@@ -2205,6 +2205,34 @@ index 795235d..cfc44a2 100644
  
  
  	auto xMin = 1000000000.0f;
+@@ -160,17 +201,27 @@ void TRamp::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
+ 	else
+ 	{
+ 		ball->CollisionFlag = 0;
++
++		// The originals notify the rules on both side walls, with distinct codes;
++		// upstream kept only the Line1 ControlCollision above. Space Cadet never
++		// binds a control function to a ramp, so the loss is invisible there --
++		// but Dragon's Keep's a_ramp103 and a_ramp6 both test 0x56, and without
++		// this they never fire at all. Codes read from TRamp::Collision at
++		// DRAGON.EXE 0x4177d0; the plane branch's third code (0x54) is not sent
++		// here because no handler in either table tests it.
+ 		if (edge == Line2)
+ 		{
+ 			ball->CollisionMask = Wall1CollisionGroup;
+ 			if (BallZOffsetFlag)
+ 				ball->Position.Z = ball->Radius + Wall1BallOffset;
++			control::handler(MessageCode::ControlRampWall1Crossed, this);
+ 		}
+ 		else
+ 		{
+ 			ball->CollisionMask = Wall2CollisionGroup;
+ 			if (BallZOffsetFlag)
+ 				ball->Position.Z = ball->Radius + Wall2BallOffset;
++			control::handler(MessageCode::ControlRampWall2Crossed, this);
+ 		}
+ 	}
+ }
 diff --git a/SpaceCadetPinball/TRampExit.cpp b/SpaceCadetPinball/TRampExit.cpp
 new file mode 100644
 index 0000000..503f1db
