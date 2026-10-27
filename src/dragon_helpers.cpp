@@ -31,10 +31,12 @@
 #include "TSound.h"
 #include "TTextBox.h"
 
-// UNVERIFIED track numbering, exactly as in dragon_missions.cpp: the roles are
-// pinned by the call sites (DAT_00439ae8 is started by Gargoyle Gaggle-Ball,
-// DAT_00439afc by the game-over sequence), the TABCn file each maps to is not. The
-// six quest/idle tracks are 1..6 there, so these continue the run.
+// LEFT OPEN, exactly as in dragon_missions.cpp: the roles are pinned by the call
+// sites (DAT_00439ae8 is started by Gargoyle Gaggle-Ball, DAT_00439afc by the
+// game-over sequence), the TABCn file each maps to is not. The globals hold loader
+// handles, so the index is nowhere in .text -- it needs the track table out of
+// DRAGON.DAT, or a running table. The six quest/idle tracks are 1..6 in
+// dragon_missions.cpp, so these continue the run.
 constexpr music_track gargoyle_gaggle_music = 7;
 constexpr music_track game_over_music = 8;
 
@@ -249,7 +251,7 @@ const char* GetRcString(int id);                                  // 0x409730
 void Display(TTextBox* box, const char* text, float time);        // 0x41de40, font 0
 void DisplayGlyph(TTextBox* box, const char* glyph, float time);  // 0x41de40, font 1
 void ClearText(TTextBox* box);                                    // 0x41d930
-void FormatWithValue(char* out, const char* labelOrFormat);       // 0x42c76f
+void FormatWithValue(char* out, const char* fmt, int value);       // 0x42c76f == sprintf
 void Play(TSound* sound);                                         // vtable +0x18
 extern const char* GlyphJackpot;                                  // 0x439a5c, '"'
 
@@ -625,20 +627,24 @@ void DragonFlurryController(MessageCode code)
 // with the text box's own timer expiry, remapped to MissionStarted by
 // MissionHandler -- which is what turns the loop below into one line per step.
 //
-// UNVERIFIED value: 0x42c76f takes a label plus ONE number and that number is the
-// argument every decompile of every caller drops off the x87 stack. It is almost
-// certainly this step's own term (a bonus count-up that printed the running total
-// against "Target Bonus" would read wrongly), but nothing in the pseudocode says
-// so, so this calls FormatWithValue exactly as dragon_missions.cpp's
-// DisplayTimeRemaining does and passes no value of its own. Settled by
-// disassembling 0x42c76f.
-static bool AnnounceBonusLine(int stringId, TPinballComponent* wave)
+// The value is this step's own term, confirmed. 0x42c76f is plain variadic sprintf (see
+// dragon_common.cpp), and every one of the eight bonus-line sites in 0x42b7c0 has the
+// shape
+//
+//     add DWORD PTR ds:0x434d00,eax   ; the running total
+//     cmp DWORD PTR ds:0x434d0c,edi   ; silent count-up?
+//     jne <skip>
+//     push eax                        ; <- sprintf's one vararg, the same term
+//
+// at 0x42b907, 0x42b98d, 0x42ba4b, 0x42bad2, 0x42bb58, 0x42bbdf, 0x42bc4d and 0x42bcf9,
+// for string ids 3012..3017, 3069 and 3070 -- all of which read "<label>\n%ld".
+static bool AnnounceBonusLine(int stringId, TPinballComponent* wave, int term)
 {
 	if (BonusQuiet != 0)
 		return false;
 
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(stringId));
+	FormatWithValue(buffer, GetRcString(stringId), term);
 	Display(tag_info_text_box.Component, buffer, 2.0f);
 	PlayWave(wave);
 	return true;
@@ -773,8 +779,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			// collisions with popup and solo targets instead.
 			if (TargetsHitThisBall != 0)
 			{
-				BonusTotal += TargetsHitThisBall * 2000;
-				if (AnnounceBonusLine(STR_TARGET_BONUS, tag_tabc06wave.Component))
+				const int term = TargetsHitThisBall * 2000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_TARGET_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -789,8 +796,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			UnlightSelectedQuest();
 			if (quests != 0)
 			{
-				BonusTotal += quests * 100000;
-				if (AnnounceBonusLine(STR_QUEST_BONUS, tag_tabc06wave.Component))
+				const int term = quests * 100000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_QUEST_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -808,8 +816,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 					lit++;
 			if (lit != 0)
 			{
-				BonusTotal += lit * 50000;
-				if (AnnounceBonusLine(STR_ARMOR_BONUS, tag_tabc06wave.Component))
+				const int term = lit * 50000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_ARMOR_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -819,8 +828,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			// 75,000 per spell cast this ball.
 			if (SpellsCastThisBall != 0)
 			{
-				BonusTotal += SpellsCastThisBall * 75000;
-				if (AnnounceBonusLine(STR_SPELL_BONUS, tag_tabc06wave.Component))
+				const int term = SpellsCastThisBall * 75000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_SPELL_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -831,8 +841,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			const int eggs = tag_dragon_egg_light_group.Component->Message(ft::GroupGetOnCount, 0.0f);
 			if (eggs != 0)
 			{
-				BonusTotal += eggs * 150000;
-				if (AnnounceBonusLine(STR_DRAGON_EGG_BONUS, tag_tabc06wave.Component))
+				const int term = eggs * 150000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_DRAGON_EGG_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -844,8 +855,9 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			// at the neutral value, so no weapons means no line.
 			if (TableG->ScoreMultiplier > 1)
 			{
-				BonusTotal += TableG->ScoreMultiplier * 75000;
-				if (AnnounceBonusLine(STR_WEAPON_BONUS, tag_tabc06wave.Component))
+				const int term = TableG->ScoreMultiplier * 75000;
+				BonusTotal += term;
+				if (AnnounceBonusLine(STR_WEAPON_BONUS, tag_tabc06wave.Component, term))
 					return;
 			}
 			break;
@@ -858,7 +870,7 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			if (held != 0)
 			{
 				BonusTotal += held;
-				if (AnnounceBonusLine(STR_BONUS_HOLD, tag_tabc06wave.Component))
+				if (AnnounceBonusLine(STR_BONUS_HOLD, tag_tabc06wave.Component, held))
 					return;
 			}
 			break;
@@ -882,8 +894,10 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			{
 				// Unmultiplied: the terms above already carry the multiplier through
 				// the weapon line, so the total must not be scaled again.
-				DragonSpecialAddScore(caller, BonusTotal);
-				if (AnnounceBonusLine(STR_TOTAL_BONUS, tag_tabc13wave.Component))
+				// 0x42bcf9 pushes DragonSpecialAddScore's return value, so the line
+				// shows what was actually credited, not the pre-flag total.
+				const int credited = DragonSpecialAddScore(caller, BonusTotal);
+				if (AnnounceBonusLine(STR_TOTAL_BONUS, tag_tabc13wave.Component, credited))
 					return;
 			}
 			break;

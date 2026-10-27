@@ -45,11 +45,18 @@ namespace dragon {
 // name: the two gargoyle rocks receive it as well as the dragon's jaw, so it is a
 // moving-part notification and not a jaw event.
 namespace FtMessageCode {
-// Sent to a TBlocker-like component when it has finished moving. Received by a_rocka,
-// a_rockb and (in dragon_missions.cpp) a_jaw.
-// UNVERIFIED: the name. Settled by decompiling FT's TBlocker / moving-part Message
-// override and its timer callback, which is also what would say whether 0x3d means
-// "finished extending", "finished retracting" or "animation step done".
+// Raised by the moving-part class when it has reached its target frame -- not a step,
+// and not direction-specific. Settled from the engine, which both DRAGON.EXE and
+// CADET.EXE carry at the same addresses: 0x414f80 is the class's Message override and
+// 0x414f00 its step callback, which reads
+//
+//     [this+0x9a] = 0;                      ; the step timer
+//     if ([this+0x7e] == [this+0x92])       ; current frame == target frame
+//         ComponentHandler(0x3d, this);
+//
+// so it is delivered to the part's own ControlFunc, like 0x4d, and never to a
+// component's Message(). Received by a_rocka, a_rockb and (in dragon_missions.cpp)
+// a_jaw -- the three multi-frame parts on the table.
 constexpr auto BlockerMotionDone = static_cast<MessageCode>(0x3d);
 // A ramp component reports the ball leaving it, and completing a full traversal. Dragon
 // uses the second as a scoring trigger so a ramp pays once per pass, not per collision.
@@ -78,8 +85,8 @@ constexpr int Str_SuperJackpotUp = 3076; // 0xc04, "Super Jackpot Increased\n%ld
 // Per-table interface this file depends on but does not define
 // ---------------------------------------------------------------------------
 
-void AddScoreFor(TPinballComponent* caller, int index); // 0x4230a0, indexes Scores[]
-void AddScoreAt(TPinballComponent* caller, int score);  // 0x4230f0, literal, multiplied
+int AddScoreFor(TPinballComponent* caller, int index);  // 0x4230a0, indexes Scores[]; returns the credit
+int AddScoreAt(TPinballComponent* caller, int score);   // 0x4230f0, literal, multiplied; returns the credit
 void AddToJackpot(int amount);                          // 0x4238a0, clamp 10,000,000
 void AddToSuperJackpot(int amount);                     // 0x423870, clamp 20,000,000
 void AwardDragonEggs(int count);                        // 0x4232b0
@@ -91,19 +98,23 @@ bool CheckDragonFlurry();                               // 0x4244e0, true when i
 // See the CONFLICT note at its call site in PrisonWindowTripControl.
 void RescueMaidenAwardWindow(TPinballComponent* caller);
 
-// 0x42c76f -- renders a label (or format string) plus ONE numeric value into `out`. The
-// value is a lost argument at every call site in this file: the 1996 build passes it on
-// the x87 stack and Ghidra drops it, so none of the "%ld" amounts below can be recovered
-// from the pseudocode. dragon_missions.cpp owns this declaration and the UNVERIFIED note
-// on its real shape; it is repeated here only so the call sites can be written honestly
-// instead of guessing an operand.
-void FormatWithValue(char* out, const char* labelOrFormat);
+// 0x42c76f is plain variadic sprintf; dragon_common.cpp carries the evidence. Every
+// call site in this file formats one `long`, and in all of them it is the score
+// AddScoreFor / AddScoreAt just returned -- pushed before the buffer and the format, in
+// the ordinary cdecl vararg order, which is what Ghidra was rendering as an unrelated
+// earlier expression.
+void FormatWithValue(char* out, const char* fmt, int value);
 
-// UNVERIFIED: a TBlocker field at +0x7e that the gargoyle rocks test against -1. It is
-// not one of the two durations (those are at +0x86 / +0x8a, where upstream's
-// InitialDuration / ExtendedDuration sit), and nothing in the rules code ever writes it,
-// so it comes from the blocker's record in DRAGON.DAT. Settled by reading that record, or
-// by decompiling FT's TBlocker constructor.
+// The moving part's current frame index, with -1 for "retracted, nothing drawn". From
+// the engine at 0x414f80: BlockerDisable (0x37) aims +0x92 at -1, BlockerEnable (0x38)
+// aims it at the last frame of the sprite list at +0x3a, MovingPartSetPosition (0x3a)
+// aims it at floor(value), and the step callback raises MotionDone once +0x7e has
+// arrived. The listing really is an integer compare -- `cmp DWORD PTR [eax+0x7e],
+// 0xffffffff` at 0x42381b -- and there is no conflict with dragon_part3.cpp's float
+// read, which is of a_sink9 and a different class entirely.
+//
+// Note the port's TBlocker is upstream's two-state one and never raises MotionDone, so
+// the two rock handlers below are inert until the engine grows the frame machinery.
 int BlockerUnknownP7e(TPinballComponent* blocker);
 
 // ---------------------------------------------------------------------------
@@ -423,19 +434,17 @@ void FireRidgeOrbitControl(MessageCode code, TPinballComponent* caller)
 	if (code != MessageCode::ControlCollision)
 		return;
 
-	AddScoreFor(caller, lite69->MessageField);
+	const int addedScore = AddScoreFor(caller, lite69->MessageField);
 	if (lite69->MessageField < 3)
 		lite69->MessageField++;
 
-	// UNVERIFIED: both values in this pair. Ghidra lost the float arguments here -- the
-	// abStack_50 writes in the listing are spilled return addresses, not data -- and only
-	// the opcodes survived. They are taken from DragonChuteControl below, which runs the
-	// byte-identical turn-on/flash-then-off pair on its own ladder light. Reading the two
-	// pushes at 0x4269e9 / 0x4269f4 would settle it.
+	// Read off the listing: `push 0; push 1; call vtable+4` at 0x426a0b, then
+	// `push 0x41a00000; push 0x10; call vtable+4` at 0x426a1f. 0x41a00000 is 20.0f, not
+	// the 10.0f borrowed from DragonChuteControl.
 	lite69->Message(MessageCode::TLightTurnOn, 0.0f);
-	lite69->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 10.0f);
+	lite69->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 20.0f);
 
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_FireRidge)));
+	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_FireRidge)), addedScore);
 	info_text_box->Display(Buffer, 2.0f);
 }
 
@@ -565,6 +574,8 @@ void DragonChuteControl(MessageCode code, TPinballComponent* caller)
 
 	tabc20wave->Play(caller, "DragonChute");
 	AddScoreFor(caller, lite68->MessageField);
+	// 0x4268ed formats the increment, not the credit: `push 0x30d40` (200,000) is the
+	// vararg, pushed before the format string.
 	if (lite68->MessageField < 4)
 		lite68->MessageField++;
 
@@ -572,7 +583,7 @@ void DragonChuteControl(MessageCode code, TPinballComponent* caller)
 	// shared routine; same arithmetic either way.
 	AddToSuperJackpot(200000);
 
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_SuperJackpotUp)));
+	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_SuperJackpotUp)), 200000);
 	info_text_box->Display(Buffer, 2.0f);
 
 	lite68->Message(MessageCode::TLightTurnOn, 0.0f);
@@ -648,9 +659,9 @@ void RightFlipperControl(MessageCode code, TPinballComponent* caller)
 
 	if (mode == ModeSlayDragon)
 	{
-		// UNVERIFIED: lite29's duration. Ghidra dropped the value on this one call only;
-		// 1.0f is taken from lite30 on the next line, which is flashed in lock-step with
-		// lite29 everywhere else in the binary.
+		// 1.0f confirmed: the compiler hoists the single `push 0x3f800000` to 0x426c82,
+		// above the mode branch, so the same operand serves lite29 in both arms -- which
+		// is also why Ghidra could not attribute it to either call.
 		lite29->Message(MessageCode::TLightFlasherStartTimed, 1.0f);
 		lite30->Message(MessageCode::TLightFlasherStartTimed, 1.0f);
 	}
@@ -711,8 +722,8 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 		// window; mode_timer->MessageField holds that quest's index.
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
-			AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+			const int credited = AddScoreFor(caller, 0);
+			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
@@ -738,8 +749,8 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 	}
 
 	const int lit = prison_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
-	AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+	const int credited = AddScoreFor(caller, lit);
+	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (prison_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)
@@ -778,19 +789,21 @@ void WatchWindowTripControl(MessageCode code, TPinballComponent* caller)
 	case ModeRestartWindow:
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
-			AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+			const int credited = AddScoreFor(caller, 0);
+			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
 		break;
 
 	case ModeRescueMaiden:
+	{
 		tabc51wave->Play(caller, "WatchWindowTrip");
-		AddScoreFor(caller, 0);
-		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+		const int credited = AddScoreFor(caller, 0);
+		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 		info_text_box->Display(Buffer, 2.0f);
 		return;
+	}
 
 	case ModeTowerBarrage:
 		AddScoreAt(caller, 100000);
@@ -802,8 +815,8 @@ void WatchWindowTripControl(MessageCode code, TPinballComponent* caller)
 
 	tabc04wave->Play(caller, "WatchWindowTrip");
 	const int lit = watch_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
-	AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+	const int credited = AddScoreFor(caller, lit);
+	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (watch_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)
@@ -836,19 +849,21 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 	case ModeRestartWindow:
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
-			AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+			const int credited = AddScoreFor(caller, 0);
+			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
 		break;
 
 	case ModeRescueMaiden:
+	{
 		tabc51wave->Play(caller, "GateWindowTrip");
-		AddScoreFor(caller, 0);
-		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+		const int credited = AddScoreFor(caller, 0);
+		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 		info_text_box->Display(Buffer, 2.0f);
 		return;
+	}
 
 	case ModeTowerBarrage:
 		AddScoreAt(caller, 100000);
@@ -859,8 +874,8 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 	}
 
 	const int lit = gate_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
-	AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)));
+	const int credited = AddScoreFor(caller, lit);
+	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (gate_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)
@@ -1044,9 +1059,13 @@ void MoatBlockerControl(MessageCode code, TPinballComponent* caller)
 // confirmed by a_spot10's own handler, which sends 0x35 -- TSoloTargetDisable, upstream
 // 49 -- to itself on the way in.
 //
-// The BlockerUnknownP7e guard is read as "only re-arm the target if this rock closes on
-// its own": Dragon Pass holds both rocks open indefinitely and must not get its targets
-// back. See the UNVERIFIED note on that accessor above.
+// The BlockerUnknownP7e guard is now exact rather than a reading: +0x7e is the frame the
+// rock has just arrived at and -1 is the retracted sentinel, so this re-arms the target
+// only when the rock has finished sliding back *out* (BlockerEnable aims at the last
+// frame). The retraction that a_spot10's own handler triggers raises the same
+// notification and is filtered out here -- a_spot10 disables itself on the way in and is
+// never re-enabled by its own handler (0x4254a0 confirms it: the body is one flash, one
+// BlockerDisable, one self-disable and a call to 0x4252b0).
 void GargoyleRockAControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code != FtMessageCode::BlockerMotionDone)

@@ -5,8 +5,7 @@
 1005	Not enough memory to run Full Tilt!.
 1006	Warning:
 1007	WAVEMIX.INF is missing - it must be in the pinball directory!
-1008	One or more of the player controls is set to the same key,
-for best performance use unique keys for each control.
+1008	One or more of the player controls is set to the same key,\nfor best performance use unique keys for each control.
 1009	Clear High Scores?
 1010	Confirm
 1011	1 UseBitmapFont
@@ -16,13 +15,12 @@ for best performance use unique keys for each control.
 1015	88 Bump Left Key
 1016	190 Bump Right Key
 1017	38 Bump Bottom Key
-1018	Software\Cinematronics\Pinball
+1018	Software\\Cinematronics\\Pinball
 1019	Shift Keys do not work correctly on all systems
 1020	FullTilt! requires at least 256 color (8-bit)
 2001	F2 Starts New Game
 2002	Game Over
-2003	Game Paused
-F3 to Resume
+2003	Game Paused\nF3 to Resume
 2004	Continue Play
 2005	Careful...
 2006	TILT!
@@ -34,14 +32,10 @@ F3 to Resume
 2012	Player 2 Shoot Again
 2013	Player 3 Shoot Again
 2014	Player 4 Shoot Again
-2015	Demo
-Player 1
-2016	Demo
-Player 2
-2017	Demo
-Player 3
-2018	Demo
-Player 4
+2015	Demo\nPlayer 1
+2016	Demo\nPlayer 2
+2017	Demo\nPlayer 3
+2018	Demo\nPlayer 4
 2019	Full Tilt! - Space Cadet
 2020	Space Cadet
 2021	SpaceCadet
@@ -54,40 +48,26 @@ Player 4
 2030	Use &Maximum Resolution (640 x 480)
 2031	Use &Maximum Resolution (800 x 600)
 2032	Use &Maximum Resolution (1024 x 768)
-2033	Joystick driver is not available.
- Make sure you have a joystick driver installed.
+2033	Joystick driver is not available.\n Make sure you have a joystick driver installed.
 2034	Joystick 1 not found
 2035	Joystick 1 is not responding, make sure it is properly installed.
-2036	Music: On
-Game Paused
-F3 to Resume
-2037	Music: Off
-Game Paused
-F3 to Resume
-2038	Sound Effects: On
-Game Paused
-F3 to Resume
-2039	Sound Effects: Off
-Game Paused
-F3 to Resume
+2036	Music: On\nGame Paused\nF3 to Resume
+2037	Music: Off\nGame Paused\nF3 to Resume
+2038	Sound Effects: On\nGame Paused\nF3 to Resume
+2039	Sound Effects: Off\nGame Paused\nF3 to Resume
 3001	Replay Awarded
 3002	Ball Locked
-3003	Center Post
-%ld
-3004	Bonus Awarded
-%ld
+3003	Center Post\n%ld
+3004	Bonus Awarded\n%ld
 3005	Bonus Activated
 3006	Weapons Upgraded
 3007	Engine Upgraded
 3008	Bonus up 1 Million
-3009	Extra Ball Available
-%ld
+3009	Extra Ball Available\n%ld
 3010	Extra Ball
-3011	Reflex Shot Award
-%ld
+3011	Reflex Shot Award\n%ld
 3012	Final Battle Won
-3013	Hyperspace Bonus
-%ld
+3013	Hyperspace Bonus\n%ld
 3014	Hyperspace Bonus Available
 3015	Jackpot Doubled
 3016	Jackpot Activated
@@ -96,8 +76,7 @@ F3 to Resume
 3019	Light Added
 3020	Ramp Bonus On
 3021	Light Reset Off
-3022	Skill Shot
-%ld
+3022	Skill Shot\n%ld
 3023	Ship Re-Fueled
 3024	Gravity Well
 3025	Time Warp Forward
@@ -131,17 +110,12 @@ F3 to Resume
 3053	Secret
 3054	Time Warp
 3055	Maelstrom
-3056	Mission Accepted
-%ld
-3057	Jackpot!
-%ld
+3056	Mission Accepted\n%ld
+3057	Jackpot!\n%ld
 3058	%s Mission Selected
-3059	Black Hole
-%ld
-3060	Gravity Normalized
-%ld
-3061	Gravity Well
-%ld
+3059	Black Hole\n%ld
+3060	Gravity Normalized\n%ld
+3061	Gravity Well\n%ld
 3062	Promotion to %s
 3063	Cadet
 3064	Ensign
@@ -153,23 +127,20 @@ F3 to Resume
 3070	Admiral
 3071	Fleet Admiral
 3072	Wormhole Opened
-3073	Crash Bonus
-%ld
+3073	Crash Bonus\n%ld
 3074	Replay Ball
 3075	Re-Deploy
 3076	Hit Mission Targets To Select Mission
 3077	Re-Fuel Ship
 3078	Launch Ramp To Accept %s Mission
-3079	Attack Bumpers Hits
-Left: %d
+3079	Attack Bumpers Hits\nLeft: %d
 3080	Target Training Passed
 3081	Mission Aborted
 3082	Launches Left: %d
 3083	Launch Training Passed
 3084	Re-Entries Left: %d
 3085	Re-Entry Training Passed
-3086	Drop Targets
-Left: %d
+3086	Drop Targets\nLeft: %d
 3087	Science Mission Completed
 3088	Warning -- Low Fuel
 3089	Fill Right Hazard Banks
@@ -180,23 +151,19 @@ Left: %d
 3094	Upgrade Launch Bumpers
 3095	Enter Black Hole
 3096	Black Hole Eliminated
-3097	Targets
-Left: %d
+3097	Targets\nLeft: %d
 3098	Xenomorphs Destroyed
 3099	Upgrade Flags
 3100	Hyperspace Launch
 3101	Survivors Rescued
 3102	Aliens Repelled
 3103	Hit Fuel Targets
-3104	Remote Attack Bumper Hits
-Left: %d
+3104	Remote Attack Bumper Hits\nLeft: %d
 3105	Satellite Repaired
-3106	Lane Passes
-Left: %d
+3106	Lane Passes\nLeft: %d
 3107	Shoot Ball Up Fuel Chute
 3108	Survey Complete
-3109	Out Lane Passes
-Left: %d
+3109	Out Lane Passes\nLeft: %d
 3110	Doomsday Machine Destroyed
 3111	Roll Flags: %d
 3112	Hit Space Warp Rollover
@@ -205,42 +172,28 @@ Left: %d
 3115	Hit Red Wormhole
 3116	Hit Green Wormhole
 3117	Plans Recovered
-3118	Rebound Hits
-Left: %d
+3118	Rebound Hits\nLeft: %d
 3119	Hit Hyperspace Chute or Launch Ramp
-3120	Drop Target Hits
-Left: %d
-3121	Spot Target Hits
-Left: %d
-3122	Lanes Passes
-Left: %d
+3120	Drop Target Hits\nLeft: %d
+3121	Spot Target Hits\nLeft: %d
+3122	Lanes Passes\nLeft: %d
 3123	Shoot Ball Up Fuel Chute
 3124	Hit Launch Ramp
 3125	Hit Flags
 3126	Hit Worm Hole
 3127	Hyperspace Chute to end Maelstrom
-3129	Full Tilt!
-Space Cadet Demo
+3129	Full Tilt!\nSpace Cadet Demo
 3130	Promotion to %s
 3131	Demotion to %s
 3132	Upgrade Attack Bumpers
 3133	Fill Left Hazard Banks
 3134	HIGH SCORE
-3135	Player 1's Score
-%ld
-3136	Player 2's Score
-%ld
-3137	Player 3's Score
-%ld
-3138	Player 4's Score
-%ld
-3139	High Score 1
-%ld
-3140	High Score 2
-%ld
-3141	High Score 3
-%ld
-3142	High Score 4
-%ld
-3143	High Score 5
-%ld
+3135	Player 1's Score\n%ld
+3136	Player 2's Score\n%ld
+3137	Player 3's Score\n%ld
+3138	Player 4's Score\n%ld
+3139	High Score 1\n%ld
+3140	High Score 2\n%ld
+3141	High Score 3\n%ld
+3142	High Score 4\n%ld
+3143	High Score 5\n%ld

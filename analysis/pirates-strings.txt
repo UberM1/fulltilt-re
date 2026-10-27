@@ -5,8 +5,7 @@
 1005	Not enough memory to run Full Tilt!.
 1006	Warning:
 1007	WAVEMIX.INF is missing - it must be in the pinball directory!
-1008	One or more of the player controls is set to the same key,
-for best performance use unique keys for each control.
+1008	One or more of the player controls is set to the same key,\nfor best performance use unique keys for each control.
 1009	Clear High Scores?
 1010	Confirm
 1011	1 UseBitmapFont
@@ -16,13 +15,12 @@ for best performance use unique keys for each control.
 1015	88 Bump Left Key
 1016	190 Bump Right Key
 1017	38 Bump Bottom Key
-1018	Software\Cinematronics\Pinball
+1018	Software\\Cinematronics\\Pinball
 1019	Shift Keys do not work correctly on all systems
 1020	FullTilt! requires at least 256 color (8-bit)
 2001	F2 Starts New Game
 2002	Game Over
-2003	Game Paused
-F3 to Resume
+2003	Game Paused\nF3 to Resume
 2004	Continue Play
 2005	Careful...
 2006	TILT!
@@ -34,14 +32,10 @@ F3 to Resume
 2012	Player 2 Shoot Again
 2013	Player 3 Shoot Again
 2014	Player 4 Shoot Again
-2015	Demo
-Player 1
-2016	Demo
-Player 2
-2017	Demo
-Player 3
-2018	Demo
-Player 4
+2015	Demo\nPlayer 1
+2016	Demo\nPlayer 2
+2017	Demo\nPlayer 3
+2018	Demo\nPlayer 4
 2019	Full Tilt! - Skulduggery
 2020	Skulduggery
 2021	Skulduggery
@@ -54,51 +48,29 @@ Player 4
 2030	Use &Maximum Resolution (640 x 480)
 2031	Use &Maximum Resolution (800 x 600)
 2032	Use &Maximum Resolution (1024 x 768)
-2033	Joystick driver is not available.
- Make sure you have a joystick driver installed.
+2033	Joystick driver is not available.\n Make sure you have a joystick driver installed.
 2034	Joystick 1 not found
 2035	Joystick 1 is not responding, make sure it is properly installed.
-2036	Music: On
-Game Paused
-F3 to Resume
-2037	Music: Off
-Game Paused
-F3 to Resume
-2038	Sound Effects: On
-Game Paused
-F3 to Resume
-2039	Sound Effects: Off
-Game Paused
-F3 to Resume
-3001	Crew Added
-Bumpers Now
-%ld
-3002	Secret Hideaway
-%ld
+2036	Music: On\nGame Paused\nF3 to Resume
+2037	Music: Off\nGame Paused\nF3 to Resume
+2038	Sound Effects: On\nGame Paused\nF3 to Resume
+2039	Sound Effects: Off\nGame Paused\nF3 to Resume
+3001	Crew Added\nBumpers Now\n%ld
+3002	Secret Hideaway\n%ld
 3003	%ld
-3004	Island Breeze
-%ld
-3005	Nor'Easter
-%ld
-3006	Port O' Call
-%ld
+3004	Island Breeze\n%ld
+3005	Nor'Easter\n%ld
+3006	Port O' Call\n%ld
 3007	In The Brig
-3008	Tradewind Loop
-%ld
-3009	Shipwreck Mystery
-%ld
-3010	Sou'Eastern
-%ld
-3011	Easterly
-%ld
-3012	Westerly
-%ld
-3013	WINDS
-%ld
+3008	Tradewind Loop\n%ld
+3009	Shipwreck Mystery\n%ld
+3010	Sou'Eastern\n%ld
+3011	Easterly\n%ld
+3012	Westerly\n%ld
+3013	WINDS\n%ld
 3014	Extra Ball
 3015	One Million
-3016	Attack Ship
-%ld
+3016	Attack Ship\n%ld
 3017	Ship Sunk
 3018	Ship Captured
 3019	Gold Ingots
@@ -107,74 +79,42 @@ Bumpers Now
 3022	The Frantz Ruby
 3023	Shapiro's Sceptre
 3024	Crown of Sandige
-3025	Tavern
-%ld
+3025	Tavern\n%ld
 3026	Shoot Again
 3027	HIGH SCORE
-3028	Target Bonus
-%ld
-3029	Mode Bonus
-%ld
-3030	Map Piece Bonus
-%ld
-3031	Special Treasures
-%ld
-3032	Ship's Hold
-%ld
-3033	Total Bonus
-%ld
-3034	Gold Ingots
-Buried
-3035	Silver Chalice
-Buried
-3036	Signet Ring
-Buried
-3037	The Frantz Ruby
-Buried
-3038	Shapiro's Sceptre
-Buried
-3039	Crown of Sandige
-Buried
-3040	Coins
-Buried
-3041	Bonus
-Buried
-3042	Jackpot
-Buried
-3043	Extra Ball
-Buried
-3044	Max Crew
-Bumpers Now
-%ld
-3045	Bermuda Triangle
-%ld
-3046	Squall!
-%ld
-3047	Tropical Storm!
-%ld
-3048	Monsoon!
-%ld
-3049	Hurricane!
-%ld
+3028	Target Bonus\n%ld
+3029	Mode Bonus\n%ld
+3030	Map Piece Bonus\n%ld
+3031	Special Treasures\n%ld
+3032	Ship's Hold\n%ld
+3033	Total Bonus\n%ld
+3034	Gold Ingots\nBuried
+3035	Silver Chalice\nBuried
+3036	Signet Ring\nBuried
+3037	The Frantz Ruby\nBuried
+3038	Shapiro's Sceptre\nBuried
+3039	Crown of Sandige\nBuried
+3040	Coins\nBuried
+3041	Bonus\nBuried
+3042	Jackpot\nBuried
+3043	Extra Ball\nBuried
+3044	Max Crew\nBumpers Now\n%ld
+3045	Bermuda Triangle\n%ld
+3046	Squall!\n%ld
+3047	Tropical Storm!\n%ld
+3048	Monsoon!\n%ld
+3049	Hurricane!\n%ld
 3050	Shipwrecked
-3051	Mutiny!
-%ld
-3052	Sword Fight
-%ld
-3053	Treasure Hunt
-%ld
-3054	Pegleg's Loot
-%ld
+3051	Mutiny!\n%ld
+3052	Sword Fight\n%ld
+3053	Treasure Hunt\n%ld
+3054	Pegleg's Loot\n%ld
 3055	Lava-Ball
 3056	Jail Break!
-3057	Bonus
-%ld
-3058	Jackpot
-%ld
-3059	Shipwreck Mystery
-Available
-3060	Hit ship to sink.
-Wire ramp to capture.
+3057	Bonus\n%ld
+3058	Jackpot\n%ld
+3059	Shipwreck Mystery\nAvailable
+3060	Hit ship to sink.\nWire ramp to capture.
 3061	Hit the X to find treasure
 3062	Hit the Tavern
 3063	Follow the Winds

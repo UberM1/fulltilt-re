@@ -71,7 +71,13 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit(f"usage: {sys.argv[0]} TABLE.EXE [OUT.txt]")
     s = strings(sys.argv[1])
-    lines = [f"{i}\t{t}" for i, t in sorted(s.items())]
+    # Escape embedded newlines. Writing the raw text one line per id silently
+    # truncates every string at its first newline, and these strings routinely carry
+    # one: 3007 is "Fire Ridge\n%ld", not "Fire Ridge". Reading the truncated dump
+    # produced two wrong conclusions about how the game formats its displays.
+    lines = [
+        f"{i}\t{t.encode('unicode_escape').decode('ascii')}" for i, t in sorted(s.items())
+    ]
     if len(sys.argv) > 2:
         Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
         print(f"{sys.argv[1]}: {len(s)} strings -> {sys.argv[2]}")

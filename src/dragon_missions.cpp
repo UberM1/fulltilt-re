@@ -49,8 +49,10 @@
 // the originals hold Mix_Music-like handles in globals, so these names are the
 // handles' roles rather than the handles themselves.
 //
-// UNVERIFIED: which TABCn file each role maps to. The roles are pinned by the
-// call sites; the file numbering needs the track table out of the DAT.
+// LEFT OPEN: which TABCn file each role maps to. The roles are pinned by the
+// call sites, but the globals hold loader handles, not indices, so no listing
+// can say which file is which -- it needs the track table out of DRAGON.DAT, or
+// a running table.
 constexpr music_track idle_music = 1;
 constexpr music_track dragon_hoard_music = 2;
 constexpr music_track fire_lizards_music = 3;
@@ -89,12 +91,16 @@ constexpr MessageCode LightOverrideOn = MessageCode::TLightFtTmpOverrideOn;
 constexpr MessageCode LightOverrideOff = MessageCode::TLightFtTmpOverrideOff;
 constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 
-// UNVERIFIED: 0x1b, sent only to `light_sweeps` with a float selecting which
-// canned sweep to run (0..5, one per quest). 27 is not a group code under the
-// +4 rule and `light_sweeps` has its own component type (1038), so this is a
-// Full-Tilt-only code on a Full-Tilt-only component. Settled by decompiling
-// the TLightGroup/TComponentGroup Message override that handles 0x1b.
-constexpr MessageCode LightSweepStart = Msg(0x1b);
+// 0x1b, settled: TLightSweep has since been recovered out of CADET.EXE's engine
+// (object type 1038 / 0x40e -- CADET's own table constructor spawns it even though
+// Space Cadet's data never defines one). Message(0x1b, n) picks sweep n out of the
+// group's attributes 1600..1604 -- start point, direction, step time, repeat count,
+// override time -- walks a growing or shrinking circle of grid cells over the
+// playfield and flashes the lights it crosses with TLightFtTmpOverrideOn, raising
+// ControlTimerExpired when the last repeat ends. See
+// reference/SpaceCadetPinball/TLightSweep.h; the port binds the code as
+// MessageCode::TLightSweepStart, upstream's own 27.
+constexpr MessageCode LightSweepStart = MessageCode::TLightSweepStart;
 
 // TLightGroup family (delta +4).
 constexpr MessageCode GroupReset = Msg(0x26);
@@ -121,9 +127,9 @@ constexpr MessageCode TimerGetRemaining = Msg(0x48);
 
 // Control* block (delta +10, ControlCollision +11).
 constexpr MessageCode BallCaptured = Msg(0x42);
-// 0x43 is sent *to* the egg kickout to let the held ball go. The analysis
-// reads 0x44 as ControlBallReleased, so this is a private THole command and
-// not that code. UNVERIFIED name; settled by decompiling THole::Message.
+// 0x43 is sent *to* a THole to let the held ball go, after `value` seconds --
+// confirmed by decompiling THole::Message at 0x416c70 (see dragon_part4.cpp).
+// 0.0 therefore means "release now", not "hold forever".
 constexpr MessageCode HoleReleaseBall = Msg(0x43);
 constexpr MessageCode TimerExpired = Msg(0x46);
 constexpr MessageCode NotifyTimerExpired = Msg(0x47);
@@ -142,16 +148,22 @@ constexpr MessageCode RampEntered = Msg(0x54);
 constexpr MessageCode RampExited = Msg(0x55);
 constexpr MessageCode RampComplete = Msg(0x56);
 
-// UNVERIFIED: 0x3d, delivered to SlayDragon with `a_jaw` as the caller to
-// re-arm the dragon's ramp after the jaw animation. Named from that one use.
+// 0x3d, settled: the moving part raises it from its own step callback (0x414f00)
+// once its current frame (+0x7e) has reached its target (+0x92), and it arrives at
+// the part's ControlFunc rather than at any component's Message(). So the generic
+// reading in dragon_part2.cpp is the right one -- "the jaw has finished moving",
+// in whichever direction -- and the name here is the local meaning, not the code's.
 constexpr MessageCode JawOpened = Msg(0x3d);
 
-// UNVERIFIED: 0x3a, sent *to* the sword and the jaw with a float position or
-// duration (0.0 / 1.0 for the sword's stages, 7.0 to open the jaw, 0.0 to shut
-// it). Under the +4 blocker rule it would be upstream 54 (TGateEnable) and
-// under +9 it would be 49 (TPopupTargetDisable); neither fits a moving part,
-// so this is an FT-only code on an FT-only component class. Settled by
-// decompiling a_sword's and a_jaw's Message overrides.
+// 0x3a, settled, and the name is exact: it is one arm of the moving-part class's
+// Message override at 0x414f80 (shared, byte for byte, by DRAGON.EXE and CADET.EXE),
+// reached through a jump table at 0x415398 covering 0x37..0x3c. The arm reads
+// `[this+0x92] = (int)floor(value); kill the step timer; timer = timer::set(
+// [this+0x96], this, stepper)`, so the float is a target *frame index* and the part
+// walks to it at its own step rate. Consistent with the operands: 0.0 / 1.0 for the
+// sword's stages and 7.0 / 0.0 for the jaw. The sibling arms are BlockerDisable
+// (0x37, target -1) and BlockerEnable (0x38, target = last frame), which is what
+// places this class under the +4 blocker band after all.
 constexpr MessageCode MovingPartSetPosition = Msg(0x3a);
 
 constexpr MessageCode FlipperPressed = Msg(0x01);  // same value as LightTurnOn; see EggExchange
@@ -450,12 +462,12 @@ void ClearText(TTextBox* box);                                 // 0x41d930
 // `out`. The value is a lost argument in every decompile of every caller: the
 // 1996 build passes it on the x87 stack, which Ghidra drops.
 //
-// UNVERIFIED layout. It cannot be a plain sprintf(out, fmt, value): string
-// 3008 is a bare "%ld" while 3019 is a bare "Dragon Hoard" with no specifier
-// at all, and both are passed in this same slot. So it either concatenates
-// label and value itself, or there are two call shapes the decompile has
-// flattened into one. Settled by disassembling 0x42c76f.
-void FormatWithValue(char* out, const char* labelOrFormat);
+// Settled: it is a plain variadic sprintf, and the argument really is
+// sprintf(out, fmt, value). dragon_common.cpp carries the prologue evidence.
+// The premise that half these strings carry no specifier was an artifact of
+// analysis/dragon-strings.txt, which truncates every string at its embedded
+// newline -- 3019 is "Dragon Hoard\n%ld", not "Dragon Hoard".
+void FormatWithValue(char* out, const char* fmt, int value);
 void ComponentHandler(MessageCode code, TPinballComponent* caller);  // 0x423060
 void Play(TSound* sound);  // vtable +0x18; the original returns the clip length
 
@@ -478,8 +490,11 @@ void MoatBlockerControl(MessageCode code, TPinballComponent* caller);        // 
 // `AnnouncementPending(box)` stands for `*(int*)(info_text_box + 0x5e) != 0`:
 // the text box's own display timer, non-zero while something is still on
 // screen. Every quest's restart branch checks it before overwriting the
-// display with its countdown. UNVERIFIED which TTextBox field that is -- the
-// offset is confirmed, the name is not.
+// display with its countdown. The field is CurrentMessage, not the timer:
+// TTextBox::Display at 0x41de40 opens by testing +0x5e, then strcmp's against
+// `*(char**)(*(+0x62) + 4)` and reads `*(float*)(*(+0x5e) + 8)`, which is
+// upstream's `if (CurrentMessage && !strcmp(text, PreviousMessage->Text))
+// PreviousMessage->Refresh(time)`.
 bool AnnouncementPending(TTextBox* box);
 
 // Glyph runs. Dragon announces collectibles as single characters in a symbol
@@ -580,9 +595,13 @@ extern int SpellsCastThisBall;
 
 // 0x434d2c -- how far the ball has got since the plunger. 3 means "still in
 // the launch lane"; Slay Dragon waits for it to leave before starting its
-// clock. UNVERIFIED name: set to 3 by the plunger and by NewGame, stepped
-// 3->2->1->0 by v_lite40Control, and read here and by s_oneway2Control.
-// Settled by reading 0x424870 (v_lite40Control) properly.
+// clock. 0x424870 reads cleanly and confirms the shape: on ControlTimerExpired
+// it steps 3 -> 2 (v_lite40 turn-on-timed 10 s), 2 -> 1 (flash 5 s), 1 -> 0
+// (reset and turn off). The first step is not on a timer at all -- s_oneway2,
+// the launch-lane exit gate, calls v_lite40Control(ControlTimerExpired) by hand
+// on collision while the counter is still 3 -- which is exactly why 3 means
+// "the ball has not left the launch lane yet". Structurally upstream's
+// ShootAgainLightControl with three stages instead of two.
 extern int shoot_again_flag;
 
 // Forward declarations of the modes this file does not implement. They are
@@ -650,9 +669,11 @@ const ComponentTable<TLight, 8> DragonFireLights = {{
 	nullptr /* v_lite58 */, nullptr /* v_lite59 */, nullptr /* v_lite60 */,
 	nullptr /* v_lite61 */, nullptr /* v_lite62 */,
 }};
-// UNVERIFIED: v_lite58..62 are named in the analysis from the static pointer
-// array but have no tag declared above because nothing else in this slice
-// touches them. Declare the five tags when the sweep is wired up.
+// The five missing names are confirmed straight out of .data: the eight pointers
+// at 0x43bb78 are the tags of v_lite113, v_lite114, v_lite115, v_lite58, v_lite59,
+// v_lite60, v_lite61 and v_lite62, followed by a null terminator. They are left
+// null here only because no other rule in this slice touches them; declare the
+// five tags when the sweep is wired up.
 
 // ---------------------------------------------------------------------------
 // Small shared predicates
@@ -694,12 +715,15 @@ const ComponentTable<TLight, 4> SpellLights = {{
 // does not print "0".
 void DisplayTimeRemaining(int nameStringId)
 {
-	auto remaining = tag_mode_timer.Component->Message(ft::TimerGetRemaining, 0.0f);
-	if (remaining == 0.0f)
+	// The getter returns an integer millisecond count, and the print is whole seconds:
+	// 0x428940 spills the result, fild's it against the double 0.0 at 0x437930 to make
+	// the "clock not running" test, then divides by a literal 1000 before sprintf.
+	const int remaining = tag_mode_timer.Component->Message(ft::TimerGetRemaining, 0.0f);
+	if (remaining == 0)
 		return;
 
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(nameStringId));
+	FormatWithValue(buffer, GetRcString(nameStringId), remaining / 1000);
 	Display(tag_info_text_box.Component, buffer, 0.5f);
 }
 
@@ -840,11 +864,11 @@ void CastSpell(int slot)
 	Play(tag_tabc35wave.Component);
 	DisplayGlyph(tag_info_text_box.Component, GlyphSpell, 2.0f);
 
-	// UNVERIFIED: slot 1 vs slot 3 <-> "Dragon Blood" vs "Stealth". The
-	// mechanics of each slot are certain; only the manual names are guesses,
-	// inferred from a_kout3 (a slow kickout, matching the manual's magnet)
-	// against a_blocf (a blocker whose removal opens a path). Settled by
-	// locating a_blocf and a_kout3 geometrically in DRAGON.DAT.
+	// LEFT OPEN: slot 1 vs slot 3 <-> "Dragon Blood" vs "Stealth". The mechanics
+	// of each slot are certain; only the manual names are guesses, inferred from
+	// a_kout3 (a slow kickout, matching the manual's magnet) against a_blocf (a
+	// blocker whose removal opens a path). Nothing in .text distinguishes them --
+	// it needs a_blocf's and a_kout3's geometry out of DRAGON.DAT, or a run.
 }
 
 // 0x423780 -- drop every spell. Called on drain and at the end of Slay Dragon.
@@ -1355,9 +1379,11 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 	auto collect = [&](const Gem& gem)
 	{
 		gem.light->Message(ft::LightFlashTimedThenStayOn, 1.0f);
-		AddScoreAt(caller, gem.score);
 		char buffer[128];
-		FormatWithValue(buffer, GetRcString(gem.stringId));
+		// Each gem site (0x428b9c, 0x428c4c, 0x428d34, 0x428d98, 0x428dfc, 0x428e6c,
+		// 0x42909f, 0x429112) pushes AddScoreAt's return value as sprintf's one vararg.
+		const int credited = AddScoreAt(caller, gem.score);
+		FormatWithValue(buffer, GetRcString(gem.stringId), credited);
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		CollectGem(gem.bit);
 	};
@@ -1635,13 +1661,13 @@ void RescueMaidenAwardWindow(TPinballComponent* caller)
 	switch (static_cast<int>(windows->Message(ft::GroupGetOnCount, 0.0f)))
 	{
 	case 0:
-		AddScoreAt(caller, 250000);
-		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
+		// 0x427a48 / 0x427a8d: `push 0x3d090` / `push 0x7a120` into AddScoreAt, then its
+		// return value into sprintf. 3008 is the bare "%ld", so the amount is all there is.
+		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 250000));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 1:
-		AddScoreAt(caller, 500000);
-		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER));
+		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 500000));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 2:
@@ -1948,13 +1974,19 @@ void DragonPassController(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	// NOTE: a_spot10/a_spot14 are disabled on entry but never re-enabled here;
-	// their own handlers must do it. UNVERIFIED -- check 0x4254a0 / 0x425570.
+	// a_spot10/a_spot14 are disabled on entry and never re-enabled here, and not by
+	// their own handlers either: 0x4254a0 is one flash of v_lite45, BlockerDisable to
+	// a_rocka, TSoloTargetDisable to itself and a call to 0x4252b0, with no re-enable
+	// anywhere (0x425570 is its twin). The re-enable comes from the rock, whose
+	// ControlFunc answers the moving part's arrival notification -- see
+	// GargoyleRockAControl in dragon_part2.cpp.
 	//
-	// UNVERIFIED: the manual's "gargoyle target: 100,000 + 250,000 to jackpot"
-	// was not located anywhere. What is confirmed is that a_kout1 (armor
-	// kickout) pays the jackpot and a_kout2 (gargoyle kickout) pays one dragon
-	// egg, both gated on mode == 7 inside their own handlers.
+	// LEFT OPEN: the manual's "gargoyle target: 100,000 + 250,000 to jackpot" is
+	// nowhere in the binary. What is confirmed is that a_kout1 (armor kickout)
+	// pays the jackpot and a_kout2 (gargoyle kickout) pays one dragon egg, both
+	// gated on mode == 7 inside their own handlers. Either the manual describes a
+	// build that did not ship, or it describes these two awards loosely; only a
+	// run can tell those apart.
 }
 
 // ---------------------------------------------------------------------------
@@ -2144,9 +2176,11 @@ void AnimateDragonDeath(TPinballComponent* caller)
 
 	// The dragon is dead. Everything the table has to give, at once.
 	pb::MainTable->LightGroup->Message(ft::LightClearOverride, 0.0f);
-	DragonSpecialAddScore(caller, pb::MainTable->SuperJackpotScore);  // the whole super jackpot
+	// 3050 is "Super Jackpot\n%ld" and 0x42a4e3 formats DragonSpecialAddScore's return
+	// value, so the banner is the amount actually paid, not the stored total.
+	const int superJackpot = DragonSpecialAddScore(caller, pb::MainTable->SuperJackpotScore);
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN));
+	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN), superJackpot);
 	Display(tag_info_text_box.Component, buffer, Forever);
 	AddScoreAt(caller, 1500000);
 	CollectJackpot(0.0f, false);
@@ -2177,8 +2211,9 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	tag_dragon_letter_light_group.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
 	CheckDragonFlurry();
 
-	// UNVERIFIED: the manual also promises "+ all gems" here. Nothing in this
-	// path touches gem_light_group or v_lite88's bitmask. Settled by watching a
+	// LEFT OPEN: the manual also promises "+ all gems" here. Nothing in this path
+	// touches gem_light_group or v_lite88's bitmask, and the listing agrees with
+	// the pseudocode, so if the award exists it is not in this function. Needs a
 	// real dragon kill with a partial gem set.
 }
 
@@ -2598,10 +2633,12 @@ done:
 	if (code == ft::MissionComplete)
 		Play(tag_tabc33wave.Component);
 
-	// UNVERIFIED: the "flipper pressed" code is 1 here, compared against
-	// a_flip1. 1 collides numerically with TLightTurnOn, so this is a private
-	// per-component code reaching MissionControl rather than a public one.
-	// Settled by finding who sends it (presumably the flipper's own handler).
+	// The "flipper pressed" code is 1 and the sender is the engine, not a handler:
+	// TFlipper::Message calls `control::handler(MessageCode::TFlipperExtend, this)`
+	// when the flipper is raised, and TFlipperExtend is 1 in the private TFlipper
+	// numbering -- unshifted, like TLight's, which is why it collides with
+	// TLightTurnOn harmlessly (no component answers both). dragon_part2.cpp's
+	// RightFlipperControl reaches the same conclusion from a_flip2's side.
 }
 
 // ---------------------------------------------------------------------------

@@ -167,11 +167,19 @@ constexpr auto MissionStarted = static_cast<MessageCode>(0x50);
 // sender's side.
 constexpr auto BallDrained = static_cast<MessageCode>(0x53);
 
-// FT-only. Sent to a THole with a float; the only two senders (this file's s_hole118 and
-// the sink-side quest staging at 0x004241c0) both mean "keep the ball, release it after
-// this long". UNVERIFIED: disassembling FT's THole::Message would settle whether the float
-// is a hold time or a release delay, and whether 0.0 means "hold forever".
-constexpr auto THoleHoldBall = static_cast<MessageCode>(0x43);
+// FT-only, and settled from the engine. 0x416c70 is THole::Message -- the class is
+// identified by its vtable at 0x437660 and by what the 0x43 arm does, which is exactly
+// upstream's `Reset` arm: `[this+0x7a] = 1; [this+0x7e] = 0`, i.e.
+// BallCapturedSecondStage = true with the Timer cleared, which is what makes FieldEffect
+// push the held ball back out. FT adds 0x43 on top:
+//
+//     if (value > 0.0) { kill [this+0x7e]; [this+0x7e] = timer::set(value, this, cb); }
+//     else             cb(0, this);            // release now
+//
+// So the float is a release *delay*, and 0.0 releases immediately rather than holding
+// forever. (SetTiltLock falls into the same arm with value forced to -1.0, so a tilt
+// drops a held ball at once.)
+constexpr auto THoleReleaseBall = static_cast<MessageCode>(0x43);
 }
 
 // info_text_box->MessageField is Dragon's mode register -- the exact analogue of Space
@@ -198,7 +206,7 @@ constexpr int Str_BallSaved = 3009; // 0xbc1
 // ---------------------------------------------------------------------------
 
 // part1 (0x004230a0 / 0x0042c020 / 0x004238d0 / 0x00423e90).
-void AddScoreFor(TPinballComponent* caller, int index);
+int AddScoreFor(TPinballComponent* caller, int index);
 void MissionHandler(MessageCode code, TPinballComponent* cmp);
 void SetSwordStage(int stage);
 int SelectNextQuest();
@@ -247,11 +255,13 @@ extern int TargetsHitThisBall;   // DAT_00434d08, the bonus's "Targets dropped" 
 extern int SpellsCastThisBall;       // DAT_00434d24
 
 // _DAT_00439b04 -- written only here and by the table's tilt message (0x00424260 case
-// 0x3f3), and read nowhere in the decompiled set, so it is dead as far as the rules go.
-// Ghidra flags the symbol as overlapping a smaller one at the same address, so it may be a
-// field of some larger .data object rather than a variable of its own.
-// UNVERIFIED: a full cross-reference over the non-rules code (UI, demo, high-score) would
-// say whether anything outside control reads it.
+// 0x3f3), and read nowhere at all. The cross-reference is now the whole binary, not just
+// the rules: disassembling every byte of DRAGON.EXE's .text turns up exactly two
+// instructions naming the address, both of them those stores, and the four address bytes
+// occur nowhere else in the file -- so no UI, demo or high-score path reads it either.
+// (Ghidra flags the symbol as overlapping a smaller one; 0x439b00 is the TableG pointer,
+// so this is simply the next cell, and a base-relative read off TableG's own global is
+// the one shape this search could not see.)
 extern int unknown_439b04;
 
 // ---------------------------------------------------------------------------
@@ -442,10 +452,11 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 		// is exactly what this path needs -- the drained ball must not count.
 		drain->Message(MessageCode::Reset, 0.0);
 
-		// TPinballTable+0x6a, set only here. UNVERIFIED, but almost certainly upstream's
-		// BallInDrainFlag: upstream sets it in TDrain::Collision and clears it in
-		// TPlunger's PlungerFeedBall, which is exactly the lifetime of this assignment.
-		// Anchoring any field between +0x6a and PlayerCount at +0x102 would confirm it.
+		// TPinballTable+0x6a is BallInDrainFlag, confirmed from the engine: 0x41a230 is
+		// TPinballTable::tilt, and its guard `if ([this+0x1b2] == 0 && [this+0x6a] == 0)`
+		// is upstream's `if (!TiltLockFlag && !BallInDrainFlag)`, followed by the same
+		// body -- play_sound([this+0x66]), TiltTimeoutTimer = timer::set(15.0, this,
+		// 0x41a1b0), then a SetTiltLock broadcast.
 		TableG->BallInDrainFlag = 1;
 
 		// The original jumps back to the dispatch head with code = ControlTimerExpired
@@ -705,7 +716,7 @@ void QuestHoleControl(MessageCode code, TPinballComponent* caller)
 
 		tabc32wave->Play(nullptr, "QuestHoleControl");
 		caller->MessageField = 1;
-		caller->Message(FtMessageCode::THoleHoldBall, 1.0f); // 0x43
+		caller->Message(FtMessageCode::THoleReleaseBall, 1.0f); // 0x43, release after 1 s
 		return;
 	}
 

@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index fb705ed..1f71a4d 100644
+index fb705ed..012f786 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -82,6 +82,8 @@ set(SOURCE_FILES
@@ -35,7 +35,18 @@ index fb705ed..1f71a4d 100644
          SpaceCadetPinball/TLightRollover.cpp
          SpaceCadetPinball/TLightRollover.h
          SpaceCadetPinball/TLine.cpp
-@@ -186,6 +194,27 @@ set(SOURCE_FILES
+@@ -141,6 +149,10 @@ set(SOURCE_FILES
+         SpaceCadetPinball/TPopupTarget.h
+         SpaceCadetPinball/TRamp.cpp
+         SpaceCadetPinball/TRamp.h
++        SpaceCadetPinball/TRampExit.cpp
++        SpaceCadetPinball/TRampExit.h
++        SpaceCadetPinball/TAccelerator.cpp
++        SpaceCadetPinball/TAccelerator.h
+         SpaceCadetPinball/translations.cpp
+         SpaceCadetPinball/translations.h
+         SpaceCadetPinball/TRollover.cpp
+@@ -186,6 +198,27 @@ set(SOURCE_FILES
          SpaceCadetPinball/imstb_truetype.h
          SpaceCadetPinball/DebugOverlay.cpp
          SpaceCadetPinball/DebugOverlay.h
@@ -63,7 +74,7 @@ index fb705ed..1f71a4d 100644
          )
  
  # On Windows, include resource file with the icon
-@@ -196,6 +225,10 @@ endif(WIN32)
+@@ -196,6 +229,10 @@ endif(WIN32)
  
  add_executable(SpaceCadetPinball ${SOURCE_FILES})
  
@@ -110,6 +121,139 @@ index 7e22d08..2b887e2 100644
  	Bitmaps[bmp->Resolution] = bmp;
  
  	auto zMap = ZMaps[bmp->Resolution];
+diff --git a/SpaceCadetPinball/TAccelerator.cpp b/SpaceCadetPinball/TAccelerator.cpp
+new file mode 100644
+index 0000000..187cdb9
+--- /dev/null
++++ b/SpaceCadetPinball/TAccelerator.cpp
+@@ -0,0 +1,72 @@
++#include "pch.h"
++#include "TAccelerator.h"
++
++#include "control.h"
++#include "loader.h"
++#include "TBall.h"
++#include "TPinballTable.h"
++#include "TTableLayer.h"
++
++TAccelerator::TAccelerator(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
++{
++	visualStruct visual{};
++	loader::query_visual(groupIndex, 0, &visual);
++
++	ThrowDirection = visual.Kicker.ThrowBallDirection;
++	ThrowAngleMult = visual.Kicker.ThrowBallAngleMult;
++	ThrowSpeedMult1 = visual.Kicker.Boost;
++	// The same 1/100 the kicker's throw multiplier gets everywhere else in the engine.
++	ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
++	SoundIndex4 = visual.SoundIndex4;
++
++	// 1.8 is the original's constant, and it is the full extent being halved and then
++	// widened: extent / 1.8 is half-extent / 0.9, so the circle clears the wall by a
++	// tenth. The larger axis wins, so a long thin accelerator still covers its own wall.
++	circle_type circle{};
++	circle.Center.X = (AABB.XMin + AABB.XMax) / 2.0f;
++	circle.Center.Y = (AABB.YMin + AABB.YMax) / 2.0f;
++	auto radius = std::max((AABB.YMax - AABB.YMin) / 1.8f, (AABB.XMax - AABB.XMin) / 1.8f);
++	circle.RadiusSq = radius * radius;
++
++	fprintf(stderr, "DBG-accl grp=%d edges=%zu aabb=%g %g %g %g rsq=%g dir=%g %g %g ang=%g b=%g m=%g snd=%d\n", groupIndex, EdgeList.size(), AABB.XMin, AABB.YMin, AABB.XMax, AABB.YMax, circle.RadiusSq, ThrowDirection.X, ThrowDirection.Y, ThrowDirection.Z, ThrowAngleMult, ThrowSpeedMult1, ThrowSpeedMult2, SoundIndex4);
++	Field.ActiveFlag = &ActiveFlag;
++	Field.CollisionComp = this;
++	Field.CollisionGroup = visual.CollisionGroup;
++	TTableLayer::edges_insert_circle(&circle, nullptr, &Field);
++}
++
++void TAccelerator::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++                             TEdgeSegment* edge)
++{
++	// The wall does not push back -- the ball goes through it and gets accelerated
++	// instead, so there is no basic_collision here either.
++	ball->not_again(edge);
++	ball->RayMaxDistance -= distance;
++	ball->Position.X = nextPosition->X;
++	ball->Position.Y = nextPosition->Y;
++
++	// A tilted table is inert: the ball crosses the wall and nothing is armed, which
++	// leaves the field with nothing to throw.
++	if (PinballTable->TiltLockFlag)
++		return;
++
++	Ball = ball;
++	ball->CollisionDisabledFlag = true;
++	loader::play_sound(SoundIndex4, ball, "TAccelerator");
++	control::handler(MessageCode::ControlCollision, this);
++}
++
++int TAccelerator::FieldEffect(TBall* ball, vector2* vecDst)
++{
++	// Only the ball the wall armed, and only once: clearing Ball here is what makes the
++	// kick one-shot. Every other ball crossing the field sees nothing.
++	if (Ball != ball)
++		return 0;
++
++	Ball = nullptr;
++	ball->throw_ball(&ThrowDirection, ThrowAngleMult, ThrowSpeedMult1, ThrowSpeedMult2);
++
++	// Zero either way: the throw has already set the ball's direction and speed outright,
++	// so there is no force for the caller to add on top of it.
++	return 0;
++}
+diff --git a/SpaceCadetPinball/TAccelerator.h b/SpaceCadetPinball/TAccelerator.h
+new file mode 100644
+index 0000000..7eae76f
+--- /dev/null
++++ b/SpaceCadetPinball/TAccelerator.h
+@@ -0,0 +1,49 @@
++#pragma once
++#include "maths.h"
++#include "TCollisionComponent.h"
++#include "TEdgeManager.h"
++
++// Object type 1036 -- `a_accl*`, recovered from CADET.EXE: constructor 0x41b7d0,
++// Collision 0x41b8f0, FieldEffect 0x41b9f0, vtable 0x437800, object size 0xa6. CADET's
++// own TPinballTable constructor spawns it for type 0x40c. Dragon's Keep has four,
++// Skulduggery two.
++//
++// It is a kicker turned inside out, and the only Full-Tilt-only class that asks the
++// collision component for the standard attribute-600 wall (createWall = true). That
++// wall is all the geometry it has, and its only job is to mark which ball to push: the
++// push itself happens in FieldEffect, on the next evaluation of a field circle laid
++// over the component's own AABB.
++//
++// So the sequence is: ball hits the wall -> the wall notes the ball, plays the
++// component's 1100 sound and raises ControlCollision -> the ball, still inside the
++// field, is thrown along the kicker's own direction with the kicker's own multipliers,
++// exactly the throw_ball call TKickout makes when its timer expires. That is why a
++// TKickout stand-in moved the ball wrongly rather than merely approximately: a
++// kickout's field pulls the ball toward a centre and parks it, an accelerator's pushes
++// it along a fixed direction and never takes it out of play.
++//
++// FieldEffect returns 0 in both branches, so there is no continuous force -- the
++// accelerator is a one-shot kick, and between kicks its field costs nothing.
++class TAccelerator : public TCollisionComponent
++{
++public:
++	TAccelerator(TPinballTable* table, int groupIndex);
++	void Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++	               TEdgeSegment* edge) override;
++	int FieldEffect(TBall* ball, vector2* vecDst) override;
++
++private:
++	// The ball that hit the wall and has not been thrown yet. One at a time: a second
++	// ball arriving before the field fires replaces the first, which is the original's
++	// behaviour and not a bug worth fixing here.
++	TBall* Ball{};
++
++	// Straight out of visual.Kicker, under TKickout's names for the same four values.
++	vector3 ThrowDirection{};
++	float ThrowAngleMult{};
++	float ThrowSpeedMult1{};
++	float ThrowSpeedMult2{};
++
++	int SoundIndex4{};
++	field_effect_type Field{};
++};
 diff --git a/SpaceCadetPinball/TBall.cpp b/SpaceCadetPinball/TBall.cpp
 index 0445b7b..74d81f2 100644
 --- a/SpaceCadetPinball/TBall.cpp
@@ -1257,10 +1401,10 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..7008127 100644
+index e0ccd71..b83c93c 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
-@@ -44,6 +44,24 @@ enum class MessageCode
+@@ -44,6 +44,33 @@ enum class MessageCode
  	TLightFtTmpOverrideOff = -25,
  	TLightFtResetOverride = -26,
  
@@ -1282,10 +1426,19 @@ index e0ccd71..7008127 100644
 +	TMagnetFieldEnable = 75,
 +	TMagnetFieldDisable = 76,
 +
++	// 85/86, raised at the rules when a ball crosses a ramp's side wall. The original's
++	// TRamp sends 85 from its 1301 wall and 86 from its 1302 wall (its plane branch sends
++	// a third, 84, which nothing here produces yet), and a type-1035 ramp exit sends the
++	// same pair from its two one-sided edges. Both tables' rules read 86 as "a pass was
++	// completed" and score on it -- dragon_part2.cpp and pirates_part2.cpp already cast
++	// the raw 0x55/0x56 for exactly these.
++	ControlRampWall1Crossed = 85,
++	ControlRampWall2Crossed = 86,
++
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -143,6 +161,18 @@ public:
+@@ -143,6 +170,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -1305,7 +1458,7 @@ index e0ccd71..7008127 100644
  	char ActiveFlag;
  	int MessageField;
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..a731ada 100644
+index aa8551a..73a72ea 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
 @@ -6,6 +6,7 @@
@@ -1316,17 +1469,19 @@ index aa8551a..a731ada 100644
  #include "render.h"
  #include "TBall.h"
  #include "TBlocker.h"
-@@ -34,6 +35,9 @@
+@@ -34,6 +35,11 @@
  #include "TTimer.h"
  #include "TTripwire.h"
  #include "TWall.h"
 +#include "TDiverter.h"
 +#include "TLightSweep.h"
 +#include "TMagnet.h"
++#include "TRampExit.h"
++#include "TAccelerator.h"
  #include "TPlunger.h"
  #include "TFlipper.h"
  #include "TDrain.h"
-@@ -62,7 +66,7 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -62,7 +68,7 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
  	auto ball = AddBall({0.0f, 0.0f});
  	ball->Disable();
  
@@ -1335,7 +1490,7 @@ index aa8551a..a731ada 100644
  	LightGroup = new TLightGroup(this, 0);
  
  	auto score1 = score::create("score1", render::background_bitmap);
-@@ -95,7 +99,7 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -95,7 +101,7 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
  				new TWall(this, groupIndex);
  				break;
  			case 1001:
@@ -1344,19 +1499,19 @@ index aa8551a..a731ada 100644
  				break;
  			case 1002:
  				LightGroup->List.push_back(new TLight(this, groupIndex));
-@@ -178,15 +182,79 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -178,15 +184,69 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
  			case 1033:
  				new TTextBox(this, groupIndex);
  				break;
 +
 +			// Full Tilt's bonus tables use seven object types 3D Pinball never had.
-+			// The classes are not in any decompilation, but they ARE in CADET.EXE:
-+			// its own TPinballTable constructor spawns all seven, which is why the
-+			// assertion string "sweep == NULL" is in the Space Cadet binary. The
-+			// three recovered from there are below; the rest are still stand-ins,
-+			// mapped onto the nearest existing class so the tables load, draw and
-+			// behave approximately. Every component carries its real type code via
-+			// GetComponentType() either way, so the rules still discriminate.
++			// The classes are in no decompilation, but they ARE in CADET.EXE: its own
++			// TPinballTable constructor at 0x41a290 spawns all seven, which is why the
++			// assertion string "sweep == NULL" is in the Space Cadet binary even though
++			// Space Cadet's data never defines one. All seven were read out of there and
++			// none is a stand-in any more. Every component also carries its real type
++			// code via GetComponentType(), which is how the rules discriminate the two
++			// that share a class with an existing type.
 +			case 1034:
 +				// s_launcher1: Skulduggery's ball launcher; that table has no plunger.
 +				// RECOVERED. CADET.EXE's own TPinballTable constructor (0x41a290) spawns
@@ -1368,21 +1523,11 @@ index aa8551a..a731ada 100644
 +				break;
 +			case 1035:
 +				// s_rexit*: ramp exits, one ramp wall (1301) each.
-+				// STAND-IN. The real class is a TCollisionComponent with no Message
-+				// override at all -- only Collision -- plus two collision-mask bit
-+				// fields built by shifting 1 left by attribute 1301's two values. TRamp
-+				// is the closest existing class and also masks the ball; what is wrong
-+				// is which mask bits, not the shape of the behaviour.
-+				new TRamp(this, groupIndex);
++				new TRampExit(this, groupIndex);
 +				break;
 +			case 1036:
 +				// a_accl*: accelerators, a wall plus a kicker.
-+				// STAND-IN. The real class is a TCollisionComponent that installs a
-+				// field effect over its own AABB and accelerates the ball through it;
-+				// TKickout installs a field too, which is why this is close, but a
-+				// kickout's field pulls toward a centre instead of pushing along a
-+				// direction.
-+				new TKickout(this, groupIndex, false);
++				new TAccelerator(this, groupIndex);
 +				break;
 +			case 1037:
 +				// A point (408) on a collision layer (602): an extra ball the table
@@ -1425,7 +1570,7 @@ index aa8551a..a731ada 100644
  	control::make_links(this);
  }
  
-@@ -208,6 +276,10 @@ TPinballTable::~TPinballTable()
+@@ -208,6 +268,10 @@ TPinballTable::~TPinballTable()
  		ScoreBallcount = nullptr;
  	}
  	delete LightGroup;
@@ -1436,7 +1581,7 @@ index aa8551a..a731ada 100644
  	while (!ComponentList.empty())
  	{
  		// Component destructor removes it from the list.
-@@ -232,6 +304,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
+@@ -232,6 +296,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
  	return nullptr;
  }
  
@@ -1457,7 +1602,7 @@ index aa8551a..a731ada 100644
  TPinballComponent* TPinballTable::find_component(int groupIndex)
  {
  	char Buffer[40]{};
-@@ -261,7 +347,15 @@ int TPinballTable::AddScore(int score)
+@@ -261,7 +339,15 @@ int TPinballTable::AddScore(int score)
  		if (BonusScore > 5000000)
  			BonusScore = 5000000;
  	}
@@ -1474,7 +1619,7 @@ index aa8551a..a731ada 100644
  	CurScore += addedScore;
  	if (CurScore > 1000000000)
  	{
-@@ -290,9 +384,12 @@ void TPinballTable::tilt(float time)
+@@ -290,9 +376,12 @@ void TPinballTable::tilt(float time)
  {
  	if (!TiltLockFlag && !BallInDrainFlag)
  	{
@@ -1490,7 +1635,7 @@ index aa8551a..a731ada 100644
  		loader::play_sound(SoundIndex3, nullptr, "TPinballTable1");
  		TiltTimeoutTimer = timer::set(30.0, this, tilt_timeout);
  
-@@ -315,6 +412,20 @@ void TPinballTable::port_draw()
+@@ -315,6 +404,20 @@ void TPinballTable::port_draw()
  	}
  }
  
@@ -1511,7 +1656,7 @@ index aa8551a..a731ada 100644
  int TPinballTable::Message(MessageCode code, float value)
  {
  	const char* rc_text;
-@@ -324,25 +435,25 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -324,25 +427,25 @@ int TPinballTable::Message(MessageCode code, float value)
  	case MessageCode::LeftFlipperInputPressed:
  		if (!TiltLockFlag)
  		{
@@ -1541,7 +1686,7 @@ index aa8551a..a731ada 100644
  		}
  		break;
  	case MessageCode::PlungerInputPressed:
-@@ -375,7 +486,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -375,7 +478,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			rc_text = pb::get_rc_string(Msg::STRING131);
  		else
  			rc_text = pb::get_rc_string(Msg::STRING127);
@@ -1551,7 +1696,7 @@ index aa8551a..a731ada 100644
  		if (Demo)
  			Demo->Message(MessageCode::NewGame, 0.0);
  		break;
-@@ -447,8 +559,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -447,8 +551,10 @@ int TPinballTable::Message(MessageCode code, float value)
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
@@ -1564,7 +1709,7 @@ index aa8551a..a731ada 100644
  			LightGroup->Message(MessageCode::TLightGroupLightShowAnimation, 0.2f);
  			auto time = loader::play_sound(SoundIndex1, nullptr, "TPinballTable2");
  			if (time < 0)
-@@ -479,7 +593,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -479,7 +585,8 @@ int TPinballTable::Message(MessageCode code, float value)
  					textboxText = pb::get_rc_string(Msg::STRING131);
  				else
  					textboxText = pb::get_rc_string(Msg::STRING127);
@@ -1574,7 +1719,7 @@ index aa8551a..a731ada 100644
  				break;
  			}
  
-@@ -547,7 +662,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -547,7 +654,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			}
  
  			if (textboxText != nullptr)
@@ -1584,7 +1729,7 @@ index aa8551a..a731ada 100644
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
-@@ -556,8 +672,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -556,8 +664,10 @@ int TPinballTable::Message(MessageCode code, float value)
  		break;
  	case MessageCode::GameOver:
  		loader::play_sound(SoundIndex2, nullptr, "TPinballTable3");
@@ -1597,7 +1742,7 @@ index aa8551a..a731ada 100644
  		EndGameTimeoutTimer = timer::set(3.0, this, EndGame_timeout);
  		break;
  	case MessageCode::Reset:
-@@ -680,8 +798,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
+@@ -680,8 +790,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
  	}
  	if (table->Demo)
  		table->Demo->Message(MessageCode::GameOver, 0.0);
@@ -1674,16 +1819,10 @@ index c407fdc..662e062 100644
  	int BallCount{};
  	int MaxBallCount;
 diff --git a/SpaceCadetPinball/TPlunger.cpp b/SpaceCadetPinball/TPlunger.cpp
-index 6f0f48e..770699e 100644
+index 6f0f48e..bc1a90b 100644
 --- a/SpaceCadetPinball/TPlunger.cpp
 +++ b/SpaceCadetPinball/TPlunger.cpp
-@@ -1,4 +1,5 @@
- #include "pch.h"
-+#include <SDL_log.h>
- #include "TPlunger.h"
- 
- 
-@@ -11,7 +12,8 @@
+@@ -11,7 +11,8 @@
  #include "timer.h"
  #include "TPinballTable.h"
  
@@ -1693,7 +1832,7 @@ index 6f0f48e..770699e 100644
  {
  	visualStruct visual{};
  
-@@ -24,24 +26,51 @@ TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+@@ -24,24 +25,48 @@ TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(t
  	HardHitSoundId = visual.Kicker.HardHitSoundId;
  	Threshold = 1000000000.0;
  
@@ -1749,24 +1888,13 @@ index 6f0f48e..770699e 100644
 +	// 601 is where the plunger feeds the ball in. Skulduggery's launcher (object type
 +	// 1034) is mapped onto TPlunger and need not carry one; absent means this component
 +	// contributes no feed point, so leave the table's existing one alone.
-+	SDL_Log("DBG-PLUNGER ctor launcher=%d MaxPullback=%f incr=%f bmps=%d",
-+	        (int)LauncherFlag, MaxPullback, PullbackIncrement,
-+	        ListBitmap ? (int)ListBitmap->size() : -1);
 +	float* floatArr = loader::query_float_attribute_opt(groupIndex, 0, 601);
 +	if (floatArr)
 +		table->PlungerPosition = {floatArr[0], floatArr[1]};
  }
  
  void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
-@@ -49,6 +78,7 @@ void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction,
- 	if (PinballTable->TiltLockFlag || SomeCounter > 0) 
- 	{
- 		auto boost = RandFloat() * MaxPullback * 0.1f + MaxPullback;
-+		SDL_Log("DBG-PLUNGER collision launch boost=%f someCounter=%d", boost, SomeCounter);
- 		maths::basic_collision(ball, nextPosition, direction, Elasticity, Smoothness, 0, boost);
- 		if (SomeCounter)
- 			SomeCounter--;
-@@ -69,6 +99,15 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -69,6 +94,15 @@ int TPlunger::Message(MessageCode code, float value)
  		if (!PullbackStartedFlag && (!pb::FullTiltMode || PinballTable->MultiballCount > 0 && !PinballTable->
  			TiltLockFlag))
  		{
@@ -1782,15 +1910,7 @@ index 6f0f48e..770699e 100644
  			PullbackStartedFlag = true;
  			Boost = 0.0;
  			Threshold = 1000000000.0;
-@@ -84,6 +123,7 @@ int TPlunger::Message(MessageCode code, float value)
- 			}
- 			else
- 			{
-+				SDL_Log("DBG-PLUNGER feed ball at %f,%f", PinballTable->PlungerPosition.X, PinballTable->PlungerPosition.Y);
- 				auto ball = PinballTable->AddBall(PinballTable->PlungerPosition);
- 				assertm(ball, "Failure to create ball in plunger");
- 				PinballTable->MultiballCount++;
-@@ -132,7 +172,9 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -132,7 +166,9 @@ int TPlunger::Message(MessageCode code, float value)
  				timer::kill(PullbackTimer_);
  			PullbackTimer_ = 0;
  			loader::play_sound(SoundIndexP2, this, "TPlunger3");
@@ -1801,7 +1921,7 @@ index 6f0f48e..770699e 100644
  			timer::set(PullbackDelay, this, ReleasedTimer);
  		}
  		break;
-@@ -147,7 +189,9 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -147,7 +183,9 @@ int TPlunger::Message(MessageCode code, float value)
  		timer::kill(PullbackTimer);
  		timer::kill(ReleasedTimer);
  
@@ -1812,17 +1932,19 @@ index 6f0f48e..770699e 100644
  		break;
  	}
  	default:
-@@ -186,7 +230,9 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
+@@ -185,6 +223,12 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
+ 		plunger->Boost = plunger->MaxPullback;
  	}
  
++	// 0x418dea: with no sprite list there is nothing to step, and the original skips
++	// the whole block rather than calling SpriteSet with a degenerate index. That is
++	// the launcher's case on every tick.
++	if (!plunger->ListBitmap || plunger->ListBitmap->empty())
++		return;
++
  	int index = static_cast<int>(floor(
--		static_cast<float>(plunger->ListBitmap->size() - 1) *
-+		static_cast<float>(plunger->ListBitmap && !plunger->ListBitmap->empty()
-+			                   ? plunger->ListBitmap->size() - 1
-+			                   : 0) *
+ 		static_cast<float>(plunger->ListBitmap->size() - 1) *
  		(plunger->Boost / plunger->MaxPullback)));
- 	plunger->SpriteSet(index);
- }
 diff --git a/SpaceCadetPinball/TPlunger.h b/SpaceCadetPinball/TPlunger.h
 index 86f1eec..663eb61 100644
 --- a/SpaceCadetPinball/TPlunger.h
@@ -1999,6 +2121,135 @@ index 795235d..cfc44a2 100644
  
  
  	auto xMin = 1000000000.0f;
+diff --git a/SpaceCadetPinball/TRampExit.cpp b/SpaceCadetPinball/TRampExit.cpp
+new file mode 100644
+index 0000000..1815ac1
+--- /dev/null
++++ b/SpaceCadetPinball/TRampExit.cpp
+@@ -0,0 +1,70 @@
++#include "pch.h"
++#include "TRampExit.h"
++
++#include "control.h"
++#include "loader.h"
++#include "TBall.h"
++#include "TLine.h"
++#include "TPinballTable.h"
++
++TRampExit::TRampExit(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, false)
++{
++	visualStruct visual{};
++	// The original queries the visual and then uses none of it -- not even the collision
++	// group, which comes from 1301 here. Kept because query_visual is also what reports a
++	// malformed record, and dropping it would silence that for three components per table.
++	loader::query_visual(groupIndex, 0, &visual);
++
++	auto wall = loader::query_float_attribute_opt(groupIndex, 0, 1301);
++	if (!wall || wall[2] != 2.0f)
++		return;
++
++	CollisionGroup1 = 1 << static_cast<int>(wall[0]);
++	CollisionGroup2 = 1 << static_cast<int>(wall[1]);
++
++	vector2 start{wall[3], wall[4]};
++	vector2 end{wall[5], wall[6]};
++
++	// Two edges on one segment, each offset to its own side by the ball's collision
++	// radius, so neither can be hit from behind the other.
++	fprintf(stderr, "DBG-rexit grp=%d g1=%d g2=%d seg=%g,%g -> %g,%g off=%g\n", groupIndex, CollisionGroup1, CollisionGroup2, start.X, start.Y, end.X, end.Y, table->CollisionCompOffset);
++	Edge1 = InstallEdge(start, end, CollisionGroup1, table->CollisionCompOffset);
++	Edge2 = InstallEdge(end, start, CollisionGroup2, -table->CollisionCompOffset);
++}
++
++TEdgeSegment* TRampExit::InstallEdge(const vector2& start, const vector2& end, int collisionGroup, float offset)
++{
++	auto line = new TLine(this, &ActiveFlag, collisionGroup, start, end);
++	line->Offset(offset);
++	line->place_in_grid(&AABB);
++	EdgeList.push_back(line);
++	return line;
++}
++
++void TRampExit::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++                          TEdgeSegment* edge)
++{
++	// Pass-through only: no basic_collision, no sound, no reflection. The ball keeps its
++	// direction and speed and simply changes which layer it belongs to.
++	ball->not_again(edge);
++	ball->RayMaxDistance -= distance;
++	ball->Position.X = nextPosition->X;
++	ball->Position.Y = nextPosition->Y;
++
++	// Report first, then move the ball -- the original's order, and it matters because a
++	// rules handler may inspect or redirect the ball. CollisionDisabledFlag ends this
++	// ball's collision scan for the frame, so the edge it has just been handed to cannot
++	// catch it on the way out; pb.cpp clears the flag at the top of the next frame.
++	if (edge == Edge1)
++	{
++		control::handler(MessageCode::ControlRampWall2Crossed, this);
++		ball->CollisionDisabledFlag = true;
++		ball->CollisionMask = CollisionGroup2;
++	}
++	else
++	{
++		control::handler(MessageCode::ControlRampWall1Crossed, this);
++		ball->CollisionDisabledFlag = true;
++		ball->CollisionMask = CollisionGroup1;
++	}
++}
+diff --git a/SpaceCadetPinball/TRampExit.h b/SpaceCadetPinball/TRampExit.h
+new file mode 100644
+index 0000000..0e44f61
+--- /dev/null
++++ b/SpaceCadetPinball/TRampExit.h
+@@ -0,0 +1,47 @@
++#pragma once
++#include "TCollisionComponent.h"
++
++struct vector2;
++
++// Object type 1035 -- `s_rexit*`, recovered from CADET.EXE: constructor 0x41b4f0,
++// Collision 0x41b6b0, vtable 0x4377e0, object size 0x86. CADET's own TPinballTable
++// constructor spawns it for type 0x40b, like the other six Full-Tilt-only classes.
++// Dragon's Keep has three, Skulduggery three.
++//
++// A ramp exit is a boundary between two collision layers, and nothing else. Its whole
++// geometry is one line segment out of attribute 1301 -- the same attribute TRamp reads
++// for its first switchable side wall, in the same layout: [0] and [1] are collision
++// group exponents, [2] is the segment's point count and [3..6] its two endpoints. The
++// original builds nothing at all unless [2] is exactly 2, so the class only ever
++// handles a single segment.
++//
++// From that one segment it installs two one-sided TLines: the same endpoints wound in
++// opposite directions, offset by plus and minus the table's CollisionCompOffset, each
++// carrying one of the two collision groups. A ball can therefore only ever reach the
++// edge that faces it, and crossing that edge hands it to the *other* group -- which is
++// what leaving a ramp is in this engine. Both crossings also report to the rules, by
++// the same two codes the original's TRamp sends from its two side walls, which is how
++// Dragon's gargoyle and forest ramp exits pay their dragon eggs once per pass and how
++// Skulduggery's ship wire ramp captures the ship.
++//
++// The vtable confirms it overrides Collision and nothing else: Message, port_draw,
++// get_scoring and FieldEffect are all the inherited slots. No sprite, no sound, no
++// field, no per-player state.
++class TRampExit : public TCollisionComponent
++{
++public:
++	TRampExit(TPinballTable* table, int groupIndex);
++	void Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
++	               TEdgeSegment* edge) override;
++
++private:
++	TEdgeSegment* InstallEdge(const vector2& start, const vector2& end, int collisionGroup, float offset);
++
++	// Edge1 is wound start->end and offset to the positive side, Edge2 is the reverse of
++	// both. Null when the component has no usable 1301, in which case it owns no edges
++	// and Collision is unreachable.
++	TEdgeSegment* Edge1{};
++	TEdgeSegment* Edge2{};
++	int CollisionGroup1{};
++	int CollisionGroup2{};
++};
 diff --git a/SpaceCadetPinball/TRollover.cpp b/SpaceCadetPinball/TRollover.cpp
 index 7ed23b4..455a548 100644
 --- a/SpaceCadetPinball/TRollover.cpp
@@ -2271,7 +2522,7 @@ index a6c31e7..87a6d69 100644
  
  void fullscrn::window_size_changed()
 diff --git a/SpaceCadetPinball/loader.cpp b/SpaceCadetPinball/loader.cpp
-index 283e983..627f069 100644
+index 283e983..80110ce 100644
 --- a/SpaceCadetPinball/loader.cpp
 +++ b/SpaceCadetPinball/loader.cpp
 @@ -43,7 +43,7 @@ int loader::sound_count = 1;
@@ -2408,16 +2659,33 @@ index 283e983..627f069 100644
  	return groupIndex;
  }
  
-@@ -405,10 +434,19 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
+@@ -405,10 +434,36 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
  		case 406:
  			kicker->HardHitSoundId = get_sound_id(static_cast<int>(floor(*floatArr)));
  			break;
 +		case 410:
-+			// Full Tilt only. Consume all eight so the walk stays aligned; bailing
-+			// out here leaves the whole visual record unparsed.
++			// Full Tilt only: two points of four floats each, the fourth of each unused.
++			// The original (DRAGON.EXE 0x40d3fc) does not keep the path -- it stores the
++			// second point minus the first as the throw direction and normalises it, the
++			// same ending its 404 case has. That is where type-1036 accelerators get
++			// their push from: they carry 410 and no 404, so without this the direction
++			// is the zero vector and throw_ball leaves the ball standing still.
++			//
++			// The normalise is 2D in the original, over X and Y only, with Z carried
++			// through unscaled; it is the same maths::normalize_2d the rest of the engine
++			// uses on these vectors. Upstream's 404 case has no normalise at all, which
++			// is left alone here: Space Cadet's kickers are the only users of 404 and
++			// their behaviour is the regression test.
 +			for (auto i = 0; i < 8; i++)
 +				kicker->ThrowPath[i] = floatArr[i];
 +			kicker->HasThrowPath = true;
++			fprintf(stderr, "DBG-410 grp=%d had404=%d\n", groupIndex, (int)(kicker->ThrowBallDirection.X!=0.0f||kicker->ThrowBallDirection.Y!=0.0f||kicker->ThrowBallDirection.Z!=0.0f));
++			kicker->ThrowBallDirection = {
++				floatArr[4] - floatArr[0],
++				floatArr[5] - floatArr[1],
++				floatArr[6] - floatArr[2]
++			};
++			maths::normalize_2d(*reinterpret_cast<vector2*>(&kicker->ThrowBallDirection));
 +			floatArr += 8;
 +			index += 9;
 +			break;
@@ -3123,55 +3391,6 @@ index 0000000..4244ccc
 +	QuestRestart,    // original 0x53
 +	LastScorerChanged, // original 0x4d; no component consumes it, kept for fidelity
 +};
-diff --git a/SpaceCadetPinball/winmain.cpp b/SpaceCadetPinball/winmain.cpp
-index 836556f..037210a 100644
---- a/SpaceCadetPinball/winmain.cpp
-+++ b/SpaceCadetPinball/winmain.cpp
-@@ -1,5 +1,6 @@
- #include "pch.h"
- #include "winmain.h"
-+#include "TPinballTable.h"
- 
- #include "control.h"
- #include "EmbeddedData.h"
-@@ -322,6 +323,37 @@ void winmain::MainLoop()
- 		if (!ProcessWindowMessages() || bQuit)
- 			break;
- 
-+		// FT_SCRIPT: temporary harness-only instrumentation. Drives a new game and a
-+		// plunger press with no display, to prove the ball serve / launch path.
-+		{
-+			static int ftScript = -1;
-+			static unsigned ftTick = 0;
-+			if (ftScript < 0)
-+				ftScript = SDL_getenv("FT_SCRIPT") ? 1 : 0;
-+			if (ftScript)
-+			{
-+				++ftTick;
-+				if (ftTick == 60)
-+				{
-+					SDL_Log("DBG-SCRIPT new_game");
-+					new_game();
-+				}
-+				if (ftTick == 240)
-+				{
-+					SDL_Log("DBG-SCRIPT balls=%d multiball=%d plunger=%p",
-+					        pb::MainTable->BallCount, pb::MainTable->MultiballCount,
-+					        (void*)pb::MainTable->Plunger);
-+					SDL_Log("DBG-SCRIPT plunger press");
-+					pb::MainTable->Message(MessageCode::PlungerInputPressed, 0.0f);
-+				}
-+				if (ftTick == 250)
-+					pb::MainTable->Message(MessageCode::PlungerInputReleased, 0.0f);
-+				if (ftTick == 400)
-+					SDL_Log("DBG-SCRIPT end balls=%d multiball=%d",
-+					        pb::MainTable->BallCount, pb::MainTable->MultiballCount);
-+			}
-+		}
-+
- 		if (has_focus)
- 		{
- 			if (mouse_down)
 diff --git a/SpaceCadetPinball/zdrv.cpp b/SpaceCadetPinball/zdrv.cpp
 index 5ed5925..20b0a6f 100644
 --- a/SpaceCadetPinball/zdrv.cpp

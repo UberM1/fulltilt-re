@@ -152,11 +152,16 @@ TSound*& tabc96wave = tag_tabc96wave.Component;
 
 // FT-only codes above upstream's enum; see the header note.
 namespace FtMessageCode {
-// Sent to the component that was scoring before this one. Nothing in DRAGON.EXE has a
-// case for it, and no TLight/TBumper/TSoloTarget Message() can accept it, so it is a
-// no-op for every component that can reach it -- a port may drop it.
-// UNVERIFIED: by the +11 offset this is upstream's ControlMissionComplete, which makes
-// no sense for the recipient; settled by finding a FullTilt table that handles 0x4d.
+// Sent to the component that was scoring before this one, and the name is right:
+// 0x4230a0 is `if (last != caller) { if (last) ComponentHandler(0x4d, last); last =
+// caller; } return TableG->AddScore(caller->get_scoring(i));`.
+//
+// It never reaches a component's Message() -- ComponentHandler (0x423060) routes it to
+// the recipient's ControlFunc, which is why no TLight/TBumper/TSoloTarget needing a
+// case for it was ever the question. Dragon has no handler that wants it; PIRATES.EXE
+// has four (0x428b70, 0x428d80, 0x429210, 0x429400), each dropping its own indicator
+// light when it stops being the current scorer. So it is a live rules notification, not
+// a dead code, and a port must deliver it.
 constexpr auto ScoringComponentReplaced = static_cast<MessageCode>(0x4d);
 // Broadcast whenever the mode register changes. Every mode-aware Dragon handler has a
 // case for it, so it reads as "mode started" -- upstream's ControlMissionStarted plus
@@ -166,7 +171,11 @@ constexpr auto ModeStarted = static_cast<MessageCode>(0x4f);
 
 // Mode register values of info_text_box->MessageField; see analysis/dragon-quest-system.md.
 constexpr int ModeNormal = 2;
-constexpr int ModeDragonHoard = 4; // UNVERIFIED: no handler in this slice sets it
+// No handler writes 4 as a literal: the quest modes are copied wholesale out of
+// a_kout2's MessageField (0x424210) or mode_timer's (the fire lizard sinks), where
+// SelectNextQuest left the chosen quest. 4 is Dragon Hoard because MissionControl's
+// switch at 0x42c120 sends case 4 to 0x428a80, the gem controller.
+constexpr int ModeDragonHoard = 4;
 constexpr int ModeDragonPass = 7;
 constexpr int ModeWizardsFury = 8;
 constexpr int ModeSlayDragon = 9;
@@ -203,10 +212,6 @@ void MissionHandler(MessageCode code, TPinballComponent* cmp);          // 0x004
 // handler) and notifies the outgoing one. Upstream has no equivalent.
 static TPinballComponent* LastScoringComp = nullptr; // DAT_00434d20
 
-// What the "...\n%ld" displays format: the amount these wrappers last credited,
-// after the multiplier. dragon_common.cpp's FormatWithValue reads it.
-extern int LastCreditedScore;
-
 static void NoteScoringComponent(TPinballComponent* caller)
 {
 	if (LastScoringComp == caller)
@@ -224,7 +229,7 @@ static void NoteScoringComponent(TPinballComponent* caller)
 int AddScoreFor(TPinballComponent* caller, int index)
 {
 	NoteScoringComponent(caller);
-	return LastCreditedScore = TableG->AddScore(caller->get_scoring(index));
+	return TableG->AddScore(caller->get_scoring(index));
 }
 
 // 0x004230f0 -- same, with a literal score instead of a scoring-table lookup. Goes
@@ -232,7 +237,7 @@ int AddScoreFor(TPinballComponent* caller, int index)
 int AddScoreAt(TPinballComponent* caller, int score)
 {
 	NoteScoringComponent(caller);
-	return LastCreditedScore = TableG->AddScore(score);
+	return TableG->AddScore(score);
 }
 
 // 0x00423130 -- upstream's SpecialAddScore, except that Dragon forces the multiplier to
@@ -256,7 +261,7 @@ int DragonSpecialAddScore(TPinballComponent* caller, int score)
 	TableG->BonusScoreFlag = bonus;
 	TableG->JackpotScoreFlag = jackpot;
 	TableG->ScoreMultiplier = scoreMult;
-	return LastCreditedScore = credited;
+	return credited;
 }
 
 // The DAT_00434d20 = 0 inside the plunger (VA 4245b0, whose handler is in
@@ -280,9 +285,11 @@ void AddToJackpot(int score)
 // 0x004231e0 -- a negative time suppresses the announcement.
 void AwardExtraBall(float time)
 {
-	// UNVERIFIED: TPinballTable+0x18e, *set* to 1 rather than incremented. String 3011
-	// makes the meaning certain; the field is past the last anchored offset
-	// (JackpotScoreFlag at +0x176), so the name is upstream's best fit, not a match.
+	// TPinballTable+0x18e is ExtraBalls, and the *assignment* is the Full Tilt
+	// behaviour rather than a transcription slip: CADET.EXE's control::table_add_extra_ball
+	// at 0x422fe0 -- pinned in analysis/symbols-cadet.md and matching upstream's body
+	// line for line (soundwave18, then STRING142 at 0xbc2 displayed for the float
+	// argument) -- opens with `TableG->[0x18e] = 1` where upstream has `++ExtraBalls`.
 	TableG->ExtraBalls = 1;
 	tabc21wave->Play(nullptr, "AwardExtraBall");
 	if (time >= 0.0f)
@@ -573,8 +580,14 @@ void GargoyleTargetBankHit(TPinballComponent* caller)
 	lite11->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
 
 	// Both diverter pairs flip to open the pass, and both rocks slide back out.
-	// UNVERIFIED: which of a pair is "open" -- 0x3e/0x3f are TGateDisable/TGateEnable by
-	// position in the FT code block, and the diverters are FT class 1043, not TGate.
+	//
+	// Which of the pair is open is settled by the recovered TDiverter (object type 1043,
+	// reference/SpaceCadetPinball/TDiverter.h): the edges it installs are gated on
+	// &ActiveFlag, so Enable puts the wall into the world and closes that chute while
+	// Disable takes it out and opens one. A diverter answers the gate pair as well as the
+	// blocker pair and the magnets' 0x4b/0x4c, and Dragon drives it with the gate pair --
+	// so 0x3e/0x3f really are TGateDisable/TGateEnable here. Which physical chute each
+	// half of a pair covers still needs the geometry out of DRAGON.DAT.
 	dvtrBA->Message(MessageCode::TGateDisable, 0.0);
 	dvtrBB->Message(MessageCode::TGateEnable, 0.0);
 	dvtrCA->Message(MessageCode::TGateDisable, 0.0);
@@ -717,20 +730,34 @@ void QuestSelectTargetControl(MessageCode code, TPinballComponent* caller)
 // score, starts Slay Dragon). SetSwordStage enables exactly one of the three and
 // disables the others, so only the live stage can be hit at all.
 //
-// UNVERIFIED: the light predicate. Ghidra emitted only two of light_on()'s three flag
-// tests for all three handlers, and as decompiled the body is reachable only via
-// FlasherOnFlag. The two readings agree in practice -- SetSwordStage flashes the live
-// stage's light indefinitely while completed stages' lights are steady-on and their
-// targets disabled -- so light_on() is used here; the decompilation of the other
-// handlers' identical inlined test, which does show all three fields, is the evidence
-// that would settle it.
+// The light predicate, narrowed: the decompile's "reachable only via one flag" is the
+// shipped control flow, not decompiler loss. At 0x425762 the listing is
+//
+//     ecx = [lite16+0x46]; test ecx,ecx; jne body
+//     cmp [lite16+0x42],0; jne 0x4257ba   ; 0x4257ba is `ret 8`
+//     ret 8                                ; and so is the fallthrough
+//
+// so both outcomes of the second compare return and the body runs iff +0x46 != 0. The
+// Fire Ridge handler (0x426964) inlines light_on() as the OR of +0x42, +0x4e and +0x46,
+// which places +0x46 among its three fields but does not name it -- that still needs
+// the Full Tilt TLight layout, since the 1996 build's flags are ints four bytes apart
+// where upstream's are bools.
+//
+// light_on() is kept here because it is a superset of the real test and the two agree in
+// practice: SetSwordStage flashes the live stage's light indefinitely while completed
+// stages' lights are steady-on and their targets disabled, so only the live stage can be
+// hit at all.
 //
 // The announcement is literally the one-character string "!" at .data:0x439a58, one of a
 // family ("!", "\"", "#".."####", "%".."(") that the box expands itself; the original
 // also passes a fourth Display argument of 1 here where resource strings pass 0, which
 // is presumably what marks a string as such a token. The port's TTextBox::Display has no
-// such parameter. UNVERIFIED: what "!" expands to -- dumping DRAGON.DAT's message groups
-// would settle it.
+// such parameter.
+//
+// Narrowed, not settled: the bytes at 0x439a58 are `21 00 00 00 22 00 00 00`, so these
+// really are one-character NUL-terminated strings on a four-byte stride -- "!" at
+// 0x439a58, '"' (GlyphJackpot) at 0x439a5c -- and not an array of pointers or a
+// misdecoded struct. What "!" renders as still needs DRAGON.DAT's symbol font.
 
 // 0x00425750 -- a_spot19 (skeleton: a_spot19Control)
 void SwordTargetControl1(MessageCode code, TPinballComponent* caller)

@@ -94,14 +94,12 @@ extern TSound*& tabc35wave;
 extern TSound*& tabc51wave;
 extern TSound*& tabc56wave;
 
-// DAT_0043a99c -- an unannotated component global sitting between a_sink17 and a_sink16
-// in .data, read by both fire lizard handlers for one float and never otherwise touched
-// in the decompiled set. Declared as a TBlocker only so the +0x7e field has a name.
-//
-// UNVERIFIED: which component this is. Dumping DRAGON.DAT's component table in .data
-// order, or breaking on 0x43a99c, would settle it; nothing in the rules depends on the
-// identity, only on the float.
-extern TBlocker* unknown_a99c;
+// DAT_0043a99c is a_sink9's Component, read straight out of .data: the tags are
+// `{const char* Name; TPinballComponent* Component;}` pairs laid end to end, the one at
+// 0x43a998 points at the string "a_sink9" at 0x43a990, and "a_sink10" begins at
+// 0x43a9a0. a_sink9 is the lock-3 tower entrance; the fire lizard sinks simply borrow
+// its 407 attribute as a shared duration. dragon_common.cpp reads it.
+float ASink9TimerTime();
 
 // ---------------------------------------------------------------------------
 // Table-local message codes, mode register, string ids
@@ -117,8 +115,11 @@ constexpr auto QuestRestarted = static_cast<MessageCode>(0x51);
 // current mode, in milliseconds. By the Control* band's +10 this would be upstream's
 // ControlSpinnerLoopReset, which is plainly not what a timer returns, so it is treated as
 // FT-only here.
-// UNVERIFIED: the name and the unit. The /1000.0 in the handler forces "milliseconds";
-// disassembling FT's TTimer/TBlocker Message() would confirm the getter.
+// The unit is settled: at 0x428940 the same call's result is spilled, `fild`ed and
+// compared against the double 0.0 at 0x437930, then divided by a literal `esi = 0x3e8`
+// before being printed. So Message(0x48) returns an *integer* count of milliseconds, and
+// every quest countdown divides by 1000 to print whole seconds. The getter's own name is
+// still inferred from that use.
 constexpr auto TimerGetRemaining = static_cast<MessageCode>(0x48);
 }
 
@@ -208,17 +209,13 @@ int RandBelow(int n)
 // fild/fstp. Reproduced literally because the truncation is observable: a DAT value of
 // 1.75 flashes for 1 second.
 //
-// UNVERIFIED, and a disagreement with part2: part2's GargoyleRockAControl reads the same
-// +0x7e as an *int* and compares it against -1. Both readings are consistent if the field
-// is a float whose -1.0 means "no duration", in which case part2's integer compare is the
-// one to fix; disassembling FT's TBlocker would settle which.
+// The field is TSink::TimerTime, a float: CADET.EXE's WormHoleControl loads
+// `*(float*)(sink + 0x7e)` at all four places upstream's control::WormHoleControl passes
+// `sink->TimerTime`. There is no disagreement with part2 after all -- that +0x7e is on a
+// moving part, a different class, where it is an integer frame index.
 static float FireLizardFlashTime()
 {
-	// unknown_a99c is null until the component it names is identified, so fall back
-	// to TBlocker's own -1.0 default, which is the "no duration" the gargoyle rocks
-	// read the same field as.
-	const float raw = unknown_a99c ? unknown_a99c->UnknownP7e : -1.0f;
-	return static_cast<float>(static_cast<int>(raw));
+	return static_cast<float>(static_cast<int>(ASink9TimerTime()));
 }
 
 // 0x00425c30 -- the shared tail of both fire lizard handlers (__stdcall, RET 0x4).
@@ -977,8 +974,9 @@ void DragonMouthSinkControl(MessageCode code, TPinballComponent* caller)
 	// The shared tail. "!" is the literal one-character token at .data:0x439a58 that the
 	// text box expands itself (see part1's note on the sword targets); the original also
 	// passes lowPriority = 1 for it and 0 everywhere else, which the port's
-	// TTextBox::Display cannot express.
-	// UNVERIFIED: what "!" expands to -- dumping DRAGON.DAT's message groups would settle it.
+	// TTextBox::Display cannot express. That it really is a one-character string is
+	// settled -- 0x439a58 holds `21 00 00 00` with '"' four bytes later -- but what the
+	// symbol font renders for it still needs DRAGON.DAT.
 	info_text_box->Display("!", 3.5);
 
 	snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_HitsLeft)),
