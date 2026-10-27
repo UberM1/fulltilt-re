@@ -1152,13 +1152,30 @@ bool StartSelectedQuest()
 
 // 0x424000 -- FinishQuest. Books the quest that just ran and picks the next.
 //
-// CAVEAT, unresolved: this is called from the *shared* 0x52 teardown of every
-// quest, and 0x52 is reached on timer expiry as much as on success. So as far
-// as the binary shows, a quest's Quest Light is lit -- and the quest counted
-// for both progression and the 100,000/quest drain bonus -- whenever it is
-// played to its end, won or lost. No success/failure discriminator exists
-// anywhere in this path. Settled by instrumenting a real game: fail a quest on
-// the clock and see whether its purple light lights.
+// SETTLED, and the code below was right for the wrong reason. The old note here
+// said no success/failure discriminator existed. One does: the shared teardown
+// tests the incoming message at 0x429a18 (`cmp esi,0x4a` / `jne 0x429a32`). But
+// read what it guards -- only the jump back to mode 2, so that an objective met
+// returns to Idle while a timeout falls through to the restart window. The very
+// next instruction, 0x429a32 `call 0x424000`, is **outside** the branch:
+// FinishQuest runs either way.
+//
+// So the outcome really is not discriminated *here*, and the quest is booked
+// whether it was won or timed out: 0x42400b pays the 500,000 jackpot, 0x42401e
+// increments the quests-completed counter the 100,000/quest drain bonus reads at
+// 0x42b940, and 0x42401c sends message 0x13 to light the Quest Light solid. The
+// one guard, at 0x424005, only asks whether a quest was selected at all.
+//
+// That is deliberate, not an oversight, and the structure of the table proves
+// it: four of the five quests -- 0x428a80, 0x4291c0, 0x429b10, 0x429ec0 -- have
+// no objective collision to meet. Only Rescue Maiden (0x429510) can be "won".
+// If the light needed a win, four of the five could never light and the sword
+// could never be spent. Dragon's Keep has no vocabulary of failure at all: its
+// string table contains not one failure-flavoured message.
+//
+// (Skulduggery is the same, and goes further -- it has an explicitly lost mode,
+// string 3050 "Shipwrecked" at 0x42c5cd, which still runs the ordinary teardown
+// at 0x42c5ed and is still counted and still paid.)
 void FinishQuest()
 {
 	if (SelectedQuest() != Quest::None)

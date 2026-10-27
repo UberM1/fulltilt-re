@@ -99,17 +99,21 @@ of what that proves: the table constructs, binds and pumps the event loop. Nothi
 launches a ball, presses a flipper, enters a quest or reads a score, so every
 `// UNVERIFIED:` in `src/` is still unverified. The open questions are unchanged:
 
-- **Success versus timeout is undiscriminated** on both tables. The binaries call the
-  same teardown path either way, so a timed-out quest still lights its light and still
-  counts toward the drain bonus. Written as the binary behaves; watching a real game
-  settles it.
+- ~~**Success versus timeout is undiscriminated**~~ -- **settled**, see
+  `analysis/quest-outcome.md`. A discriminator does exist (`cmp esi,0x4a` at Dragon's
+  0x429a18), but it only chooses which mode the teardown returns to; `call 0x424000`
+  sits outside the branch, so `FinishQuest` books the quest either way. The reconstruction
+  was already correct and now has the addresses behind it. The design is deliberate: four
+  of Dragon's five quests have no objective to meet at all, and Skulduggery counts and
+  pays even its explicitly lost mode (string 3050 "Shipwrecked").
 - **Which physical component** several abstractly-identified ones are -- which outlane
   `a_kick2` guards, which tower each lock belongs to. Dragon's `unknown_a99c`
   (0x43a99c) is still unidentified and therefore null; its one reader falls back to
   `TBlocker`'s own -1 default.
-- **The glyph tokens render as ASCII.** The tokens themselves are now read out of
-  `.rdata` and are exact, but the port has no symbol font, so `#`, `$` and `K` appear
-  on the playfield where symbols belong.
+- ~~**The glyph tokens render as ASCII.**~~ -- **done**. The symbol font is the `font2`
+  group of each bonus table's own DAT, 20 glyphs in `DRAGON.DAT` and 52 in `PIRATES.DAT`,
+  absent from `CADET.DAT`. See `docs/engine-changes.md` section 10 for the geometry that
+  confirms it.
 - **`FormatWithValue`** (Dragon's 0x42c76f) takes a value the decompile loses on the
   x87 stack at every call site. It substitutes the last credited score where the string
   has a specifier and copies the label where it does not.
