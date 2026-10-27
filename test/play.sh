@@ -56,6 +56,31 @@ cp -- "$src/$dat.DAT" "$rundir/"
 [[ -f $src/$dat.BMP ]] && cp -- "$src/$dat.BMP" "$rundir/"
 cp -R -- "$src/SOUND" "$rundir/SOUND"
 
+# Keep the previous session: a report usually arrives after the next launch.
+log=$rundir/session.log
+[[ -f $log ]] && mv -f -- "$log" "$rundir/session.prev.log"
+
+{
+	echo "# $dat"
+	echo "# $(date -Is)"
+	echo "# binary $bin"
+	echo "# engine $(cd -- "$repo_root" && git rev-parse --short HEAD)"
+} >"$log"
+
 echo "playing $dat from $rundir" >&2
+echo "log: $log" >&2
 cd -- "$rundir"
-HOME=$rundir/home XDG_DATA_HOME=$rundir/home/.local/share exec "$bin" "$@"
+
+# Both streams, unbuffered, to the terminal and the log. The engine reports
+# loader failures and missing components on stderr, and they scroll past.
+export HOME=$rundir/home XDG_DATA_HOME=$rundir/home/.local/share
+set +e
+stdbuf -oL -eL "$bin" "$@" 2>&1 | tee -a -- "$log"
+status=${PIPESTATUS[0]}
+set -e
+
+echo "# exit $status" >>"$log"
+echo >&2
+echo "session log: $log" >&2
+[[ -f $rundir/session.prev.log ]] && echo "previous:    $rundir/session.prev.log" >&2
+exit "$status"
