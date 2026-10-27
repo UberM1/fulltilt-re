@@ -1397,7 +1397,7 @@ index 2f07d83..4196a3c 100644
  
  	auto deltaAngle = FlipperEdge->flipper_angle_delta(dt);
 diff --git a/SpaceCadetPinball/THole.cpp b/SpaceCadetPinball/THole.cpp
-index 4c930ff..c1ad2dc 100644
+index 4c930ff..04df3ba 100644
 --- a/SpaceCadetPinball/THole.cpp
 +++ b/SpaceCadetPinball/THole.cpp
 @@ -9,6 +9,7 @@
@@ -1499,16 +1499,60 @@ index 4c930ff..c1ad2dc 100644
  	if (!BallCapturedFlag)
  	{
  		BallCapturedSecondStage = false;
-@@ -111,6 +158,9 @@ int THole::FieldEffect(TBall* ball, vector2* vecDst)
+@@ -108,13 +155,50 @@ int THole::FieldEffect(TBall* ball, vector2* vecDst)
+ 			ball->Position.Z += ball->Direction.Z;
+ 			if (ball->Position.Z <= ZSetValue)
+ 			{
++				ball->Position.Z = ZSetValue;
++				ball->Direction = {};
++				ball->Speed = 0.0f;
++
++				// The release is gated on the mouth being clear. The original splits
++				// this in two -- its FieldEffect stops the ball here (DRAGON.EXE
++				// 0x416b79: Direction zeroed) and sends itself 0x3f8, whose arm at
++				// 0x416cea does the test and re-arms its own timer when the box is
++				// occupied (0x416d8d) instead of releasing. Retesting here on the next
++				// frame is the same loop without the extra timer: Direction.Z was just
++				// zeroed, gravity takes z back below ZSetValue, and this branch runs
++				// again.
++				//
++				// Without the gate a hole drops its ball on top of a ball already
++				// standing in the mouth, which only happens during multiball -- and
++				// both bonus tables have multiball. The box is the ball's position
++				// plus or minus 2 x CollisionCompOffset, the same extent and the same
++				// field TSink::TimerExpired uses (0x418509), and the count is filtered
++				// to the layer being released onto, so the held ball -- which still
++				// carries the hole's capture mask -- does not count itself.
++				RectF mouth{};
++				const auto margin = PinballTable->CollisionCompOffset * 2.0f;
++				mouth.XMin = ball->Position.X - margin;
++				mouth.XMax = ball->Position.X + margin;
++				mouth.YMin = ball->Position.Y - margin;
++				mouth.YMax = ball->Position.Y + margin;
++				if (PinballTable->BallCountInRect(mouth, CollisionMask))
++				{
++					if (ft_accel_enabled() || ft_autoplay_enabled())
++						fprintf(stderr, "DBG-holerel %-12s HELD, mouth occupied on mask 0x%x\n",
++						        GroupName ? GroupName : "?", CollisionMask); // FTDBG
++					return 0;
++				}
++
  				BallCapturedFlag = false;
  				BallCapturedSecondStage = false;
- 				ball->Position.Z = ZSetValue;
+-				ball->Position.Z = ZSetValue;
 +				if (ft_accel_enabled() || ft_autoplay_enabled())
 +					fprintf(stderr, "DBG-holerel %-12s mask 0x%x -> 0x%x z=%.3f\n",
 +					        GroupName ? GroupName : "?", ball->CollisionMask, CollisionMask, ZSetValue); // FTDBG
++				// 0x416dcc. Ends the ball's edge scanning for this frame, as every
++				// other layer change does; the port was missing it here.
++				ball->CollisionDisabledFlag = true;
  				ball->CollisionMask = CollisionMask;
  				ball->CollisionComp = nullptr;
- 				ball->Direction = {};
+-				ball->Direction = {};
+-				ball->Speed = 0.0f;
+ 				loader::play_sound(SoftHitSoundId, ball, "THole2");
+ 				control::handler(MessageCode::ControlBallReleased, this);
+ 			}
 diff --git a/SpaceCadetPinball/TKickout.cpp b/SpaceCadetPinball/TKickout.cpp
 index dd31ce3..62b5594 100644
 --- a/SpaceCadetPinball/TKickout.cpp
@@ -2095,10 +2139,10 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..5c10c59 100644
+index e0ccd71..de365a8 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
-@@ -44,6 +44,39 @@ enum class MessageCode
+@@ -44,6 +44,44 @@ enum class MessageCode
  	TLightFtTmpOverrideOff = -25,
  	TLightFtResetOverride = -26,
  
@@ -2126,19 +2170,24 @@ index e0ccd71..5c10c59 100644
 +	TMagnetFieldEnable = 75,
 +	TMagnetFieldDisable = 76,
 +
-+	// 85/86, raised at the rules when a ball crosses a ramp's side wall. The original's
-+	// TRamp sends 85 from its 1301 wall and 86 from its 1302 wall (its plane branch sends
-+	// a third, 84, which nothing here produces yet), and a type-1035 ramp exit sends the
-+	// same pair from its two one-sided edges. Both tables' rules read 86 as "a pass was
++	// 84/85/86, raised at the rules as a ball moves through a ramp. The original's
++	// TRamp sends 84 from its plane branch when the ball changes layer onto the ramp,
++	// 85 from its 1301 wall and 86 from its 1302 wall; a type-1035 ramp exit sends the
++	// 85/86 pair from its two one-sided edges. Both tables' rules read 86 as "a pass was
 +	// completed" and score on it -- dragon_part2.cpp and pirates_part2.cpp already cast
-+	// the raw 0x55/0x56 for exactly these.
++	// the raw 0x55/0x56 for exactly these -- and 84 has real consumers too, Dragon's
++	// 0x54 arm and Skulduggery's a_ramp8, which releases a_blocg on it.
++	//
++	// Read off DRAGON.EXE's TRamp::Collision at 0x4177d0: the plane branch at 0x41791d
++	// pushes 0x54, the Line2 branch at 0x4179a5 pushes 0x55, the Line3 branch 0x56.
++	ControlRampPlaneCrossed = 84,
 +	ControlRampWall1Crossed = 85,
 +	ControlRampWall2Crossed = 86,
 +
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -131,6 +164,21 @@ enum class MessageCode
+@@ -131,6 +169,21 @@ enum class MessageCode
  	Reset = 1024,
  };
  
@@ -2160,7 +2209,7 @@ index e0ccd71..5c10c59 100644
  class TPinballComponent
  {
  public:
-@@ -143,6 +191,18 @@ public:
+@@ -143,6 +196,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -2179,7 +2228,7 @@ index e0ccd71..5c10c59 100644
  	char UnusedBaseFlag;
  	char ActiveFlag;
  	int MessageField;
-@@ -156,3 +216,8 @@ private:
+@@ -156,3 +221,8 @@ private:
  	float VisualPosNormX;
  	float VisualPosNormY;
  };
@@ -2189,7 +2238,7 @@ index e0ccd71..5c10c59 100644
 +	return component ? component->GetComponentType() : 0;
 +}
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..73a72ea 100644
+index aa8551a..6bad534 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
 @@ -6,6 +6,7 @@
@@ -2473,7 +2522,32 @@ index aa8551a..73a72ea 100644
  		EndGameTimeoutTimer = timer::set(3.0, this, EndGame_timeout);
  		break;
  	case MessageCode::Reset:
-@@ -680,8 +790,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
+@@ -658,6 +768,24 @@ int TPinballTable::BallCountInRect(const RectF& rect)
+ 	return count;
+ }
+ 
++int TPinballTable::BallCountInRect(const RectF& rect, int collisionMask)
++{
++	int count = 0;
++	for (const auto ball : BallList)
++	{
++		if (ball->ActiveFlag &&
++			ball->CollisionMask == collisionMask &&
++			ball->Position.X >= rect.XMin &&
++			ball->Position.Y >= rect.YMin &&
++			ball->Position.X <= rect.XMax &&
++			ball->Position.Y <= rect.YMax)
++		{
++			count++;
++		}
++	}
++	return count;
++}
++
+ int TPinballTable::BallCountInRect(const vector2& pos, float margin)
+ {
+ 	RectF rect{};
+@@ -680,8 +808,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
  	}
  	if (table->Demo)
  		table->Demo->Message(MessageCode::GameOver, 0.0);
@@ -2490,7 +2564,7 @@ index aa8551a..73a72ea 100644
  
  void TPinballTable::LightShow_timeout(int timerId, void* caller)
 diff --git a/SpaceCadetPinball/TPinballTable.h b/SpaceCadetPinball/TPinballTable.h
-index c407fdc..662e062 100644
+index c407fdc..5551fb9 100644
 --- a/SpaceCadetPinball/TPinballTable.h
 +++ b/SpaceCadetPinball/TPinballTable.h
 @@ -10,6 +10,8 @@ class TPlunger;
@@ -2510,7 +2584,18 @@ index c407fdc..662e062 100644
  	TPinballComponent* find_component(int groupIndex);
  	int AddScore(int score);
  	void ChangeBallCount(int count);
-@@ -44,6 +47,10 @@ public:
+@@ -38,12 +41,21 @@ public:
+ 	TBall* AddBall(vector2 position);
+ 	int BallCountInRect(const RectF& rect);
+ 	int BallCountInRect(const vector2& pos, float margin);
++	// Counting only the balls on one collision layer. THole's release gate needs it:
++	// the original's 0x4130c0 filters on CollisionMask as well as ActiveFlag, which is
++	// what lets the hole ignore the ball it is itself about to release -- that ball
++	// still carries the hole's capture mask until the release assigns the new one.
++	int BallCountInRect(const RectF& rect, int collisionMask);
+ 
+ 	static void EndGame_timeout(int timerId, void* caller);
+ 	static void LightShow_timeout(int timerId, void* caller);
  	static void replay_timer_callback(int timerId, void* caller);
  	static void tilt_timeout(int timerId, void* caller);
  
@@ -2521,7 +2606,7 @@ index c407fdc..662e062 100644
  	TFlipper* FlipperL;
  	TFlipper* FlipperR;
  	scoreStruct* CurScoreStruct;
-@@ -73,6 +80,14 @@ public:
+@@ -73,6 +85,14 @@ public:
  	std::vector<TBall*> BallList;
  	std::vector<TFlipper*> FlipperList;
  	TLightGroup* LightGroup;
@@ -2536,7 +2621,7 @@ index c407fdc..662e062 100644
  	float GravityDirVectMult{};
  	float GravityAngleX{};
  	float GravityAnglY{};
-@@ -85,6 +100,12 @@ public:
+@@ -85,6 +105,12 @@ public:
  	bool BonusScoreFlag{};
  	int JackpotScore{};
  	bool JackpotScoreFlag{};
@@ -2736,7 +2821,7 @@ index a2535c0..bae2e1b 100644
  
  int TPopupTarget::Message(MessageCode code, float value)
 diff --git a/SpaceCadetPinball/TRamp.cpp b/SpaceCadetPinball/TRamp.cpp
-index 795235d..7b2e8b5 100644
+index 795235d..1403e35 100644
 --- a/SpaceCadetPinball/TRamp.cpp
 +++ b/SpaceCadetPinball/TRamp.cpp
 @@ -9,6 +9,7 @@
@@ -2889,7 +2974,32 @@ index 795235d..7b2e8b5 100644
  	TTableLayer::edges_insert_square(y0, x0, y1, x1, nullptr, &Field);
  }
  
-@@ -160,17 +206,27 @@ void TRamp::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
+@@ -145,7 +191,23 @@ void TRamp::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
+ 		ball->RampFieldForce.Y = plane->FieldForce.Y;
+ 		ball->Position.Z = ball->Position.X * ball->CollisionOffset.X + ball->Position.Y * ball->CollisionOffset.Y +
+ 			ball->Radius + ball->CollisionOffset.Z;
+-		ball->CollisionMask = CollisionGroup;
++
++		// The original guards the rest on the ball not already being on this ramp's
++		// layer (0x41790a `cmp [ball+0xf7],eax` / `je` to the epilogue), so the plane
++		// geometry is reapplied every frame the ball rides the ramp but the layer
++		// change is announced once, on entry. Upstream wrote the mask unconditionally
++		// and announced nothing; writing it inside the guard is the same value, and
++		// 0x54 has consumers -- Dragon's RampEntered arm and Skulduggery's a_ramp8.
++		if (ball->CollisionMask != CollisionGroup)
++		{
++			// Ends this ball's edge scanning for the frame, which is what every other
++			// component that moves a ball between layers does (THole, TRampExit,
++			// TKickout, TSink, TAccelerator). Without it the ball can still hit an edge
++			// of the layer it just left, in the same frame. 0x417917 in the original.
++			ball->CollisionDisabledFlag = true;
++			ball->CollisionMask = CollisionGroup;
++			control::handler(MessageCode::ControlRampPlaneCrossed, this);
++		}
+ 		return;
+ 	}
+ 
+@@ -160,17 +222,31 @@ void TRamp::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
  	else
  	{
  		ball->CollisionFlag = 0;
@@ -2899,10 +3009,13 @@ index 795235d..7b2e8b5 100644
 +		// binds a control function to a ramp, so the loss is invisible there --
 +		// but Dragon's Keep's a_ramp103 and a_ramp6 both test 0x56, and without
 +		// this they never fire at all. Codes read from TRamp::Collision at
-+		// DRAGON.EXE 0x4177d0; the plane branch's third code (0x54) is not sent
-+		// here because no handler in either table tests it.
++		// DRAGON.EXE 0x4177d0; the plane branch's 0x54 is sent above.
++		// Both wall branches disable the ball's collisions for the rest of the frame
++		// in the original, at 0x417979 and 0x4179b8 -- the same `[ball+0x9b] = 1` that
++		// TBall::Disable writes at 0x402c09, which is what pins the offset.
  		if (edge == Line2)
  		{
++			ball->CollisionDisabledFlag = true;
  			ball->CollisionMask = Wall1CollisionGroup;
  			if (BallZOffsetFlag)
  				ball->Position.Z = ball->Radius + Wall1BallOffset;
@@ -2910,6 +3023,7 @@ index 795235d..7b2e8b5 100644
  		}
  		else
  		{
++			ball->CollisionDisabledFlag = true;
  			ball->CollisionMask = Wall2CollisionGroup;
  			if (BallZOffsetFlag)
  				ball->Position.Z = ball->Radius + Wall2BallOffset;

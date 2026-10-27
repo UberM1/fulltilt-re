@@ -114,6 +114,14 @@ constexpr MessageCode TableGameOver = MessageCode::GameOver;  // binary 0x400
 
 const float Forever = -1.0f;
 
+// The same -1.0f, under the name it means on a sink. TSink::Message reads a negative
+// value as "use the delay the DAT authored for this sink" (DRAGON.EXE 0x418650: the
+// value is compared against the 0.0 at 0x437330 and only a *negative* one is replaced
+// by TimerTime), so -1.0f on a sink is an eject after ~2 s, not a hold. Spelling it
+// Forever here reads as "hold the ball indefinitely", which is the opposite, and is
+// exactly the sort of comment that invites a wrong fix later.
+const float SinkUseDatDelay = -1.0f;
+
 // Upstream's TPlunger hardcodes timer::set(0.95999998f); Full Tilt passes it as a
 // message argument, which is where the 0x3f75c28f in every feed call comes from.
 const float PlungerFeedDelay = 0.96f;
@@ -514,7 +522,7 @@ void GargoyleGaggleController(MessageCode code)
 		BeginQuestPlay();
 		TableG->MultiballCount += 1;
 
-		tag_a_sink1.Component->Message(ft::SinkResetTimer, Forever);
+		tag_a_sink1.Component->Message(ft::SinkResetTimer, SinkUseDatDelay);
 		if (!KeepAnnouncement)
 			tag_a_kout2.Component->Message(ft::KickoutRestartTimer, Forever);
 
@@ -576,9 +584,9 @@ void DragonFlurryController(MessageCode code)
 			tag_s_plunger1.Component->Message(ft::PlungerRelaunchBall, PlungerFeedDelay);
 		}
 
-		tag_a_sink1.Component->Message(ft::SinkResetTimer, Forever);
+		tag_a_sink1.Component->Message(ft::SinkResetTimer, SinkUseDatDelay);
 		tag_v_lite66.Component->Message(ft::LightFlasherStartTimed, 1.0f);
-		tag_a_sink2.Component->Message(ft::SinkResetTimer, Forever);
+		tag_a_sink2.Component->Message(ft::SinkResetTimer, SinkUseDatDelay);
 		tag_v_lite65.Component->Message(ft::LightFlasherStartTimed, 1.0f);
 		tag_a_sink4.Component->Message(ft::SinkResetTimer, 1.0f);
 		tag_well_light_group.Component->Message(ft::LightFlasherStartTimed, 1.0f);

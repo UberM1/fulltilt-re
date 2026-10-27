@@ -96,8 +96,17 @@ into `src/dragon_helpers.cpp`, `src/pirates_modes_entry.cpp` and
 
 `test/run_tables.sh` passes all three tables, and its own header is the honest account
 of what that proves: the table constructs, binds and pumps the event loop. Nothing
-launches a ball, presses a flipper, enters a quest or reads a score, so every
-`// UNVERIFIED:` in `src/` is still unverified. The open questions are unchanged:
+launches a ball, presses a flipper, enters a quest or reads a score.
+
+What *has* been exercised since is the engine's debug harness
+(`reference/SpaceCadetPinball/FtAccelDebug.cpp`, env-gated), which drives a ball into a
+named sink or hole and logs the swallow and the eject. On Dragon's Keep every sink the
+harness can reach gives the ball back -- 68 swallows, 68 ejects across seven sinks,
+including the two-hit fire-lizard path that starts a quest -- and all three holes release.
+See the appendix of `analysis/dragon-ball-handlers.md` and `analysis/dragon-holes-ramps.md`.
+That is still not "the rules are right"; it is "the ball comes back".
+
+The open questions:
 
 - ~~**Success versus timeout is undiscriminated**~~ -- **settled**, see
   `analysis/quest-outcome.md`. A discriminator does exist (`cmp esi,0x4a` at Dragon's
@@ -120,3 +129,14 @@ launches a ball, presses a flipper, enters a quest or reads a score, so every
 - **A few tags are typed generically** by the generated control tables, so playing a
   sound or testing `light_on()` through them needs a `static_cast` down. Safe, because
   the objects really are `TSound` / `TLight`, but unchecked.
+- **Dragon's `a_ramp5`** -- the topmost ramp, and the one reported as not working -- is
+  physically traversable (measured: `a_sink16` 0x10 -> ramp -> `a_ramp104` 0x2 ->
+  `s_hole100` 0x1, 1.06 s over 12.1 units) and has no handler, which is faithful: it is in
+  neither of `DRAGON.EXE`'s component tables. What was *not* observed in 850 s of autoplay
+  is a ball entering it uphill at all. Whether the complaint is "it scores nothing"
+  (correct) or "it cannot be shot" (a physics or diverter question) is open.
+- **The ball's z freezes while crossing a ramp wall** and stays frozen for the whole
+  traversal. Not a port bug: attribute 1305 is 0 on all six of Dragon's ramps, so
+  `BallZOffsetFlag` is false and the original takes the same branch (0x417961 onward).
+  Some other writer of z is unaccounted for, and that is the "the ball looks odd in the
+  tunnels" report.

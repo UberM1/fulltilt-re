@@ -169,8 +169,13 @@ and the multiplier are now done; the rest stand.
   *Done.*
 - **`ScoreMultiplier` is an index upstream and a value in Full Tilt.** *Done* -- see
   section 7.
-- **A negative timeout means *cancel*** in Full Tilt, where `TBlocker::Message` clamps with
-  `std::max(value, 0.0f)` and would trip the timer instead.
+- **A negative timeout means *cancel*** in Full Tilt. Settled on `TBlockerEnable`: the
+  original's jump table at 0x415398 sends 0x38 to 0x415038, which compares the value
+  against the 0.0 at 0x437330 and only arms the motion timer for a strictly positive one,
+  dispatching 0x3a to itself otherwise. The port's `TBlockerEnable` already guards on
+  `value > 0`. `TBlockerRestartTimeout` still clamps with `std::max(value, 0.0f)`; no
+  caller in either table passes it a negative value, so the clamp is unreachable rather
+  than wrong.
 - **Text-box tokens.** *Done* -- see section 10.
 
 ## 10. The symbol font
@@ -223,3 +228,63 @@ Space Cadet is untouched by construction: its DAT has no `font2`, `glyph_fontp` 
 null, and `FontFor` falls back to the text font -- which is also the behaviour if a
 future DAT has the group but no bitmaps in it, guarded on `Height > 0` so the layout
 loop cannot spin.
+
+## 11. TRamp and THole, measured against the originals
+
+Two divergences found by reading `DRAGON.EXE`'s own `TRamp::Collision` (0x4177d0) and
+`THole::FieldEffect` / `THole::Message` (0x416ab0 / 0x416c70) next to the port's.
+
+### `TRamp::Collision` left the ball colliding
+
+The original sets `CollisionDisabledFlag` on the ball in all three of its layer-changing
+branches -- 0x417917 (plane), 0x417979 (wall 1), 0x4179b8 (wall 2) -- and the port set it
+in none of them. The offset is pinned, not guessed: `TBall::Disable` at 0x402c00 writes
+`[ball+0x5] = 0` and `[ball+0x9b] = 1`, which is `ActiveFlag` and `CollisionDisabledFlag`
+in that order. `pb.cpp` clears the flag at the top of each physics pass, so setting it
+ends that ball's edge scanning for the frame; `THole`, `TRampExit`, `TKickout`, `TSink`
+and `TAccelerator` all already did it and `TRamp` was the one that did not. Without it a
+ball crossing onto a ramp can still hit an edge of the layer it just left, in the same
+frame.
+
+### The ramp's plane branch announced nothing
+
+The original's plane branch guards on the ball not already being on the ramp's layer
+(0x41790a) and, on the layer change, raises **0x54**. The port wrote the mask
+unconditionally and raised nothing, so `MessageCode::ControlRampPlaneCrossed = 84` is new
+and the write moved inside the guard -- the same value either way, since the guard only
+passes when they differ.
+
+That code has consumers, so this is not only fidelity: Dragon's `ft::RampEntered` arm and
+Skulduggery's `a_ramp8`, which releases `a_blocg` indefinitely on it, were both dead.
+
+### `THole` released onto an occupied mouth
+
+The original does not release in `FieldEffect`. It stops the ball there (0x416b79 zeroes
+the ball's `Direction`) and sends **itself** 0x3f8, whose arm at 0x416cea tests whether
+the mouth is clear and *re-arms its own timer* (0x416d8d) instead of releasing when it is
+not. The box is the ball's position plus or minus `2 x CollisionCompOffset` -- the same
+extent and the same `[table+0x152]` that `TSink::TimerExpired` uses at 0x418509 -- and the
+count at 0x4130c0 filters on `CollisionMask` as well as `ActiveFlag`, which is what stops
+the held ball counting itself: it still carries the hole's capture mask until the release
+assigns the new one.
+
+Nothing outside the hole sends 0x3f8 -- checked across the decompiled corpus, where every
+apparent hit is the float constant `0x3f800000` -- so the port keeps the release inside
+`FieldEffect` and simply retests on the next frame. That is the same loop without the
+extra timer: `Direction.Z` has just been zeroed, gravity takes z back below `ZSetValue`,
+and the branch runs again. `TPinballTable::BallCountInRect` gained the mask-filtered
+overload for it.
+
+The gate only ever matters during multiball, and both bonus tables have multiball. Space
+Cadet reaches the same code, and its three holes still release: regression-tested with
+`FT_HOLETEST=0..2`, `s_hole118` 0x1 -> 0x4, `s_hole101` and `s_hole100` 0x2 -> 0x1.
+
+### Not a gap: `timer::kill(TimerExpired)` kills *every* sink's timer
+
+`TSink::Message`'s `PlayerChanged` and `Reset` arms kill by *callback*, and
+`timer::kill(void(*)(int,void*))` walks the whole active list and frees every timer with
+that function -- so one sink's reset cancels the pending eject of all of them. That looks
+like a bug and is not: `DRAGON.EXE`'s own `TSink::Message` does the same, pushing the
+callback 0x418500 into 0x41f960 at 0x41869f. The 0x41 arm, by contrast, kills nothing
+before arming, so repeated `TSinkResetTimer` messages stack timers in the original too,
+and the port matches. Both were checked because two separate passes flagged them.

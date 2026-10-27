@@ -260,6 +260,14 @@ const float RestartQuestTime = 15.0f;    // the five ordinary quests' 0x51 re-ar
 
 const float Forever = -1.0f;  // the "flash/display indefinitely" sentinel
 
+// The same -1.0f, under the name it means on a sink. TSink::Message reads a negative
+// value as "use the delay the DAT authored for this sink" (DRAGON.EXE 0x418650: the
+// value is compared against the 0.0 at 0x437330 and only a *negative* one is replaced
+// by TimerTime), so -1.0f on a sink is an eject after ~2 s, not a hold. Spelling it
+// Forever here reads as "hold the ball indefinitely", which is the opposite, and is
+// exactly the sort of comment that invites a wrong fix later.
+const float SinkUseDatDelay = -1.0f;
+
 // ---------------------------------------------------------------------------
 // Component tags
 //
@@ -2255,7 +2263,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	// Tear this mode down, release the locked ball, light every letter, and
 	// hand over to Dragon Flurry.
 	SlayDragonController(ft::QuestTeardown, nullptr);
-	tag_a_sink16.Component->Message(ft::SinkResetTimer, Forever);
+	tag_a_sink16.Component->Message(ft::SinkResetTimer, SinkUseDatDelay);
 	tag_dragon_letter_light_group.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
 	CheckDragonFlurry();
 
