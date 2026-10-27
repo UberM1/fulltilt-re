@@ -896,7 +896,14 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 // mirroring each stage -- but with two FT differences worth keeping in mind:
 //
 //  * FT arms the timer with a separate TBlockerRestartTimeout rather than passing the
-//    duration to TBlockerEnable, and
+//    duration to TBlockerEnable. The code is 0x45, and `a_center_post`'s own handler at
+//    0x425910 is the proof: the constants it pushes are 0x37, 0x38, 0x45 twice, and the
+//    light codes 0x14 and 0xf -- nothing else. Upstream numbers that message 59, the same
+//    value as TTimerResetTimer, which is why dragon_part3.cpp can send it to `mode_timer`
+//    (a TTimer, not a TBlocker) and mean it. The port's mapping is already right here;
+//    the +4 arithmetic that covers TBlockerDisable and TBlockerEnable does *not* extend
+//    to this one, and 0x39 -- which is in TBlocker's 0x37..0x3c jump table at 0x415398 --
+//    is a different mechanic entirely: it sets the part's position index. And
 //  * FT treats a negative TBlockerRestartTimeout as "cancel". Upstream's TBlocker clamps
 //    it with std::max(value, 0.0f), which would fire the timer immediately instead. The
 //    reading is forced by the rest of the binary: the Slay Dragon controller cancels

@@ -445,14 +445,17 @@ Every "derived" row below sits on a 4-byte-spaced chain between two CONFIRMED an
 
 | slot offset | method | conf. | evidence |
 |---|---|---|---|
-| +0x00 | destructor | PROBABLE | Slot 0 convention; never called from control code. |
+| +0x00 | `int GetComponentType()` | CONFIRMED | **Not the destructor.** It returns the DAT object type code: `TSink`'s is `mov eax,0x3f9 / ret` at DRAGON.EXE 0x41af50 (0x3f9 = 1017, the `TSink` case in `TPinballTable`'s spawn switch), `TBlocker`'s `mov eax,0x3f3 / ret` at 0x41ae60 (1011), `THole`'s at 0x41aef0 (0x3fe = 1022). The dispatchers read the slot and switch on the result -- CADET.EXE 0x42a150 and PIRATES.EXE 0x42d850 -- and the type getters sit in one contiguous run, which no vtable of destructors would. Slot 0 convention is what made this look like a destructor; the deleting destructor is at +0x14. |
 | +0x04 | `int Message(MessageCode code, float value)` | CONFIRMED | Hundreds of sites, always `(**(code **)(*comp + 4))(code, value)` where the source has `comp->Message(code, value)`. |
 | +0x08 | `void port_draw()` | PROBABLE | Declaration order; not called from control code. |
 | +0x0c | `int get_scoring(unsigned index)` | CONFIRMED | `BumperControl`: `(**(code **)(*param_2 + 0xc))(*(int*)(param_2+0x76))` == `caller->get_scoring(static_cast<TBumper*>(caller)->BmpIndex)`. Always feeds `AddScore`. |
 | +0x10 | `vector2 get_coordinates()` | PROBABLE | Declaration order. |
 | +0x18 | `float TSound::Play(TPinballComponent* caller)` | CONFIRMED | `GravityWellKickoutControl`: `fVar4 = (**(code **)(*DAT_00438b0c + 0x18))()` then `caller->Message(TKickoutRestartTimer, fVar4)` == `auto duration = soundwave7->Play(lite62, ...); caller->Message(TKickoutRestartTimer, duration)`. Also `OutLaneRolloverControl`, `BoosterTargetControl`, `BallDrainControl` (soundwave26/47/27/59/3). Return value is the clip length. |
 
-(+0x14 is never taken in this translation unit.)
+(+0x14 is never taken in this translation unit. It is the destructor-shaped thunk --
+`push esi / mov esi,ecx / call <base dtor> / test [esp+8],1 / call operator delete /
+ret 0x4`, e.g. `TSink`'s at DRAGON.EXE 0x41b250 -- which is consistent with slot 0 being
+the type getter instead.)
 
 ### 3.3 `TLight`
 
