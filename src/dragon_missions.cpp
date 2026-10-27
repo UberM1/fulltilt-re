@@ -434,7 +434,12 @@ component_tag<TPinballComponent> tag_a_dvtrcb = {"a_dvtrcb"};
 component_tag<TPinballComponent> tag_a_dvtrda = {"a_dvtrda"};
 component_tag<TPinballComponent> tag_a_dvtrdb = {"a_dvtrdb"};
 
-component_tag<TLightGroup> tag_light_sweeps = {"light_sweeps"};
+// TPinballComponent, not TLightGroup: light_sweeps is object type 1038, whose real
+// class TLightSweep derives straight from TPinballComponent. component_tag::SetComponent
+// binds through dynamic_cast<T*>, and its "wrong component type" assert is a no-op in a
+// release build -- so a tag typed too narrowly binds to nullptr in silence. That is what
+// crashed Slay Dragon on its fire sweep. Only Message() is called through this tag.
+component_tag<TPinballComponent> tag_light_sweeps = {"light_sweeps"};
 
 // Voice-overs and effects. Named by their wave resource, as in the DAT.
 component_tag<TSound> tag_tabc13wave = {"tabc13wave"};  // sword stage change
@@ -1498,6 +1503,12 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ft::MissionComplete:
+		fprintf(stderr, "DBG-hoard sweeps=%p gems=%p dvtrba=%p dvtrbb=%p dvtrca=%p dvtrcb=%p info=%p rockb=%p lite46=%p\n",
+		        (void*)tag_light_sweeps.Component, (void*)tag_gem_light_group.Component,
+		        (void*)tag_a_dvtrba.Component, (void*)tag_a_dvtrbb.Component,
+		        (void*)tag_a_dvtrca.Component, (void*)tag_a_dvtrcb.Component,
+		        (void*)tag_info_text_box.Component, (void*)tag_a_rockb.Component,
+		        (void*)tag_v_lite46.Component); // FTDBG
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, 0.0f);
 		tag_gem_light_group.Component->Message(ft::LightFlasherStartTimed, Forever);
 		// Divert the ball toward the gem banks.

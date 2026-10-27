@@ -1,5 +1,5 @@
 diff --git a/SpaceCadetPinball/FtAccelDebug.cpp b/SpaceCadetPinball/FtAccelDebug.cpp
-index 94bd398..dfc9344 100644
+index 94bd398..351f11f 100644
 --- a/SpaceCadetPinball/FtAccelDebug.cpp
 +++ b/SpaceCadetPinball/FtAccelDebug.cpp
 @@ -8,6 +8,11 @@
@@ -14,7 +14,7 @@ index 94bd398..dfc9344 100644
  static std::vector<FtAccelDbgEntry> gAccels;
  static std::vector<FtRexitDbgEntry> gRexits;
  
-@@ -19,6 +24,244 @@ bool ft_accel_enabled()
+@@ -19,6 +24,248 @@ bool ft_accel_enabled()
  	return enabled != 0;
  }
  
@@ -158,6 +158,9 @@ index 94bd398..dfc9344 100644
 +	if (sinkTest >= 0)
 +	{
 +		auto bb = active_ball(table);
++		static float lastDrive = 0.0f;
++		if (getenv("FT_SINKREPEAT") && gNow - lastDrive > 6.0f)
++			sinkDriven = false;
 +		if (bb && !sinkDriven && gNow > 3.0f && static_cast<size_t>(sinkTest) < gSinks.size())
 +		{
 +			auto& k = gSinks[sinkTest];
@@ -171,6 +174,7 @@ index 94bd398..dfc9344 100644
 +			bb->CollisionComp = nullptr;
 +			bb->StuckCounter = 0;
 +			sinkDriven = true;
++			lastDrive = gNow;
 +		}
 +		static int m = 0;
 +		if ((m++ % 16) == 0)
@@ -259,7 +263,7 @@ index 94bd398..dfc9344 100644
  void ft_accel_register(const FtAccelDbgEntry& e)
  {
  	gAccels.push_back(e);
-@@ -61,14 +304,19 @@ static void trace(const char* tag, TPinballTable* t)
+@@ -61,14 +308,19 @@ static void trace(const char* tag, TPinballTable* t)
  	int bx = em->box_x(b->Position.X), by = em->box_y(b->Position.Y);
  	fprintf(stderr,
  	        "DBG-trace %-6s pos=(%.3f,%.3f,%.3f) dir=(%.3f,%.3f) spd=%.3f mask=0x%x comp=%p"
@@ -281,7 +285,7 @@ index 94bd398..dfc9344 100644
  	if (!ft_accel_enabled())
  		return;
  	auto table = pb::MainTable;
-@@ -138,13 +386,13 @@ void ft_accel_tick(float dtSec)
+@@ -138,13 +390,13 @@ void ft_accel_tick(float dtSec)
  		fprintf(stderr, "\nDBG-accel ==== inject accel[%zu] %s center=(%.2f,%.2f) r=%.3f group=0x%x "
  		        "approach dir=(%.3f,%.3f) ====\n",
  		        target, a.Name ? a.Name : "?", a.Center.X, a.Center.Y, r, a.Group, d.X, d.Y);
@@ -298,7 +302,7 @@ index 94bd398..dfc9344 100644
  		b->CollisionComp = nullptr;
  		b->CollisionMask = a.Group;
  		b->StuckCounter = 0;
-@@ -187,7 +435,7 @@ void ft_accel_tick(float dtSec)
+@@ -187,7 +439,7 @@ void ft_accel_tick(float dtSec)
  	b->Direction.X = n.X;
  	b->Direction.Y = n.Y;
  	b->Direction.Z = 0.0f;
@@ -566,10 +570,17 @@ index 4a5dc0e..e492cf7 100644
  		ball->CollisionDisabledFlag = true;
  		ball->throw_ball(&sink->BallThrowDirection, sink->ThrowAngleMult, sink->ThrowSpeedMult1,
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
-index 579644f..d742785 100644
+index 579644f..697faae 100644
 --- a/SpaceCadetPinball/control.cpp
 +++ b/SpaceCadetPinball/control.cpp
-@@ -867,14 +867,22 @@ void control::make_links(TPinballTable* table)
+@@ -1,5 +1,6 @@
+ #include "pch.h"
+ #include "control.h"
++#include "FtAccelDebug.h" // FTDBG
+ 
+ #include "midi.h"
+ #include "pb.h"
+@@ -867,14 +868,33 @@ void control::make_links(TPinballTable* table)
  		if (simples[i])
  			make_component_link(*simples[i]);
  
@@ -579,6 +590,17 @@ index 579644f..d742785 100644
 -	// a null dereference; the backdoor's idle "credits" scroll reached one and crashed
 -	// Dragon's Keep. Pointing the tag at the info box here matches what those tables do
 -	// anyway and fixes all 88 at once. Space Cadet has both, so this never fires for it.
++	if (ft_accel_enabled() || ft_autoplay_enabled()) // FTDBG
++	{
++		for (size_t i = 0; i < CurrentTable->ScoreComponentCount && scores; i++)
++			if (!scores[i].Tag.GetComponent())
++				fprintf(stderr, "DBG-link  UNLINKED score  %s\n", scores[i].Tag.Name);
++		for (size_t i = 0; i < CurrentTable->SimpleComponentCount && simples; i++)
++			if (simples[i] && !simples[i]->GetComponent())
++				fprintf(stderr, "DBG-link  UNLINKED simple %s\n", simples[i]->Name);
++	}
++
++
 +	// This file is Space Cadet's rule set, but parts of it run on every table: the
 +	// backdoor's idle "credits" and "quote" scrolls, the cheats, the high-score check.
 +	// Those reach 88 unguarded mission_text_box->Display() calls and a handful of
@@ -599,3 +621,23 @@ index 579644f..d742785 100644
  }
  
  void control::ClearLinks()
+diff --git a/SpaceCadetPinball/control.h b/SpaceCadetPinball/control.h
+index 78c3738..54a90a5 100644
+--- a/SpaceCadetPinball/control.h
++++ b/SpaceCadetPinball/control.h
+@@ -43,6 +43,15 @@ struct component_tag : component_tag_base
+ 	void SetComponent(TPinballComponent* comp) override
+ 	{
+ 		Component = dynamic_cast<T*>(comp);
++
++		// A tag typed more narrowly than the object binds to nullptr here, and the
++		// assert below is a no-op in a release build -- so the rules get a null they
++		// then dereference, far from the cause. Dragon's Keep's light_sweeps was
++		// declared component_tag<TLightGroup> after type 1038 gained its real class
++		// TLightSweep, which derives from TPinballComponent instead; Slay Dragon
++		// segfaulted on its fire sweep. Say so out loud rather than binding silently.
++		if (comp && !Component)
++			fprintf(stderr, "control: tag \"%s\" has the wrong component type\n", Name);
+ 		if (comp)
+ 			assertm(Component, "Wrong component type");
+ 	}

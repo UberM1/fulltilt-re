@@ -37,6 +37,7 @@
 #include "TPlunger.h"
 #include "TSound.h"
 #include "TTextBox.h"
+#include "FtAccelDebug.h" // FTDBG
 
 namespace dragon {
 
@@ -229,12 +230,18 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 	TLight* otherLight = (caller == a_sink1) ? lite65 : lite66;
 
 	const int quest = info_text_box->MessageField;
+	if (ft_accel_enabled() || ft_autoplay_enabled())
+		fprintf(stderr, "DBG-lizard common caller=%p a_sink1=%p a_sink2=%p other=%p quest=%d lite63=%d\n",
+		        static_cast<void*>(caller), static_cast<void*>(a_sink1), static_cast<void*>(a_sink2),
+		        static_cast<void*>(otherSink), quest, lite63 ? lite63->MessageField : -999); // FTDBG
 
 	if (quest == ModeNormal)
 	{
 		// One counter for both sinks, parked on v_lite63's MessageField.
 		if (++lite63->MessageField < 2)
 		{
+			if (ft_accel_enabled() || ft_autoplay_enabled())
+				fprintf(stderr, "DBG-lizard branch=first-hit eject-from=%p\n", static_cast<void*>(otherSink)); // FTDBG
 			tabc16wave->Play(nullptr, "FireLizardSink");
 			otherSink->Message(MessageCode::TSinkResetTimer, -1.0f);
 			return;
@@ -246,6 +253,8 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 		// The pending flag makes whichever sink next swallows the ball park it in
 		// s_hole118 while the quest-start offer is up. It is cleared again before
 		// TryStartSelectedQuest because that call itself takes the ball.
+		if (ft_accel_enabled() || ft_autoplay_enabled())
+			fprintf(stderr, "DBG-lizard branch=second-hit, trying quest start\n"); // FTDBG
 		KeepAnnouncement = true;
 		if (CheckDragonFlurry())
 			return; // D-R-A-G-O-N completed: mode 0xf owns the ball now
@@ -255,6 +264,8 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 
 		// No quest was selected, so nothing took the ball: hand it back. a_sink1
 		// unconditionally -- this is one of the two paths that does *not* swap sinks.
+		if (ft_accel_enabled() || ft_autoplay_enabled())
+			fprintf(stderr, "DBG-lizard branch=no-quest, eject from a_sink1=%p\n", static_cast<void*>(a_sink1)); // FTDBG
 		a_sink1->Message(MessageCode::TSinkResetTimer, -1.0f);
 		return;
 	}
@@ -301,6 +312,9 @@ void FireLizardSinkCommon(TPinballComponent* caller)
 // 0x00425ea0 -- a_sink1 (skeleton: a_sink1Control)
 void FireLizardSink1Control(MessageCode code, TPinballComponent* caller)
 {
+	if ((ft_accel_enabled() || ft_autoplay_enabled()) && code == MessageCode::ControlCollision)
+		fprintf(stderr, "DBG-lizard sink1 handler entered caller=%p mode=%d\n",
+		        static_cast<void*>(caller), info_text_box ? info_text_box->MessageField : -999); // FTDBG
 	if (code != MessageCode::ControlCollision)
 		return;
 
@@ -346,6 +360,9 @@ void FireLizardSink1Control(MessageCode code, TPinballComponent* caller)
 // a_sink1's twin, down to the register allocation; two functions in the original.
 void FireLizardSink2Control(MessageCode code, TPinballComponent* caller)
 {
+	if ((ft_accel_enabled() || ft_autoplay_enabled()) && code == MessageCode::ControlCollision)
+		fprintf(stderr, "DBG-lizard sink2 handler entered caller=%p mode=%d\n",
+		        static_cast<void*>(caller), info_text_box ? info_text_box->MessageField : -999); // FTDBG
 	if (code != MessageCode::ControlCollision)
 		return;
 
