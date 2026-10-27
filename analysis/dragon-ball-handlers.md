@@ -1377,9 +1377,29 @@ listings and have moved into the body: the "other sink" polarity (§3.1 — real
 missing plunger relaunch (§3.3.2 — real), and `a_kout2->MessageField`'s dual use
 (§4.3 — real, and the counter half is vestigial).
 
-The `TSinkResetTimer` argument is also now settled for all six tower entrances. Since
-`TSink::Message` substitutes the DAT-configured `TimerTime` only for a *negative* value,
-`0.0` means "eject immediately" and `-1.0` means "use the configured delay":
+The `TSinkResetTimer` argument is also now settled for all six tower entrances. The
+reading it rests on is no longer an inference from upstream -- which would have been
+cross-build evidence, since upstream decompiled `pinball.exe` and `CADET.EXE` and not
+this binary. `DRAGON.EXE`'s own `TSink::Message` is at **0x418650** (vtable 0x4376c0,
+slot 1; slot 0 is the type getter at 0x41af50 returning 0x3f9 = object type 1017), and
+its `0x41` arm reads:
+
+```
+418670:  fld   DWORD PTR [esp+0xc]          ; value
+418674:  fcomp QWORD PTR ds:0x437338        ; the constant there is 0.0, read out
+41867d:  test  ah,0x1                       ; C0 -> value < 0.0
+418680:  je    0x418689                     ;   not less: keep value as given
+418682:  mov   eax,DWORD PTR [esi+0x7e]     ;   less:     substitute TimerTime
+418689:  push  0x418500 / push esi / push value
+418694:  call  0x41f6c0                     ; timer::set -- unconditional
+```
+
+So the timer is armed on **every** `0x41`, whatever the value; only a *negative* value is
+replaced by the DAT's `TimerTime`. `0.0` therefore means "eject immediately" and `-1.0`
+"use the configured delay" -- and upstream's `TSink::Message` is faithful, so no engine
+change follows. (This also disposes of a stray claim from an earlier pass that "0x38 only
+arms its timer when the value is strictly positive": 0x38 is `TBlockerEnable`, a different
+class and a different message, not this one.)
 
 | Handler | out-of-quest kickout | in-quest unarmed kickout |
 |---|---|---|
@@ -1395,3 +1415,52 @@ with `0.0` by its own handler but `-1.0` by `a_sink13`'s. This looks like hand-w
 inconsistency rather than design, but it is observable behaviour and should be ported
 literally. Only `a_sink18` was mis-rendered by the decompiler; `a_sink17`'s two `0.0`s were
 correct in the `.c` file.
+
+---
+
+## Appendix: the sinks measured, not argued
+
+Every claim above about which sink ejects the ball is a reading of the 1996 code. This
+appendix is the other kind of evidence: the port actually run, with a ball driven into
+each sink and the eject waited for.
+
+The engine's debug harness (`reference/SpaceCadetPinball/FtAccelDebug.cpp`) does the
+driving. `FT_AUTOPLAY=1 FT_SINKTEST=<n> FT_SINKREPEAT=1` teleports the ball into sink
+*n* every six seconds; `TSink` logs `HIT` when it swallows and `EJECT` when it hands a
+ball back. Headless, 60 s per sink:
+
+| sink | hits | ejects |
+|---|---|---|
+| `a_sink1` (fire lizard, left) | 9 | 9 |
+| `a_sink4` (well) | 10 | 10 |
+| `a_sink9` (tower) | 10 | 10 |
+| `a_sink10` (tower) | 10 | 10 |
+| `a_sink13` (tower) | 9 | 9 |
+| `a_sink15` (tower) | 10 | 10 |
+| `a_sink19` (dragon's mouth) | 10 | 10 |
+
+**68 swallows, 68 ejects. No ball was ever kept.**
+
+Four sinks are missing from the table because the harness cannot drive a ball into them,
+not because they failed: `a_sink2`, `a_sink16`, `a_sink17` and `a_sink18` have AABBs a
+fraction of a unit thick, or a collision group the teleported ball does not carry, so the
+drive flies through and no `HIT` is logged at all. `a_sink2` is covered anyway — it is
+the sink `a_sink1`'s handler ejects from, and it did so nine times out of nine.
+
+The fire lizard pair is worth singling out, because the two-hit path is the one that was
+reported stuck in play. The log shows the whole sequence working:
+
+```
+HIT a_sink1 / lizard common quest=2 lite63=0 / branch=first-hit  -> MSG a_sink2 (2.0)  -> EJECT a_sink2
+HIT a_sink1 / lizard common quest=2 lite63=1 / branch=second-hit -> MSG a_sink1 (0.0)  -> EJECT a_sink1
+HIT a_sink1 / lizard common quest=4 ...                          -> MSG a_sink2 (2.0)  -> EJECT a_sink2
+```
+
+Mode 2 (Idle) to mode 4 (Dragon Hoard) to mode 7 (Dragon Pass): the second hit starts a
+quest and the ball still comes back, which is the case that could not come back before
+`StartSelectedQuest`'s callees were wired. Note the `0.0` on the quest-start eject — the
+"eject immediately" value whose meaning is settled above.
+
+What this does **not** prove: that the scoring is right, that the right sink ejects in
+every mode, or that no *other* mechanism on the table keeps a ball. It proves the sinks
+give the ball back.
