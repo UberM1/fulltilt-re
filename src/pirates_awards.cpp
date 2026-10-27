@@ -216,9 +216,11 @@ void ResetGoldLights(int mode);
 // indicates. Bermuda Triangle's mode start primes it; AwardIndicatedWind steps it.
 void FlashIndicatedWind(bool on);
 
-// 0x00423630 -- state 0xd. pirates_part1.cpp declares the same routine as
-// StartJailBreak(); pirates_modes_entry.cpp owns the definition under part1's
-// transition table. UNVERIFIED only in that the two names must collapse to one.
+// 0x00423630 -- state 0xd. Resolved, and the collapse already happened:
+// pirates_modes_entry.cpp defines exactly one function for this address and it is spelled
+// StartJailBreak, which is what this file and pirates_part1.cpp both declare and call.
+// pirates_modes.cpp's `EnterJailBreak` declaration was the second name; it had no
+// definition and no call site, and it has been removed, so one address now has one name.
 void StartJailBreak();
 
 // ---------------------------------------------------------------------------
@@ -272,8 +274,15 @@ constexpr auto GroupGetLightCount = static_cast<MessageCode>(0x2a);
 constexpr auto GroupTurnOnNext = static_cast<MessageCode>(0x2d);
 
 // 0x4b, "arm the holding field", sent to the six s_magnet* and to the two kickouts.
-// UNVERIFIED: whether an unarmed magnet can still catch a ball is decided inside the
-// type-1042 component class, which is engine code and outside this corpus.
+//
+// Settled: an unarmed magnet cannot catch a ball at all. Type 1042's vtable is CADET.EXE
+// 0x00435640 (slot 0 at 0x0041aee0, `mov eax,0x412; ret`) and TMagnet::Message is
+// 0x004166c0: 0x4b sets ActiveFlag ([this+0x5]) to 1 and 0x4c clears it. The magnet's
+// capture circle is installed with &ActiveFlag -- the constructor at 0x00416873 passes
+// `lea ecx,[esi+0x5]` as the edge's ActiveFlagPtr -- and TEdgeManager skips every edge
+// whose ActiveFlag is clear, so an unarmed magnet is simply not in the world. Type 1012's
+// TKickout::Message (0x004163a0) does the same and additionally releases a ball it is
+// already holding when disarmed (0x00416443..0x00416473).
 constexpr auto HoldFieldEnable = static_cast<MessageCode>(0x4b);
 }  // namespace ft
 
@@ -363,12 +372,16 @@ const int IndicatedWindScores[4] = {125000, 250000, 500000, 1000000};
 // completed-group bitfield (bits 0..3 volcano, bits 4..6 parrot). That aliasing is in the
 // original and is safe only because the mode start zeroes the cell.
 //
-// UNVERIFIED -- and a real port hazard. pirates_modes.cpp *also* defines a cell for
-// 0x435cf8, under the name `ModeScratch`, so there are currently two globals for one DAT.
-// This file deliberately uses pirates_common.cpp's, because pirates_part1.cpp (which sets
-// the Sword Fight bits and calls AwardSpecialTreasureOrNext) uses that one; the
-// consequence is that Bermuda's step is not cleared by pirates_modes.cpp's mode start
-// until the duplicate collapses. Whoever merges them owns the fix.
+// Resolved, and the hazard is gone: there is one global for 0x435cf8, not two. The cell is
+// defined once, by pirates_common.cpp (`int mode_scratch_counter = 0;`), and every other
+// slice declares it extern -- pirates_modes.cpp at its own global block, pirates_part1.cpp,
+// pirates_part2.cpp and this file. The rival `ModeScratch` definition the note warned about
+// no longer exists anywhere in src/, so pirates_modes.cpp's mode start does clear the cell
+// this file reads, and Bermuda's step is zeroed with everything else.
+//
+// The aliasing *within* the cell is still real and still intentional in the original: the
+// same int is Bermuda's progressive step and Sword Fight's completed-group bitfield,
+// which is safe only because no mode start can overlap another.
 extern int mode_scratch_counter;
 
 // DAT_00435d04 -- the shared cursor, defined by pirates_modes.cpp. The Treasure Hunt "X"
@@ -467,10 +480,20 @@ static float AwardCoinAt(float time)
 
 // 0x00423720, as the other slices declare it.
 //
-// UNVERIFIED in signature only: the original returns the dwell it advanced to and three of
-// its five callers chain that return. Declared `void` here, so the chain is dropped at
-// those three sites; AwardCoinAt keeps the real behaviour for the two callers in this file
-// that do use it (CheckGoldComplete and the pouch payout).
+// Resolved, and nothing is lost. The original does return the dwell in st(0), and the
+// split across its five call sites is exact:
+//
+//   0x004239ba  chains it (CheckGoldComplete's tail: fstp [esp+4]; fld [esp+4]; ret)
+//   0x00425470  chains it, then `inc ds:0x435d04` (the wheel cursor)
+//   0x00425ad3  stores it into a local and keeps using it (the pouch payout loop)
+//   0x00424ff0  discards it (`fstp st(0)` immediately after the call)
+//   0x0042ac57  discards it, then tail-calls 0x00423460 (EnterIdle)
+//
+// so it is two discards and three chains, not three dropped chains. `AwardCoinAt` below
+// carries the float, and every chaining site in this file uses it; the `void AwardCoin()`
+// spelling the other slices declare is reached from exactly one place,
+// pirates_modes.cpp's skill-shot coin slot, which is the original's 0x0042ac57 -- a site
+// that discards the value anyway. The void wrapper is therefore faithful where it is used.
 void AwardCoin()
 {
 	AwardCoinAt(0.0f);

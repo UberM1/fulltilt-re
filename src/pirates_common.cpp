@@ -188,11 +188,20 @@ void ClearText(TTextBox* box)
 		box->Clear();
 }
 
-// `*(int*)(info_text_box + 0x5e) != 0`: the text box's own display timer. The
-// dispatcher re-spells its expiry as a mode tick, so this gates that.
+// `*(int*)(info_text_box + 0x5e) != 0`. The dispatcher re-spells the text box's timer
+// expiry as a mode tick, so this gates that.
+//
+// The field is CurrentMessage, not Timer -- settled against Full Tilt's own TTextBox.
+// TTextBox::Display is CADET.EXE 0x0041de40 (type 1033, vtable 0x00435858, Message at
+// 0x0041e110) and its first test is `cmp DWORD PTR [ebx+0x5e],0` at 0x0041de55, exactly
+// where upstream's TTextBox::DisplayInternal tests `CurrentMessage`; it then dereferences
+// the neighbouring [ebx+0x62] as PreviousMessage->Text ([[ebx+0x62]+4]) and
+// PreviousMessage->Glyph ([[ebx+0x62]+0x14]). So +0x5e = CurrentMessage and
+// +0x62 = PreviousMessage, and this predicate is "the queue is not empty", which is a
+// different thing from "a timer is pending" whenever a message is drawn with Timer == 0.
 bool AnnouncementPending(TTextBox* box)
 {
-	return box && box->Timer != 0;
+	return box && box->CurrentMessage != nullptr;
 }
 
 // vtable +0x18. The original returns the clip length; no caller here uses it.

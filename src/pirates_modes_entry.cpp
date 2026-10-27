@@ -168,7 +168,7 @@ enum
 // symbol font and renders them as the ASCII they happen to be, exactly as
 // pirates_common.cpp does for the other runs. Verified by dumping the bytes at
 // those three addresses, so the four glyph arguments
-// pirates_modes.cpp flagged UNVERIFIED at 0x423480..0x4235f0 are now settled:
+// pirates_modes.cpp had open at 0x423480..0x4235f0 are now settled:
 // three of the eleven setters show one of these, Tavern shows entry 0, and the
 // remaining seven show none.
 // ---------------------------------------------------------------------------
@@ -668,11 +668,11 @@ void StartLavaBall()
 
 // 0x00423630 -- start Jail Break (state 0xd), the brig-release multiball.
 //
-// pirates_modes.cpp declares this same routine as `EnterJailBreak` and
-// pirates_part1.cpp as `StartJailBreak`; part1's is the name that is actually
-// called (from the brig target's third hit), so that is the one defined here.
-// pirates_modes.cpp's `EnterJailBreak` declaration has no call site and can be
-// deleted or renamed by whoever owns that file.
+// One address, one name, as of now. pirates_part1.cpp and pirates_awards.cpp
+// both declare and call it as `StartJailBreak` (from the brig target's third
+// hit and from the award ladder), which is the spelling defined here;
+// pirates_modes.cpp's rival `EnterJailBreak` declaration had no definition and
+// no call site and has been removed.
 void StartJailBreak()
 {
 	ArmModeInProgressLight();
@@ -1049,11 +1049,26 @@ void EjectLavaSink(float delay)
 // The draw is `Rnd(3)`, and the arms are 0 -> a_sink17, 1 -> a_sink15,
 // 2 -> a_sink14.
 //
-// UNVERIFIED, in one argument only: Ghidra lost the operands of the a_sink14
-// call (`(**(code **)(*a_sink14 + 4))()` with no arguments shown). The other
-// two arms are `(0x41, -1.0)` and the a_sink14 arm is the same two instructions
-// in the listing, so it is taken to be identical. Settled by reading
-// 0x004236a0's tail in decomp/pirates/asm.
+// Settled from the listing, and the arguments really are identical -- the
+// compiler simply hoisted the two pushes above the second compare, which is
+// what Ghidra lost:
+//
+//   004236b6  call 0x0042dd0b              ; rand()
+//   004236bb  lea eax,[eax+eax*2]          ; *3
+//   004236be  cdq / and edx,0x7fff / add eax,edx / sar eax,0xf   ; >>15, i.e. Rnd(3)
+//   004236ca  test eax,eax / je 0x004236eb ; pick == 0
+//   004236ce  push 0xbf800000              ; -1.0f   <-- shared by BOTH remaining arms
+//   004236d3  cmp eax,1
+//   004236d6  push 0x41                    ; 0x41    <-- likewise
+//   004236d8  je 0x00423703                ; pick == 1 -> a_sink15 (0x0043b0cc)
+//   004236da  ...                          ; pick == 2 -> a_sink14 (0x0043b0e4)
+//   004236eb  ...                          ; pick == 0 -> a_sink17 (0x0043b0b4), its own
+//                                            push pair at 0x004236eb/0x004236f7
+//
+// The 0x004236ce/0x004236d6 pair dominates both the pick==1 and pick==2 arms,
+// so a_sink14 is called with exactly (0x41, -1.0f). dump_tags confirms the
+// three globals: 0x0043b0b4 a_sink17, 0x0043b0cc a_sink15, 0x0043b0e4
+// a_sink14, which is the 0/1/2 order below.
 void EjectHideawayAtRandom()
 {
 	if (tag_info_text_box.Component->MessageField == ModeIdle)

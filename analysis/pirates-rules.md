@@ -17,8 +17,13 @@ uses, or pinned by a static table in the EXE) · **[P] PROBABLE** (one clean rea
 Same engine, same build, same message-code numbering as Dragon's Keep: `TLight` codes
 unshifted, `TLightGroup`/`TSoloTarget`/`TPopupTarget`/`TBlocker` **+4**,
 gate/kickout/sink **+9**, `Control*` **+10**, `ControlCollision` = `0x4a` (**+11**).
-Component field offsets `+5` (enable byte), `+6` (`MessageField`), `+0x42/+0x46/+0x4e`
-(the three "lit" flags) are used exactly as in Dragon. **[C]**
+Component field offsets `+5` (`ActiveFlag`), `+6` (`MessageField`), `+0x42/+0x46/+0x4e`
+(`LightOnFlag`/`FlasherOnFlag`/`ToggledOnFlag`) are used exactly as in Dragon, and are now
+read out of the engine classes rather than inferred from use — §2.5.1. The piecewise table
+above also needs one caveat it did not have: several private codes sit **below** the +4
+band because Full Tilt *added* them, not because they shifted. `0x39`–`0x3c` on a
+`TBlocker` and `0x45`/`0x48` on a `TTimer` are new codes with no upstream counterpart, so
+arithmetic against upstream's enum says nothing about them. **[C]**
 
 ---
 
@@ -509,17 +514,95 @@ of waiting for the sweep to finish.
 | `0x50` | tick / mode started (`ControlMissionStarted`) | every controller |
 | `0x52` | **teardown** | ″ |
 | `0x53` | **abort** (drain); in the two multiballs, "has the ball count fallen back to 1?" | `Pirates_drain_Control`, `FUN_0042d480`, `FUN_0042d590` |
-| `0x56` | ramp traversal complete | `s_rexit8` (ship wire ramp) |
-| `0x4b` / `0x4c` | **magnet / captive device enable, disable** | `s_magnet1`…`6`, `a_kout1`, `a_kout2`, `a_kick1` (`FUN_0042d480`/`0x42d590`/`0x42d730`) |
-| `0x4d` | sent to the previous scoring component (no-op) | `FUN_004232c0`/`00423310`/`00423350` |
-| `0x1c` | light-group **rotate** | flippers (§6) |
+| `0x54` | the ball has **mounted the ramp plane** (its collision mask switched to the ramp's) | `TRamp::Collision`, CADET.EXE `0x004177d0` arm `0x0041791d` |
+| `0x55` / `0x56` | the ball crossed the ramp's **wall 1 / wall 2** (attributes 1301 / 1302) | ″, arms `0x004179a5` / `0x004179e4`; `s_rexit8` (ship wire ramp) |
+| `0x4b` / `0x4c` | **arm / disarm** a holding device | `s_magnet1`…`6`, `a_kout1`, `a_kout2`, `a_kick1` (`FUN_0042d480`/`0x42d590`/`0x42d730`) |
+| `0x4d` | sent to the previous scoring component — **not** a no-op: the lane-ladder handlers answer it by clearing their combo group | `FUN_004232c0`/`00423310`/`00423350` |
+| `0x1c` | light-group **rotate** (= `TLightGroupStepBackward`, 24 at +4; the lit pattern walks toward higher indices, i.e. rightward) | flippers (§6) |
+| `0x1b` | **start light sweep** *n* on the type-1038 `light_sweeps` | `TLightSweep::Message`, CADET.EXE `0x0040c660` arm `0x0040c69f` |
 | `0x2d` | light-group "light the next one" | coin, map-piece groups |
-| `0x39` | blocker *restart timeout* (Dragon's `0x3a` neighbour) | `a_blocc/e/f/g` everywhere |
+| `0x39` | **set a blocker's position index** to `(int)floor(value)`; `-1` retracts it | `TBlocker::Message`, CADET.EXE `0x00414f80` arm `0x004150ce` |
+| `0x3a` | **animate a blocker toward** position `(int)floor(value)` | ″, arm `0x004151fb` |
+| `0x45` (to `mode_timer`) | **arm the timer** for `value` seconds; a negative value only cancels | `TTimer::Message`, CADET.EXE `0x0041b380` arm `0x0041b3bc` |
+| `0x48` (to `mode_timer`) | **read the remaining time, in milliseconds** (`×1000.0`, floored) | ″, arm `0x0041b3fb` |
 | `1` | flipper-button notification | `a_flip1`/`a_flip2`, `FUN_0042b820` |
 
-`0x4b`/`0x4c` have no Space Cadet counterpart and no Dragon use; "enable/disable the
-holding field" is inferred from behaviour (`0x4b` at mode start, `0x4c` on capture and at
-teardown). **[P]** for the names, **[C]** for the semantics.
+#### 2.5.1 Four of these were wrong, and the engine classes settled them **[C]**
+
+An earlier revision of this table had `0x39` as "blocker restart timeout", `0x4b`/`0x4c`
+as names inferred from behaviour alone, `0x56` as "ramp traversal complete", and `0x4d` as
+a no-op. All four are now read directly out of the component classes, which are **in
+`CADET.EXE`** even though Space Cadet's data never constructs some of them — the same route
+§2.4 of `docs/how-this-was-done.md` used for the seven missing object types. Each class is
+found from its vtable, whose slot 0 is a type-getter stub (§0.1):
+
+| type | class | vtable | `Message` |
+|---|---|---|---|
+| 1011 | `TBlocker` (`a_bloc*`, `a_cannon`) | `0x00435560` | `0x00414f80` |
+| 1012 | `TKickout` (`a_kout1/2`) | `0x00435620` | `0x004163a0` |
+| 1014 | `TKickback` (`a_kick1/2`) | `0x00435600` | `0x00415d70` |
+| 1021 | `TRamp` (`a_ramp*`) | `0x00435680` | none — slot 1 is the generic `0x004135b0`; it only *raises* codes, from `Collision` at `0x004177d0` |
+| 1032 | `TTimer` (`mode_timer`) | `0x00435778` | `0x0041b380` |
+| 1033 | `TTextBox` (`info_text_box`) | `0x00435858` | `0x0041e110` |
+| 1038 | `TLightSweep` (`light_sweeps`) | `0x00435228` | `0x0040c660` |
+| 1042 | `TMagnet` (`s_magnet*`) | `0x00435640` | `0x004166c0` |
+
+**`0x39` is a position index, not a duration.** `TBlocker::Message` jump-tables `0x37`–`0x3c`
+at `0x00415398` and separately answers `0x45`, `0x3f3`, `0x3fe`, `0x402`. The `0x39` arm
+floors the float to an int, stores it at `[this+0x7e]`, clears the old position's collision
+byte at `[this + old + 0x76]`, sets the new one and shows sprite `index`; a negative index
+retracts the blocker and blanks the sprite. So a Full Tilt `TBlocker` is a multi-position
+moving wall. The numbering objection dissolves because `0x39` was never in the
+Disable/Enable pair: CADET.EXE's own `DrainBallBlockerControl` (`0x00423480`) sends `0x38`
+exactly where upstream's sends `TBlockerEnable` (52, i.e. +4) and `0x45` exactly where
+upstream's sends `TBlockerRestartTimeout` (59). The family is therefore `0x37` Disable,
+`0x38` Enable, `0x45` RestartTimeout, with `0x39`–`0x3c` four codes Full Tilt added below
+them (`0x3b` extends to the last position, `0x3c` retracts, both by sending themselves
+`0x39`).
+
+**`0x4b`/`0x4c` mean "arm/disarm", but by three different mechanisms.** `TMagnet`: `0x4b`
+sets `ActiveFlag` (`[this+5]`) to 1, `0x4c` clears it and kills the hold timer; the capture
+circle is installed with `&ActiveFlag` (`0x00416873`, `lea ecx,[esi+0x5]`) and
+`TEdgeManager` skips edges whose `ActiveFlag` is clear. `TKickout`: the same pair, plus
+`0x4c` releases a ball already held (`0x00416443`–`0x00416473`). `TKickback`: `0x4c` sets a
+*suppression* dword `[this+0x86]` to 1 and `0x4b` clears it, and in
+`TKickback::Collision` (`0x00415ba0`) that dword only skips the arming of the kick timer at
+`0x00415bd7` — `DefaultCollision` still runs at `0x00415c05`.
+
+**`0x54`/`0x55`/`0x56` are not enter/exit/abandon.** `TRamp::Collision` branches on which
+edge was hit. The plane edge carries ramp data at `[edge+0xd]`; when present the ramp
+installs its plane on the ball, recomputes its height, and compares the ball's collision
+mask `[ball+0xf7]` against the ramp's `[this+0x82]` — already equal means nothing is raised
+(`0x00417910`), otherwise the ball is switched onto the ramp's mask and `0x54` is raised.
+`edge == [this+0x9e]` is a plain surface hit and raises `0x4a`. `edge == [this+0x96]` is
+wall 1 and raises `0x55`; anything else is wall 2 and raises `0x56`. So `0x54` is "the ball
+is on my ramp now", which is exactly how `a_ramp8`'s `0x54` arm behaves (it clears the path
+by retracting `a_blocg`), and which of `0x55`/`0x56` reads as enter or exit is a property of
+the 1301/1302 masks in `PIRATES.DAT`, not of the codes.
+
+**The three "lit" flags are confirmed field-for-field.** `TLight::Message` is CADET.EXE
+`0x0040a490`, jump-tabling codes 0–0x1a at `0x0040ac30`; its first five arms name the
+layout against upstream's own `TLight::Message`:
+
+| binary code | upstream | arm | writes / reads |
+|---|---|---|---|
+| 0 | `TLightTurnOff` | `0x0040a4eb` | `[+0x42] = 0`, then tests `0x46`/`0x4a`/`0x4e` |
+| 1 | `TLightTurnOn` | `0x0040a534` | `[+0x42] = 1`, then the same three |
+| 2 | `TLightGetLightOnFlag` | `0x0040a57d` | returns `[+0x42]` |
+| 3 | `TLightGetFlasherOnFlag` | `0x0040a588` | returns `[+0x46]` |
+| 4 | `TLightFlasherStart` | `0x0040a593` | `[+0x46] = 1`, `[+0x4e] = 0` |
+
+so the run is `+0x42` `LightOnFlag`, `+0x46` `FlasherOnFlag`, `+0x4a` `ToggledOffFlag`,
+`+0x4e` `ToggledOnFlag`, `+0x52` `TurnOffAfterFlashingFg`, `+0x56` `LightOnBmpIndex`, all
+stored as dwords where upstream declares `bool`. The drain reads the same three on
+`v_lite569` at `0x00426166`/`0x0042616b`/`0x00426170`.
+
+**`TTextBox + 0x5e` is `CurrentMessage`, not a timer.** `TTextBox::Display` (`0x0041de40`)
+tests `[ebx+0x5e]` at `0x0041de55` exactly where upstream's `DisplayInternal` tests
+`CurrentMessage`, and immediately dereferences the neighbouring `[ebx+0x62]` as
+`PreviousMessage->Text` (`[[ebx+0x62]+4]`) and `PreviousMessage->Glyph`
+(`[[ebx+0x62]+0x14]`). So `+0x5e` = `CurrentMessage`, `+0x62` = `PreviousMessage`, and the
+dispatcher's `*(int*)(info_text_box + 0x5e) != 0` means "the message queue is not empty".
 
 ---
 
@@ -1269,6 +1352,100 @@ order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
   for that mode (3016 / 3053 / 3025 / 3045 / severity / 3051 / 3052 / 3054), eight for
   eight.
 
+**Closed by the engine component classes in `CADET.EXE` (§2.5.1):**
+
+* ~~`0x39`'s meaning~~ → it sets a blocker's **position index**, not a timeout; `TBlocker` is
+  a multi-position moving wall and `0x45` is the real `TBlockerRestartTimeout`. The rules
+  files now all send `0x39` rather than upstream's constant 59. **[C]**
+* ~~`0x4b`/`0x4c` semantics (old open item 3)~~ → a disarmed **magnet** or **kickout** is
+  removed from the world (its edge carries `&ActiveFlag` and `TEdgeManager` skips cleared
+  edges), and a disarmed kickout also spits out any ball it holds; a disarmed **kickback**
+  still collides and merely declines to kick. So the flat 1,000,000 of `a_kout1`/`a_kout2`
+  is **not** reachable while they are disarmed. **[C]**
+* ~~`0x54`/`0x55`/`0x56`~~ → plane-mounted / wall 1 crossed / wall 2 crossed, from
+  `TRamp::Collision`. **[C]**
+* ~~`0x45`/`0x48` on `mode_timer`~~ → arm (negative = cancel only) and read-remaining in
+  **milliseconds**, from `TTimer::Message`. **[C]**
+* ~~`0x1b`~~ → `TLightSweep::Message` uses the float as the DAT **state index** for
+  attributes 1600/1602/1604. **[C]**
+* ~~`TTextBox + 0x5e`~~ → `CurrentMessage`. **[C]**
+* ~~`+0x42`/`+0x46`/`+0x4e`~~ → `LightOnFlag`/`FlasherOnFlag`/`ToggledOnFlag`, with
+  `+0x4a`/`+0x52`/`+0x56` named as well. **[C]**
+
+**Closed by `PIRATES.DAT` (`game/WIN95/FULLTILT/PIRATE/PIRATES.DAT`, parsed with the
+`PARTOUT(4.0)` layout in `reference/SpaceCadetPinball/partman.cpp`):**
+
+* ~~type **1020**~~ → `TLightRollover`, and `table_objects`' iattribute 1025 gives the
+  thirteen objects that use it, all `v_mlite*`: `v_mlite7`, `8`, `37`–`40`, `42`, `43`,
+  `45`–`47`, `49`, `111`. The bumpers are 1005 (and there are **three**, `a_bump1`–`3`, not
+  four) and `a_rebo1`/`a_rebo2` are plain type-1000 walls, so the "bumpers and rebounds by
+  elimination" guess was wrong: Storm's +50,000, Treasure Hunt's +20,000 and Peg Leg's
+  Loot's +50,000 are paid for crossing a **lit rollover**. **[C]**
+* ~~`lane_winds_light_group`~~ → group 531, iattribute 1027 = `[401..405]` =
+  `v_lite533`–`v_lite537`, the five W-I-N-D-S letters over the five rollover lanes (two
+  left, `a_roll5`/`a_roll4`; three right, `a_roll1`/`a_roll2`/`a_roll3`). The two island
+  groups are 532 (`v_lite538`–`540`) and 533 (`v_lite541`–`543`). **[C]**
+* ~~the six keg magnets' lights (§5.4's 1:1 pairing)~~ → `keg_light_group` is group 550 with
+  iattribute 1027 = `[500..505]` = `v_lite560`–`v_lite565`, which matches the six handlers'
+  own light globals read out of their listings (`0x0043bd6c`, `…bd84`, `…bd9c`, `…bdb4`,
+  `…bdcc`, `…bde4`, stride 0x18). No longer asserted from `.data` ordering. **[C]**
+* ~~`v_lite504`/`v_lite505`~~ → groups 412 and 413, 8×9 px at screen (244,146) and
+  (233,144), i.e. on the blocker passage immediately under `a_bloce` and `a_blocf` — not a
+  "mode in progress" banner pair. **[C]** for the location, **[P]** for the route reading.
+* ~~which outlane the two kickbacks guard~~ → **both are on the left**, which the rules
+  files had as opposite outlanes. Attribute 600: `a_kick2` X 5.23–6.25 / Y 12.98,
+  `s_bwal610` X 5.21–6.54 / Y 11.70–13.67 (overlapping it), `v_lite544` X 5.70 / Y 12.74
+  (on it), `a_kick1` X 6.92–7.94 / Y 14.02, drain at X 0. Positive X is screen-left.
+  `a_kick1` is the outer and lower of the pair. **[C]** for the geometry, **[U]** for which
+  one the manual calls the outlane.
+* ~~the glyph tokens~~ → indices into group **237, `font2`**, the table's symbol font, which
+  is why the original passes a fourth `Display` argument of 1 for them. (Which picture each
+  code draws is still unrendered, but the mechanism is no longer a guess.) **[C]**
+* the **music tracks** → see the new entry below.
+
+**Closed by `PIRATES.EXE`'s music loader, and it was four roles wrong:**
+
+* `0x004231d7` loads **six** tracks by the literal names `"tabb1"`…`"tabb6"` (strings at
+  `0x0043d1c8` + 8*n) into the handle globals `0x0043ab80`, `…84`, `…88`, `…8c`, `…90`,
+  `…94` in that order. There is no seventh load: `0x00423238` copies `0x0043ab90` into
+  `0x0043ab98`, so the **game-over music is an alias of TABB5**. The install confirms it —
+  only `TABB1.MID`–`TABB6.MID` exist in `game/WIN95/FULLTILT/PIRATE/SOUND`. Each role is
+  pinned by the global its controller pushes into `0x0040eb50`:
+  TABB1 idle (`0x0042abb8`), TABB2 attack ship / sword fight (`0x0042af64`, `0x0042cd48`),
+  TABB3 treasure hunt / Peg Leg's (`0x0042b25e`, `0x0042d097`), TABB4 tavern
+  (`0x0042b637`), TABB5 Bermuda (`0x0042c2bd`) and game over (`0x0042bfff`), TABB6 storm /
+  mutiny (`0x0042c62c`, `0x0042cab5`). `0x0042322c`–`0x004232ad` then substitutes TABB1 for
+  any handle that failed to load. **[C]**
+
+**Closed by full-image reference censuses (objdump over all of `.text`,
+`0x00401000`–`0x00435000`):**
+
+* `DAT_0043aba0` is **write-only in the shipped binary** — two stores, `0x00425f62` (in
+  `s_launcher1`'s handler) and `0x0042d74f` (dispatcher region), and no load anywhere. It
+  is not a cell whose reader is waiting to be found. **[C]**
+* `TPinballTable + 0x1b2` (`TiltLockFlag`) is **never** stored a negative value in either
+  `PIRATES.EXE` or `CADET.EXE`; every immediate store is 0 or 1. The drain's game-over
+  predicate is also not `!= -1` but `>= 0`: `0x0042627c` computes
+  `inc / cmp 1 / sbb / inc`. The branch is therefore dead and `game_over_phase` is always
+  1. **[C]**
+* `DAT_00435d30` has four writers — `0x00425df4` = 1 (`SkulduggeryCompleteIdle`),
+  `0x0042aca2` = 1 (the skill-shot controller's `0x4f`), `0x0042aa29` = 1 (the N-M-A-X
+  cheat, only in state 2), `0x0042aba1` = 0 (Idle's `0x4f`) — and nine readers, all
+  `cmp …,0` in mode controllers' "sweep finished" arms. The **launcher does not touch it**,
+  so the note that pointed at `0x00425e70` to settle it was pointing at nothing. Its
+  meaning is "a mode started with a ball already live, do not feed another", which makes
+  this document's "not in the skill shot" the inverse and the rules' `SkillShotActive` too
+  narrow. The port was also missing the `0x00425df4` write entirely; it is restored. **[C]**
+* `DAT_00435d04` (the shared cursor) has exactly nine references — reads at `0x00424597`,
+  `0x00425117`, `0x00425440`; `add` at `0x0042459c`; `inc` at `0x0042523c`, `0x00425484`;
+  zeroing stores at `0x004245c7`, `0x0042512f`, `0x0042aada`. There is no fourth writer and
+  no save/restore pair, which confirms item 2 below as a real gap rather than an unread
+  one. **[C]** for the census, **[U]** for the intent.
+* `tabb02wave`'s two `.data` slots are two `component_tag` records (bases `0x0043c0b0`,
+  `0x0043c158`) with two *copies* of the same name string (`0x0043c0a0`, `0x0043c148`), and
+  `PIRATES.DAT` has exactly one group called `tabb02wave` (group 73). Binding is by name
+  through `record_labeled`, so both tags resolve to the same `TSound`. **[C]**
+
 **Still open — and these are genuinely open, not awaiting a listing:**
 
 1. `Pirates_a_sink4_Control` (`0x4283f0`) decompiles into stack-byte noise in three of its
@@ -1283,12 +1460,14 @@ order is a **permutation** (`DAT_0043d0f0`) rather than the identity.
    the aliasing is a deliberate single "wheel position" concept or a second bug of the
    `v_lite551` kind cannot be decided from the code alone; it needs the table in motion.
    **[U]**
-3. `0x4b` / `0x4c` semantics. Both are sent to magnets and kickouts as
-   "enable / disable the holding field", and `FUN_0042d730` disarms every one of them at
-   end of game — but whether a *disarmed* device can still capture a ball (and so whether
-   the flat 1,000,000 of `a_kout1`/`a_kout2` is reachable outside its mode) is decided
-   inside the component class. **That is engine code and is not in this corpus at all**, so
-   no amount of reading the table rules will settle it. **[U]**
+3. ~~`0x4b` / `0x4c` semantics.~~ **Closed.** The reasoning that retired it is worth keeping,
+   because the item's own conclusion — "that is engine code and is not in this corpus at
+   all, so no amount of reading the table rules will settle it" — was right about the table
+   rules and wrong about the corpus. The component classes are all in `CADET.EXE`, which
+   *is* available; §2.4 of `docs/how-this-was-done.md` had already established that route
+   for the seven missing object types, and it applies to every private message code too.
+   See §2.5.1: a disarmed magnet or kickout is out of the world, a disarmed kickback is
+   not. **[C]**
 4. **`simple_components[]` has 192 entries** against the score table's 74, so ~118
    components are bound with no handler of their own. I used it only to resolve
    `v_lite527`; a full sweep against the lights referenced in this document has not been

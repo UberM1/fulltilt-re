@@ -218,8 +218,17 @@ extern TSound*& tabb87wave; // keg magnet grab
 // pirates_part1.cpp resolved the four slots starting at DAT_0043aac4 to the single
 // characters "6".."9", and 0x43aac4 - 0x43aaa0 is nine entries, so the table is one
 // contiguous run of tokens and WindsGlyph below is the entry just past the tavern eight.
-// UNVERIFIED: what the eight tavern tokens and the WINDS token expand to. Dumping
-// PIRATES.DAT's message groups would settle it; nothing in the rules depends on the text.
+// Half settled. The glyph *mechanism* is pinned: these tokens are indices into
+// PIRATES.DAT group 237, named "font2", which is the table's symbol font -- the same group
+// the engine's TTextBox::DisplayGlyph selects through score::glyph_fontp, and the reason
+// the fourth Display argument is 1 for these and 0 for resource strings. Space Cadet's
+// data has no font2 group, which is why upstream never needed the path. The bytes
+// themselves are dumped and exact: pirates_modes_entry.cpp lists the whole stride-4 run
+// from 0x43aaa0 ("333".."444", then "5" for WINDS, then "6".."9" for the lanes).
+//
+// UNVERIFIED, and now only this: which *picture* each token draws, i.e. what glyph sits at
+// font2's character slot for ASCII '3'..'9'. Rendering group 237's MsgFont character data
+// for those codes would show it. Nothing in the rules depends on the pictures.
 extern const char TavernWindowGlyphs[8][4];
 
 // DAT_0043aac0 -- the W-I-N-D-S token shown by s_trip11; entry 8 of the same table.
@@ -236,33 +245,68 @@ extern const char WindsGlyph[4];
 
 namespace FtMessageCode {
 // 0x39, sent only to blockers (a_blocc/e/f/g) and to a_cannon, 82 times across the corpus.
-// The float is a hold time: 0.0 closes it now, a positive value holds it that long, -1.0
-// holds it indefinitely -- which is what every post-ejection site passes.
 //
-// Arithmetically 0x39 is 57, which in the +4 band would be upstream's TGateDisable (53),
-// and that cannot be what a blocker does with it; upstream TBlocker handles only
-// Disable/Enable/RestartTimeout (51/52/59 -> 0x37/0x38/0x3f). So this is a code FT added to
-// TBlocker, and the name follows pirates-rules.md §2.5.
-// UNVERIFIED: the name and the float's exact meaning. Disassembling FT's TBlocker::Message
-// is the only thing that would settle it; nothing in the rules depends on the answer, only
-// on reproducing the argument.
-constexpr auto TBlockerHold = static_cast<MessageCode>(0x39);
+// SETTLED, and the old reading -- "a hold time: 0.0 closes it now, a positive value holds
+// it that long, -1.0 indefinitely" -- was wrong. Full Tilt's TBlocker::Message is CADET.EXE
+// 0x00414f80, byte-identical at the same address in PIRATES.EXE; it jump-tables codes
+// 0x37..0x3c at 0x00415398 and also answers 0x45, 0x3f3, 0x3fe, 0x402. The 0x39 arm at
+// 0x004150ce converts the float with floor/ftol (0x42afff, 0x42afd8) and stores the
+// resulting INT at [this+0x7e] as a position index: it clears the per-position byte at
+// [this + old + 0x76], sets [this + new + 0x76] = 1 and shows sprite `new`, or -- for a
+// negative index -- clears everything and sets the sprite to none (0x004151eb).
+//
+// A Full Tilt TBlocker is therefore a multi-position moving wall: one visual state and one
+// collision-flag byte per position, index -1 meaning retracted/out of the world. 0.0 is
+// position 0, 1.0 is position 1, 3.0 is position 3, -1.0 is retracted -- which is still
+// what every post-ejection site passes, so the *behaviour* the rules wanted survives; it
+// is the mechanism that was misread.
+//
+// Why the arithmetic looked impossible: 0x39 is not in the Disable/Enable pair at all.
+// CADET.EXE's own DrainBallBlockerControl (0x00423480) sends 0x38 exactly where upstream's
+// DrainBallBlockerControl sends TBlockerEnable (52, +4) and 0x45 exactly where upstream
+// sends TBlockerRestartTimeout (59). So 0x37/0x38 are Disable/Enable, RestartTimeout is
+// 0x45, and 0x39-0x3c are four codes Full Tilt added under them.
+//
+// Not this file's to fix, but noted: the port's engine TBlocker has no case for 0x39 and
+// types [+0x7e] as `float UnknownP7e`. It is an int position index.
+constexpr auto TBlockerSetPosition = static_cast<MessageCode>(0x39);
 
-// 0x3a, the second half of the cannon fire. Dragon sends the same code to a_jaw and
-// a_sword -- animated mechanisms, never blockers -- so it is a mechanism trigger rather
-// than anything in the blocker band.
-// UNVERIFIED: the name. Dragon's two senders and this one agree on "start the animation",
-// which is as far as the rules code sees.
-constexpr auto TMechanismTrigger = static_cast<MessageCode>(0x3a);
+// 0x3a -- SETTLED as part of the same family, and it is a blocker code after all. The arm
+// at 0x004151fb stores floor(value) into [this+0x92] as a *target* position, kills the
+// motion timer [this+0x9a] and re-arms it with the component's own step interval
+// [this+0x96] and callback 0x00414f00. So 0x3a animates the blocker toward a position
+// where 0x39 snaps it there; 0x3b (0x00415245) is "animate to the last position" and
+// 0x3c (0x00415284) "retract", both implemented by sending 0x39 to themselves.
+//
+// That makes the cannon fire read cleanly: 0x39 with 3.0 puts a_cannon at position 3, and
+// 0x3a with 0.0 then walks it back to 0. a_cannon is type 1011 in PIRATES.DAT, the same
+// class as the four a_bloc*, so "animated mechanism" and "blocker" were never two things.
+// Dragon's a_jaw and a_sword are presumably 1011 as well; that is DRAGON.DAT's to confirm.
+constexpr auto TBlockerMoveToPosition = static_cast<MessageCode>(0x3a);
 
-// 0x4b / 0x4c -- "arm" and "disarm" the holding field of a magnet or a captive kickout.
-// Sent to the six s_magnet*, to a_kout1/a_kout2 and to a_kick1. These are *component*
-// Message calls, so they live in TMagnet's and TKickout's private code space, not in the
-// control band -- which is why it is only a coincidence that 0x4b and 0x4c fall exactly on
-// upstream's ControlEnableMultiplier (64) and ControlDisableMultiplier (65) at +11.
-// UNVERIFIED: whether a disarmed device can still capture a ball. That is decided inside
-// the component class, which is engine code and not in this corpus at all
-// (pirates-rules.md §9 item 3).
+// 0x4b / 0x4c -- SETTLED, and the answer depends on the device, which is why "whether a
+// disarmed device can still capture a ball" had no single answer. All three classes are in
+// CADET.EXE (shared engine code):
+//
+//   TMagnet   type 1042, Message 0x004166c0. 0x4b sets ActiveFlag ([this+0x5]) to 1; 0x4c
+//             clears it and kills the hold timer [+0x7e]. The capture circle is installed
+//             with &ActiveFlag (0x00416873, `lea ecx,[esi+0x5]`) and TEdgeManager skips
+//             edges whose ActiveFlag is clear -- a disarmed magnet cannot catch anything.
+//   TKickout  type 1012, Message 0x004163a0. Same ActiveFlag pair, and 0x4c also spits out
+//             a ball it is already holding (0x00416443: clear ActiveFlag, then if [+0x76]
+//             release through 0x00416260 and kill the timer).
+//   TKickback type 1014, Message 0x00415d70 -- which is what a_kick1 and a_kick2 are.
+//             Here 0x4c sets a suppression dword [this+0x86] to 1 and 0x4b clears it (as
+//             do SetTiltLock 0x3f3 and Reset 0x402). In TKickback::Collision (0x00415ba0)
+//             that dword only skips the arming of the kick timer at 0x00415bd7;
+//             DefaultCollision still runs at 0x00415c05.
+//
+// So: a disarmed magnet or kickout is out of the world; a disarmed kickback still stops
+// and bounces the ball and merely declines to kick it.
+//
+// The numeric coincidence noted before still holds -- these are private component codes,
+// so landing on upstream's ControlEnableMultiplier (64) / ControlDisableMultiplier (65) at
+// +11 means nothing.
 constexpr auto TMagnetArm = static_cast<MessageCode>(0x4b);
 constexpr auto TMagnetDisarm = static_cast<MessageCode>(0x4c);
 
@@ -284,23 +328,44 @@ constexpr auto ModeTick = static_cast<MessageCode>(0x50);
 // cancels mode_timer and falls into the 0x52 teardown.
 constexpr auto BallDrained = static_cast<MessageCode>(0x53);
 
-// 0x54 / 0x55 / 0x56 -- the ramp traversal codes, FT-only (the mission pair stops at 0x50
-// and 0x52/0x53 are teardown and abort). The evidence for the split is behavioural:
-// a_ramp13 scores on 0x55 and opens a_blocc on 0x56, while a_ramp8, a_ramp5 and s_rexit8
-// score on 0x56; a_ramp8 alone also answers 0x54, by releasing a_blocg indefinitely.
-// Reading that as entered / exited, with 0x54 as "the ball left the ramp without
-// finishing", is the only assignment that makes all four handlers sensible.
-// UNVERIFIED: all three names. Disassembling FT's TRamp would settle it; only the
-// dispatch shape matters to the rules, and that is confirmed.
-constexpr auto TRampAbandoned = static_cast<MessageCode>(0x54);
-constexpr auto TRampEntered = static_cast<MessageCode>(0x55);
-constexpr auto TRampExited = static_cast<MessageCode>(0x56);
+// 0x54 / 0x55 / 0x56 -- SETTLED by disassembling Full Tilt's TRamp. Type 1021's vtable is
+// CADET.EXE 0x00435680; its slot 1 is the generic TPinballComponent::Message (0x004135b0),
+// so a TRamp answers nothing -- it only *raises* codes, from Collision at slot 6,
+// 0x004177d0. That routine branches on which of the component's edges was hit:
+//
+//   the plane edge carries ramp data at [edge+0xd]. If present (0x0041789b), the ramp
+//   installs its own plane on the ball, recomputes the ball's height, and then compares
+//   the ball's collision mask [ball+0xf7] against the ramp's [this+0x82]: already equal
+//   means the ball was already on the ramp and nothing is raised (0x00417910), otherwise
+//   it switches the ball onto the ramp's mask and raises 0x54 (0x0041791d).
+//   edge == [this+0x9e]  -> plain surface hit: play sound [+0x6e], raise 0x4a
+//                           ControlCollision (0x00417954)
+//   edge == [this+0x96]  -> wall 1 (attribute 1301): ball mask = [this+0xa2], raise 0x55
+//                           (0x004179a5)
+//   otherwise            -> wall 2 (attribute 1302): ball mask = [this+0xa6], raise 0x56
+//                           (0x004179e4)
+//
+// So 0x54 is NOT "abandoned": it is "the ball has just mounted the ramp plane", raised
+// once, when the ball's collision layer changes to the ramp's. 0x55 and 0x56 are literally
+// the two side walls being crossed, and which of them reads as enter or exit is a property
+// of the 1301/1302 masks in PIRATES.DAT, not of the codes.
+//
+// Every handler below still behaves as written -- a_ramp8's 0x54 arm retracting a_blocg is
+// exactly "the ball is on my ramp now, clear the path" -- but the names were wrong and are
+// corrected here. The port's engine already numbers 85/86 as ControlRampWall1Crossed /
+// ControlRampWall2Crossed, which agrees; it has no name for 84 yet.
+constexpr auto TRampPlaneEntered = static_cast<MessageCode>(0x54);
+constexpr auto TRampWall1Crossed = static_cast<MessageCode>(0x55);
+constexpr auto TRampWall2Crossed = static_cast<MessageCode>(0x56);
 
 // 0x402 = 1026. With Dragon's public-code shift (+1 at >= 1016, +2 at >= 1021) that is
 // upstream 1024 = Reset, and TDrain::Message handles exactly Reset: it kills the pending
 // timer and clears BallInDrainFlag. dragon_part4.cpp had to guess SetTiltLock here and
-// flagged it UNVERIFIED; Skulduggery's drain sends the real thing, so the guess can be
-// retired on the Dragon side too.
+// marked it open; Skulduggery's drain sends the real thing, so the guess can be retired on
+// the Dragon side too. Cross-checked against the engine's own numbering: every FT
+// component class in CADET.EXE tests 0x3f3 for SetTiltLock, 0x3fe for PlayerChanged and
+// 0x402 for Reset (TLight 0x0040a490, TBlocker 0x00414f80, TMagnet 0x004166c0,
+// TLightSweep 0x0040c660 all agree), so 0x402 cannot be SetTiltLock.
 constexpr auto DrainReset = static_cast<MessageCode>(0x402);
 }
 
@@ -404,8 +469,13 @@ int drain_phase = 0;
 extern int game_over_phase;
 
 // DAT_0043aba0 -- cleared at every ball serve and by the end-of-game lockdown state.
-// UNVERIFIED: what reads it. No reader appears in either corpus, so as far as the rules go
-// it is write-only, the same shape as Dragon's _DAT_00439b04.
+// Settled, negatively, and that is the whole answer: nothing reads it. An objdump pass
+// over the entirety of PIRATES.EXE's .text (0x00401000-0x00435000) finds exactly two
+// references to 0x0043aba0, both stores -- `mov DWORD PTR ds:0x43aba0,0x0` at 0x00425f62
+// inside s_launcher1's handler, and `mov DWORD PTR ds:0x43aba0,ebx` at 0x0042d74f inside
+// the dispatcher region -- and no load anywhere in the image. So this is not "no reader in
+// the decompiled subset"; it is write-only in the shipped binary, the same shape as
+// Dragon's _DAT_00439b04. Keeping the writes is all fidelity can mean here.
 extern int unknown_43aba0;
 
 // DAT_0043abb0 -- set to 1 by Peg Leg's Loot's teardown and consumed by exactly one site,
@@ -452,8 +522,8 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 		// game over (see BallDrainControl) rather than an actual tilt.
 		if (TableG->TiltLockFlag == 0)
 		{
-			a_cannon->Message(FtMessageCode::TBlockerHold, 3.0f);
-			a_cannon->Message(FtMessageCode::TMechanismTrigger, 0.0);
+			a_cannon->Message(FtMessageCode::TBlockerSetPosition, 3.0f);
+			a_cannon->Message(FtMessageCode::TBlockerMoveToPosition, 0.0);
 		}
 		return;
 	}
@@ -505,7 +575,7 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 		// Keg magnets do not survive the ball (pirates-rules.md §5.4).
 		ClearKegMagnets();
 
-		a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
+		a_bloce->Message(FtMessageCode::TBlockerSetPosition, 0.0);
 		lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 	}
@@ -531,7 +601,7 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 	// Repeated verbatim from the phase-0 block above. The original really does send all
 	// four twice on a fresh ball; kept as written rather than hoisted, because the
 	// duplication is the only thing that makes a *re-served* ball reset the routing too.
-	a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
+	a_bloce->Message(FtMessageCode::TBlockerSetPosition, 0.0);
 	lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 	lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 }
@@ -611,12 +681,31 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	if (TableG->MultiballCount == 0 && TableG->ExtraBalls == 0 && TableG->BallCount == 1
 		&& TableG->CurrentPlayer - TableG->PlayerCount == -1 && game_over_phase == 0)
 	{
-		// Dragon computes 1-vs-2 here from TiltLockFlag; Skulduggery only asks whether the
-		// flag is not the -1 sentinel, so this is a plain bool in practice.
-		// UNVERIFIED: what ever writes TiltLockFlag = -1. Nothing in either corpus does,
-		// so the test is always true and game_over_phase is always 1; the sentinel is
-		// presumably the engine's "table shutting down" value.
-		game_over_phase = TableG->TiltLockFlag != -1 ? 1 : 0;
+		// Dragon computes 1-vs-2 here from TiltLockFlag; Skulduggery reduces it to a bool.
+		//
+		// Settled, including the exact predicate, which was not `!= -1`. The listing at
+		// 0x0042627c is
+		//
+		//     mov eax,[ecx+0x1b2]   ; TiltLockFlag
+		//     add ecx,0x1b2
+		//     inc eax               ; TiltLockFlag + 1
+		//     cmp eax,1
+		//     sbb eax,eax           ; -1 if (TiltLockFlag+1) < 1, else 0
+		//     inc eax               ; 0 if TiltLockFlag < 0, else 1
+		//     mov ds:0x43aba8,eax
+		//
+		// i.e. `game_over_phase = TiltLockFlag >= 0`, which agrees with `!= -1` only
+		// because -1 is the only negative the flag could plausibly hold. Written as the
+		// original computes it.
+		//
+		// And the branch is dead: an objdump pass over all of PIRATES.EXE's and
+		// CADET.EXE's .text finds no instruction that stores a negative value to
+		// TPinballTable+0x1b2. Every immediate store is 0 (0x004197a0, 0x00411bba) or 1
+		// (0x00419716/0x00419720, and this routine's own 0x0042629b); the three
+		// register-sourced stores (0x00419720, 0x00419e80, 0x0041a2ff) are the engine's
+		// own tilt and construction paths and none of them carries -1. So
+		// game_over_phase is always 1 in practice.
+		game_over_phase = TableG->TiltLockFlag >= 0 ? 1 : 0;
 		TableG->TiltLockFlag = 1;
 
 		// All four flippers, not Dragon's three: Skulduggery mirrors the upper-playfield
@@ -958,8 +1047,16 @@ void ShipSinkControl(MessageCode code, TPinballComponent* caller)
 		// The jackpot helper's float return becomes the notify delay here. The three other
 		// call sites in this slice discard it, and the compiler emitted `fstp [esp+4]` over
 		// the argument slot, so this is what the source wrote.
-		// UNVERIFIED: whether that was deliberate. What matters is the effect -- the notify
-		// timer is what later sends 0x47 to fathom_light_group, which prints "Ship Sunk".
+		// UNVERIFIED, and the binary cannot settle it: whether the 1996 source meant to
+		// feed the jackpot helper's dwell into the notify timer, or whether the argument
+		// slot was simply left holding the previous expression's result. The emitted code
+		// is identical either way, so no disassembly discriminates the two. What would:
+		// the other three call sites in this slice follow `CollectJackpot` with a bare
+		// `fstp st(0)` (discard) whereas this one writes the value into the outgoing
+		// argument slot -- so the compiler was told to use it here and not there, which is
+		// as close to "deliberate" as object code gets. Short of a source leak that is the
+		// end of the evidence. The effect is what matters and is exact: the notify timer
+		// is what later sends 0x47 to fathom_light_group, which prints "Ship Sunk".
 		fathom_light_group->Message(MessageCode::TLightGroupRestartNotifyTimer, CollectJackpot(0.0));
 		EjectLavaSink(-1.0f);
 		return;
@@ -995,11 +1092,11 @@ void ShipSinkControl(MessageCode code, TPinballComponent* caller)
 	// Normal play and every other mode. a_blocf is closed, then all three sink-area
 	// blockers are released indefinitely so the ejected ball has somewhere to go. The
 	// doubled a_blocf send is in the original.
-	a_blocf->Message(FtMessageCode::TBlockerHold, 0.0);
+	a_blocf->Message(FtMessageCode::TBlockerSetPosition, 0.0);
 	lite567->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
-	a_blocc->Message(FtMessageCode::TBlockerHold, -1.0f);
-	a_blocf->Message(FtMessageCode::TBlockerHold, -1.0f);
-	a_blocg->Message(FtMessageCode::TBlockerHold, -1.0f);
+	a_blocc->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
+	a_blocf->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
+	a_blocg->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 	EjectLavaSink(-1.0f);
 
 	if (info_text_box->MessageField == ModeIdle && lite568->light_on())
@@ -1140,9 +1237,9 @@ static void TavernSinkAward(TPinballComponent* caller)
 	snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_PlainScore)), addedScore);
 	info_text_box->Display(Buffer, 4.0f);
 
-	a_blocc->Message(FtMessageCode::TBlockerHold, -1.0f);
-	a_blocf->Message(FtMessageCode::TBlockerHold, -1.0f);
-	a_blocg->Message(FtMessageCode::TBlockerHold, -1.0f);
+	a_blocc->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
+	a_blocf->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
+	a_blocg->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 	EjectLavaSink(-1.0f);
 }
 
@@ -1336,7 +1433,7 @@ static void WindLaneTraversal(const WindLane& lane, TPinballComponent* caller)
 // 0x00428b70 -- a_ramp8 (skeleton: a_ramp8Control)
 //
 // The left island ramp, "Island Breeze". The only handler in the corpus that answers
-// TRampAbandoned, and all it does there is release a_blocg indefinitely -- a ball that
+// TRampPlaneEntered, and all it does there is release a_blocg indefinitely -- a ball that
 // starts up the ramp and does not finish has to be let out of whatever the ramp entrance
 // closed behind it.
 void LeftIslandRampControl(MessageCode code, TPinballComponent* caller)
@@ -1351,12 +1448,12 @@ void LeftIslandRampControl(MessageCode code, TPinballComponent* caller)
 		left_island_combo_light_group->Message(MessageCode::TLightResetAndTurnOff, 2.0f);
 		return;
 	}
-	if (code == FtMessageCode::TRampAbandoned)
+	if (code == FtMessageCode::TRampPlaneEntered)
 	{
-		a_blocg->Message(FtMessageCode::TBlockerHold, -1.0f);
+		a_blocg->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 		return;
 	}
-	if (code != FtMessageCode::TRampExited)
+	if (code != FtMessageCode::TRampWall2Crossed)
 		return;
 
 	WindLaneTraversal(lane, caller);
@@ -1364,7 +1461,7 @@ void LeftIslandRampControl(MessageCode code, TPinballComponent* caller)
 
 // 0x00428d80 -- a_ramp5 (skeleton: a_ramp5Control)
 //
-// The right island ramp, "Nor'Easter". a_ramp8 without the TRampAbandoned arm.
+// The right island ramp, "Nor'Easter". a_ramp8 without the TRampPlaneEntered arm.
 void RightIslandRampControl(MessageCode code, TPinballComponent* caller)
 {
 	const WindLane lane = {
@@ -1377,7 +1474,7 @@ void RightIslandRampControl(MessageCode code, TPinballComponent* caller)
 		right_island_combo_light_group->Message(MessageCode::TLightResetAndTurnOff, 2.0f);
 		return;
 	}
-	if (code != FtMessageCode::TRampExited)
+	if (code != FtMessageCode::TRampWall2Crossed)
 		return;
 
 	WindLaneTraversal(lane, caller);
@@ -1392,14 +1489,14 @@ void RightIslandRampControl(MessageCode code, TPinballComponent* caller)
 // "Port O' Call", 50,000, and the component that settles what string 3006 is: the spec had
 // it down as a seventh wind name missing from the manual, and it is the name of this ramp.
 //
-// It scores on entry (TRampEntered) and opens a_blocc on exit (TRampExited) -- the opposite
+// It scores on entry (TRampWall1Crossed) and opens a_blocc on exit (TRampWall2Crossed) -- the opposite
 // assignment to the island ramps, which is the behavioural evidence for reading 0x55 and
 // 0x56 as entered and exited rather than as two flavours of "completed".
 void CannonRampControl(MessageCode code, TPinballComponent* caller)
 {
 	char Buffer[64];
 
-	if (code == FtMessageCode::TRampEntered)
+	if (code == FtMessageCode::TRampWall1Crossed)
 	{
 		const int addedScore = AddScoreFor(caller, 0); // 50,000
 		snprintf(Buffer, sizeof Buffer, pb::get_rc_string(PiratesMsg(Str_PortOCall)), addedScore);
@@ -1408,8 +1505,8 @@ void CannonRampControl(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	if (code == FtMessageCode::TRampExited)
-		a_blocc->Message(FtMessageCode::TBlockerHold, -1.0f);
+	if (code == FtMessageCode::TRampWall2Crossed)
+		a_blocc->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 }
 
 // 0x00429140 -- s_rexit8 (skeleton: s_rexit8Control)
@@ -1426,7 +1523,7 @@ void ShipWireRampControl(MessageCode code, TPinballComponent* caller)
 {
 	char Buffer[64];
 
-	if (code != FtMessageCode::TRampExited)
+	if (code != FtMessageCode::TRampWall2Crossed)
 		return;
 
 	if (info_text_box->MessageField != ModeAttackShip)
@@ -1460,7 +1557,7 @@ void LaunchLaneExitControl(MessageCode code, TPinballComponent* caller)
 	if (code != MessageCode::ControlCollision)
 		return;
 
-	a_bloce->Message(FtMessageCode::TBlockerHold, 1.0f);
+	a_bloce->Message(FtMessageCode::TBlockerSetPosition, 1.0f);
 	lite504->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 	lite505->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 }
@@ -1514,7 +1611,7 @@ void ReturnWireControl(MessageCode code, TPinballComponent* caller)
 	case ModeIdle:
 	case ModeLavaBall:
 	case ModeJailBreak:
-		a_bloce->Message(FtMessageCode::TBlockerHold, 0.0);
+		a_bloce->Message(FtMessageCode::TBlockerSetPosition, 0.0);
 		lite504->Message(MessageCode::TLightResetAndTurnOff, 0.0);
 		lite505->Message(MessageCode::TLightResetAndTurnOn, 0.0);
 		return;
@@ -1766,11 +1863,20 @@ void KegMagnet5Control(MessageCode code, TPinballComponent* caller)
 
 // 0x0042a740 -- s_magnet6 (skeleton: s_magnet6Control)
 //
-// UNVERIFIED: that the sixth handler pairs with v_lite565 rather than some other keg light.
-// The six keg lights are v_lite560..v_lite565 and the six magnets s_magnet1..s_magnet6, and
-// the first is pinned by its listing; the remaining five are asserted from the 1:1 pairing
-// in pirates-rules.md §5.4 and the .data ordering. Reading the five remaining listings for
-// their light globals would close it.
+// Settled from all six listings, not asserted. Each handler loads its light global and its
+// magnet global as absolute addresses, and the two runs are arithmetic progressions of
+// stride 0x18 that dump_tags resolves outright:
+//
+//   0x0042a470  0x0043bd6c v_lite560   0x0043be14 s_magnet1
+//   0x0042a500  0x0043bd84 v_lite561   0x0043be2c s_magnet2
+//   0x0042a590  0x0043bd9c v_lite562   0x0043be44 s_magnet3
+//   0x0042a620  0x0043bdb4 v_lite563   0x0043be5c s_magnet4
+//   0x0042a6b0  0x0043bdcc v_lite564   0x0043be74 s_magnet5
+//   0x0042a740  0x0043bde4 v_lite565   0x0043be8c s_magnet6
+//
+// (the loads are at +0x11 and +0x20 into each handler, e.g. 0x0042a761 and 0x0042a770 for
+// this one). PIRATES.DAT agrees independently: keg_light_group is group 550 and its
+// iattribute 1027 is [500..505] = v_lite560..v_lite565, in that order.
 void KegMagnet6Control(MessageCode code, TPinballComponent* caller)
 {
 	if (code == MessageCode::ControlCollision)

@@ -259,12 +259,15 @@ TSound*& tabb87wave = tag_tabb87wave.Component;
 TSound*& tabb88wave = tag_tabb88wave.Component;
 TSound*& tabb94wave = tag_tabb94wave.Component;
 
-// UNVERIFIED: tabb02wave is reached through *two* distinct .data slots, DAT_0043c0b4
-// (the tavern drop bank) and DAT_0043c15c (a_spot4/5 and a_spot6), both of which the
-// annotation pass resolved to the same wave name. One tag is used for both here, which is
-// right if PIRATES.DAT really does bind the same wave twice and wrong if the two slots are
-// different waves whose names collided. Dumping PIRATES.DAT's sound table in .data order
-// would settle it; nothing in the rules depends on which it is.
+// Settled: one wave, two tags, and the single tag used here is right. The two slots are
+// the Component halves of two distinct component_tag records whose bases are 0x0043c0b0
+// and 0x0043c158; each has its own Name pointer, 0x0043c0a0 and 0x0043c148, and both
+// strings are the literal "tabb02wave" -- two copies of the same string, not two names
+// that happen to collide. PIRATES.DAT then contains exactly one group called tabb02wave
+// (group 73), and binding is by name through DatFile::record_labeled, which returns the
+// first match. So both tags necessarily resolve to the same TSound; the duplication is two
+// translation-unit-local tags for one wave, which is what the 1996 build does whenever two
+// rule slices each declare the component they need.
 
 // ---------------------------------------------------------------------------
 // Table-local message codes, mode register, string ids
@@ -278,6 +281,14 @@ namespace FtMessageCode {
 // same two names independently from Dragon's mode timer.
 constexpr auto TimerSet = static_cast<MessageCode>(0x45);
 constexpr auto TimerGetRemaining = static_cast<MessageCode>(0x48);
+
+// 0x39, sent to the four a_bloc* blockers: set the blocker's position index to
+// (int)floor(value), -1 meaning retracted. Verified against Full Tilt's
+// TBlocker::Message, CADET.EXE 0x00414f80 arm 0x004150ce; see SwapBankRoute below and
+// pirates_part2.cpp's constant of the same name for the evidence. Spelled here as an
+// FT-only code rather than as upstream's TBlockerRestartTimeout, which is a different
+// code (59, and 0x45 in the binary).
+constexpr auto TBlockerSetPosition = static_cast<MessageCode>(0x39);
 } // namespace FtMessageCode
 
 // Mode register values of info_text_box->MessageField; see analysis/pirates-rules.md §1.3.
@@ -308,8 +319,15 @@ constexpr int Str_ModeSelected0 = 3068;  // 0xbfc, +0..7 in *selection* order
 // of 1 for these where resource strings pass 0; the port's TTextBox::Display has no such
 // parameter, so they are passed as plain strings here.
 //
-// UNVERIFIED: what each token expands to. Dumping PIRATES.DAT's message groups would
-// settle it; the rules do not depend on the text.
+// Half settled. The tokens are indices into PIRATES.DAT group 237, "font2" -- the table's
+// symbol font, and the group the engine's TTextBox::DisplayGlyph selects through
+// score::glyph_fontp. That is what the original's fourth Display argument of 1 selects, and
+// why Space Cadet never needed the path: no Space Cadet .DAT has a font2 group. The byte
+// values below are dumped from .data and exact.
+//
+// UNVERIFIED, and now only this: which picture font2 draws for ASCII '6'..'9'. Rendering
+// group 237's MsgFont character data at those codes would show it; the rules do not depend
+// on the pictures.
 constexpr const char* Glyph_IslandLane = "6";  // DAT_0043aac4, a_roll5
 constexpr const char* Glyph_ReturnLane = "7";  // DAT_0043aac8, a_roll1
 constexpr const char* Glyph_SouthWind = "8";   // DAT_0043aacc, a_roll2
@@ -360,6 +378,13 @@ float AdvanceFathomMultiplier(float time); // 0x004243d0, island lanes' award
 // and a bitfield in Sword Fight (bits 0..3 volcano, bits 4..6 parrot); FUN_0042aad0 zeroes
 // it at every mode start, which is what keeps the two uses from meeting.
 extern int mode_scratch_counter; // DAT_00435cf8
+
+// DAT_00435d30, defined by pirates_modes.cpp. Set when a mode starts with a ball
+// already live -- served by the skill shot, or still in play after the word was
+// spelled -- and read by every mode controller's "sweep finished" arm to decide
+// whether to feed one from the lava sink. SkulduggeryCompleteIdle below is one of its
+// three setters (0x00425df4).
+extern bool ModeStartedWithBallInPlay;
 
 // ---------------------------------------------------------------------------
 // Formatted announcements
@@ -500,11 +525,34 @@ static bool SkulduggeryCompleteIdle()
 	if ((lite1->MessageField & 0x7ff) != 0x7ff)
 		return false;
 
-	// DAT_00435d30 ("not in the skill shot") is latched here so the skill-shot controller
+	// DAT_00435d30 is latched here so the skill-shot controller
 	// cannot claim the ball that just spelled the word.
-	// UNVERIFIED: the flag's exact meaning -- it is set in one other place
-	// (FUN_0042abf0's 0x4f) and read by the cheat handler, and no reader in this slice
-	// depends on it, so it is left to whichever slice owns the launcher.
+	// Settled by a full-image census of 0x00435d30 (objdump over all of PIRATES.EXE's
+	// .text). Four writers:
+	//
+	//   0x00425df4  = 1   here, inside this routine
+	//   0x0042aca2  = 1   the skill-shot controller's 0x4f (0x0042abf0)
+	//   0x0042aa29  = 1   the N-M-A-X cheat, and only while the register is state 2
+	//   0x0042aba1  = 0   Idle's 0x4f (0x0042ab90)
+	//
+	// and nine readers, every one of them a `cmp ds:0x435d30,0` in a mode controller
+	// (0x0042adce, 0x0042b0f1, 0x0042b46d, 0x0042c0ce, 0x0042c4a4, 0x0042ca5e,
+	// 0x0042cc6e, 0x0042d024, plus the compare at 0x0042abb0's function). The launcher
+	// handler (0x00425e70) does not touch it at all, so it is not "left to the launcher
+	// slice" -- there is nothing there to find. See pirates_modes.cpp, which owns the
+	// cell, for what the readers do with it.
+	//
+	// The census also exposed a gap: this routine's comment claimed the latch but no
+	// statement performed it. The listing is unambiguous --
+	//
+	//     00425df4  mov DWORD PTR ds:0x435d30,0x1
+	//     00425dfe  push 0x1 ; call 0x00423b70   (ResetSkulduggeryLights)
+	//
+	// so the write is the first thing the completed-word path does, before the three bank
+	// raises and StartSelectedMode. Restored here. The Lava-Ball twin at 0x00425e30 does
+	// NOT write it, which is why only this one carries the line.
+	ModeStartedWithBallInPlay = true;
+
 	ResetSkulduggeryLights(1);
 	RaiseTavernDropBank();
 	RaiseShipDropBank();
@@ -535,21 +583,34 @@ static bool SkulduggeryCompleteLavaBall()
 // them. Those floats are from the listings -- Ghidra rendered several of them as a stray
 // `piVar3 = (int *)0x39`.
 //
-// 0x39 is treated as TBlockerRestartTimeout, following dragon_part2.cpp, which reached the
-// same reading for Dragon's blockers; a negative value cancels the timeout there too.
-// UNVERIFIED: by the +4 rule 0x39 would be upstream's TGateDisable (53), and
-// TBlockerRestartTimeout (59) would be 0x3f. The components are named a_bloc*, every FT
-// table drives them with this code, and 0x3f is already ControlCollision's neighbour, so
-// the blocker reading is taken; it would be settled by the TBlocker class's own code,
-// which is engine and outside this corpus.
+// Settled, and this slice was sending the wrong code. 0x39 is not upstream's
+// TBlockerRestartTimeout (59) -- RestartTimeout is 0x45, which CADET.EXE's own
+// DrainBallBlockerControl (0x00423480) proves by sending 0x38 then 0x45 exactly where
+// upstream's DrainBallBlockerControl sends TBlockerEnable then TBlockerRestartTimeout.
+// 0x39 is one of four codes Full Tilt added to TBlocker below the Disable/Enable pair, and
+// it sets the blocker's *position index*: TBlocker::Message at CADET.EXE 0x00414f80 (same
+// address and bytes in PIRATES.EXE) floors the float to an int at 0x004150ce, stores it at
+// [this+0x7e], flips the per-position collision byte at [this + index + 0x76] and shows
+// sprite `index`; a negative index retracts the blocker and clears the sprite. See
+// pirates_part2.cpp's FtMessageCode::TBlockerSetPosition for the full arm-by-arm read.
+//
+// The floats below therefore name positions, not seconds: a_bloce goes to position 1,
+// a_blocg to position 0, and the per-bank blocCTime/blocFTime arguments select a_blocc's
+// and a_blocf's positions -- the ball-path difference between the three banks is literally
+// which position each wall is parked at. The parameter names are kept for continuity with
+// the callers; they are indices.
+//
+// Previously this file sent MessageCode::TBlockerRestartTimeout (59) where part2 and part3
+// cast the raw 0x39, so the three slices disagreed on the value reaching the engine. They
+// now all send 0x39.
 static void SwapBankRoute(float blocCTime, float blocFTime)
 {
-	blocC->Message(MessageCode::TBlockerRestartTimeout, blocCTime);
-	blocE->Message(MessageCode::TBlockerRestartTimeout, 1.0f);
+	blocC->Message(FtMessageCode::TBlockerSetPosition, blocCTime);
+	blocE->Message(FtMessageCode::TBlockerSetPosition, 1.0f);
 	lite504->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
 	lite505->Message(MessageCode::TLightResetAndTurnOff, 0.0f);
-	blocF->Message(MessageCode::TBlockerRestartTimeout, blocFTime);
-	blocG->Message(MessageCode::TBlockerRestartTimeout, 0.0f);
+	blocF->Message(FtMessageCode::TBlockerSetPosition, blocFTime);
+	blocG->Message(FtMessageCode::TBlockerSetPosition, 0.0f);
 }
 
 // --- Ship bank: a_drop5..a_drop9, scoring {3000, 25000} --------------------
@@ -1109,10 +1170,10 @@ static void HideawayTargetPairHit(TPinballComponent* caller)
 	const bool complete = (lite522->MessageField & 0x3) == 0x3;
 	if (complete)
 	{
-		// A negative TBlockerRestartTimeout cancels the timeout, which is what leaves the
-		// passage open; the pair then goes dark and the mask resets, so the next two hits
-		// start the cycle over.
-		blocF->Message(MessageCode::TBlockerRestartTimeout, -1.0f);
+		// A negative position index retracts a_blocf -- its collision byte is cleared and
+		// its sprite set to none -- which is what leaves the passage open; the pair then
+		// goes dark and the mask resets, so the next two hits start the cycle over.
+		blocF->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 		lite522->MessageField = 0;
 		lite522->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
 		lite779->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
@@ -1214,9 +1275,15 @@ void BrigTargetControl(MessageCode code, TPinballComponent* caller)
 	// Third tavern hit: Max Crew instead of Jail Break, and -- unlike the idle arm -- the
 	// counter is *not* reset, so every further hit during the same Tavern re-awards Max
 	// Crew. The listing has no write to a_spot6->MessageField on this path.
-	// UNVERIFIED: whether that is intended. It costs nothing (Max Crew is idempotent once
-	// a_bump2->MessageField is 6) beyond repeating the announcement and the 5,000, so it
-	// is reproduced as-is.
+	// UNVERIFIED, and the binary has nothing more to say: the absence of a write is not
+	// evidence of intent, and there is no second code path, no dead store and no
+	// alternative branch anywhere in this handler that would hint at a dropped reset. What
+	// would settle it is play, not disassembly -- start a Tavern, hit the brig target four
+	// times, and see whether the fourth hit announces Max Crew and pays 5,000 again. If it
+	// does, the binary is faithful here and the design simply repeats; if a real game stops
+	// after the third, something outside this handler is resetting the counter and that
+	// writer has not been found. Reproduced as-is either way: Max Crew is idempotent once
+	// a_bump2->MessageField is 6, so the only cost of being wrong is the repeat.
 	tabb61wave->Play(caller, "BrigTargetControl");
 	ResetBrigLights(1);
 	AwardMaxCrew(0.0f);

@@ -74,15 +74,41 @@
 // the originals hold Mix_Music-like handles in globals, so these names are the
 // handles' roles rather than the handles themselves.
 //
-// UNVERIFIED: which TABBn file each role maps to. The roles are pinned by the
-// call sites; the file numbering needs the track table out of the DAT.
-constexpr music_track idle_music = 1;
-constexpr music_track attack_sword_music = 2;
-constexpr music_track storm_mutiny_music = 3;
-constexpr music_track treasure_pegleg_music = 4;
-constexpr music_track tavern_music = 5;
-constexpr music_track bermuda_music = 6;
-constexpr music_track game_over_music = 7;
+// SETTLED, and four of the seven indices below were wrong. The loader is PIRATES.EXE
+// 0x004231d7: six calls to the track loader (0x0040e9d0) with the literal name strings
+// "tabb1".."tabb6", which sit 8 bytes apart at 0x0043d1c8, 0x0043d1d0, 0x0043d1d8,
+// 0x0043d1e0, 0x0043d1e8, 0x0043d1f0, storing the handles in that order into the globals
+// 0x0043ab80, 0x0043ab84, 0x0043ab88, 0x0043ab8c, 0x0043ab90, 0x0043ab94. There is no
+// seventh load: at 0x00423238 it does `mov eax,ds:0x43ab90; mov ds:0x43ab98,eax`, so the
+// seventh handle is an ALIAS of the fifth. The install confirms it -- only TABB1.MID
+// through TABB6.MID exist in game/WIN95/FULLTILT/PIRATE/SOUND.
+//
+// Each role is then pinned by the global its controller pushes into the play call
+// (0x0040eb50), which makes the mapping mechanical:
+//
+//   tabb1  0x0043ab80  idle                      0x0042abb8  (in 0x0042ab90)
+//   tabb2  0x0043ab84  attack ship / sword fight 0x0042af64, 0x0042cd48
+//   tabb3  0x0043ab88  treasure hunt / Peg Leg's 0x0042b25e, 0x0042d097
+//   tabb4  0x0043ab8c  tavern                    0x0042b637
+//   tabb5  0x0043ab90  Bermuda Triangle          0x0042c2bd
+//   tabb6  0x0043ab94  storm / mutiny            0x0042c62c, 0x0042cab5
+//   (alias of tabb5)   game over                 0x0042bfff  (in 0x0042bfd0)
+//
+// The old numbering had storm_mutiny at 3, treasure_pegleg at 4, tavern at 5, bermuda at 6
+// and a non-existent track 7 for game over -- so the game-over music silently fell off the
+// end of midi::TableTracks and four modes played each other's track.
+//
+// One detail of the original the port cannot express through plain indices, recorded here
+// rather than emulated: 0x0042322c..0x004232ad walks handles 2..7 and substitutes handle 1
+// for any that failed to load. midi::PlayMusic already no-ops on a missing track, which is
+// a quieter version of the same fallback.
+constexpr music_track idle_music = 1;             // tabb1
+constexpr music_track attack_sword_music = 2;     // tabb2
+constexpr music_track treasure_pegleg_music = 3;  // tabb3
+constexpr music_track tavern_music = 4;           // tabb4
+constexpr music_track bermuda_music = 5;          // tabb5
+constexpr music_track storm_mutiny_music = 6;     // tabb6
+constexpr music_track game_over_music = 5;        // tabb5 again, by the alias above
 
 namespace pirates {
 
@@ -116,11 +142,19 @@ constexpr MessageCode LightResetAndTurnOff = Msg(0x14);
 constexpr MessageCode LightOverrideOff = MessageCode::TLightFtTmpOverrideOff;
 constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 
-// UNVERIFIED: 0x1b, sent only to `light_sweeps` with a float selecting which
-// canned sweep to run. 0x1b is not a group code under the +4 rule and
-// `light_sweeps` has its own component type (1038), so this is a
-// Full-Tilt-only code on a Full-Tilt-only component. Settled by decompiling
-// the TComponentGroup Message override that handles 0x1b.
+// SETTLED. Type 1038's vtable is CADET.EXE 0x00435228 (slot 0 is the type
+// getter at 0x0040ca60, `mov eax,0x40e; ret`), and its Message is
+// 0x0040c660. That function answers exactly four codes -- 0x1b, 0x3f3
+// SetTiltLock, 0x3fe PlayerChanged, 0x402 Reset -- so 0x1b really is a
+// Full-Tilt-only code on a Full-Tilt-only component, not a group code.
+//
+// The 0x1b arm at 0x0040c69f converts the float to an int with _ftol
+// (0x42afd8) and uses it as the DAT *state index* in three
+// query_float_attribute calls against the component's own group: 1602
+// (0x642, the sweep's step interval, defaulting to 0.1f when absent), 1604
+// (0x644) and 1600 (0x640). So the float selects which of the group's canned
+// sweeps to run, exactly as the call sites read -- and the port's engine
+// numbering TLightSweepStart = 27 is 0x1b, which agrees.
 constexpr MessageCode LightSweepStart = Msg(0x1b);
 
 // TLightGroup family (delta +4).
@@ -140,8 +174,25 @@ constexpr MessageCode SinkResetTimer = Msg(0x41);
 // number of seconds (-1.0 cancels) and 0x48 reads the remaining time back in
 // **milliseconds**. Neither value lines up with upstream's TTimerResetTimer
 // under any of the piecewise deltas, so both are FT-only.
-// UNVERIFIED names; the semantics are pinned by ~30 agreeing uses and by the
-// `cdq; mov ecx,0x3e8; idiv ecx` that follows every 0x48.
+// SETTLED against the class itself. Type 1032's vtable is CADET.EXE
+// 0x00435778 (slot 0 at 0x0041bf90, `mov eax,0x408; ret`) and TTimer::Message
+// is 0x0041b380. It answers 0x45, 0x48 and the 0x3f3..0x402 public block, and:
+//
+//   0x45 (0x0041b3bc)  kills the pending timer [this+0x42], then compares the
+//                      float against 0.0 at 0x00435790 and returns without
+//                      re-arming if it is below -- so a negative value is
+//                      purely a cancel -- otherwise [this+0x42] =
+//                      timer::set(value, this, 0x0041b4d0).
+//   0x48 (0x0041b3fb)  if a timer is pending, reads the remaining time
+//                      (0x0041f880), clamps a negative result to 0.0 against
+//                      0x00435798, multiplies by the double 1000.0 at
+//                      0x004357a0 and floors it -- i.e. returns
+//                      MILLISECONDS, which is why every caller divides by
+//                      1000.0.
+//
+// The names stay FT-only (upstream's TTimer has only TTimerResetTimer), but
+// the semantics are no longer inferred from the ~30 call sites; they are read
+// out of the engine.
 constexpr MessageCode TimerSet = Msg(0x45);
 constexpr MessageCode TimerGetRemaining = Msg(0x48);
 
@@ -158,23 +209,42 @@ constexpr MessageCode MissionStarted = Msg(0x50);   // "mode tick"
 constexpr MessageCode ModeTeardown = Msg(0x52);
 constexpr MessageCode ModeAbort = Msg(0x53);
 
-// UNVERIFIED: 0x4b / 0x4c, sent to the six `s_magnet*` objects and to the
-// `a_kout1` / `a_kout2` kickouts at mode start and at teardown. "Enable /
-// disable the holding field" is inferred from behaviour only -- whether a
-// disabled device can still capture a ball is decided inside the component
-// class, which is engine code and not in this corpus. Settled by decompiling
-// the type-1042 Message override.
+// SETTLED, and the answer differs per device -- which is why one name could
+// never cover it. Type 1042's vtable is CADET.EXE 0x00435640 (slot 0 at
+// 0x0041aee0, `mov eax,0x412; ret`) and TMagnet::Message is 0x004166c0:
+// 0x4b sets ActiveFlag ([this+0x5]) to 1, 0x4c clears it and kills the hold
+// timer. The magnet's capture circle is installed with &ActiveFlag
+// (0x00416873, `lea ecx,[esi+0x5]`) and TEdgeManager skips edges whose
+// ActiveFlag is clear, so a disabled magnet is out of the world: it cannot
+// capture. Type 1012's TKickout::Message (0x004163a0) uses the same
+// ActiveFlag pair and additionally releases a ball it is already holding on
+// 0x4c (0x00416443..0x00416473).
+//
+// (Type 1014, the kickbacks, is the exception and is not driven from this
+// file: there 0x4c sets a suppression dword instead and the device still
+// collides. See pirates_part2.cpp.)
 constexpr MessageCode HoldFieldEnable = Msg(0x4b);
 constexpr MessageCode HoldFieldDisable = Msg(0x4c);
 
-// UNVERIFIED: 0x39, sent to the four `a_bloc*` blockers everywhere in this
-// corpus with a float that is -1.0 (hold open forever), 0.0 (release) or a
-// duration. The analysis reads it as "blocker restart timeout"; under the +4
-// blocker rule upstream's TBlockerRestartTimeout would be 0x3f, which is
-// already TGateEnable under the +9 rule, so the numbering does not confirm
-// the name. The three observed argument values do. Settled by decompiling
-// TBlocker::Message.
-constexpr MessageCode BlockerRestartTimeout = Msg(0x39);
+// SETTLED, and it is a position index, not a timeout. TBlocker::Message is
+// CADET.EXE 0x00414f80 -- byte-identical at the same address in PIRATES.EXE --
+// jump-tabling 0x37..0x3c at 0x00415398 plus 0x45. The 0x39 arm (0x004150ce)
+// floors the float to an int, stores it at [this+0x7e], clears the old
+// position's collision byte at [this + old + 0x76], sets the new one and
+// shows sprite `index`; a negative index retracts the blocker and blanks the
+// sprite (0x004151eb). A Full Tilt TBlocker is a multi-position moving wall.
+//
+// The numbering objection dissolves: 0x39 was never in the Disable/Enable
+// pair. CADET.EXE's DrainBallBlockerControl (0x00423480) sends 0x38 where
+// upstream sends TBlockerEnable (52, +4) and 0x45 where upstream sends
+// TBlockerRestartTimeout (59), so 0x39-0x3c are four codes Full Tilt added
+// below them.
+//
+// Note on this file's spellings: `Forever` below is -1.0f, and for a blocker
+// that means "retracted", not "held indefinitely". The float values are
+// unchanged -- only what they mean is corrected -- so every call site is
+// still faithful.
+constexpr MessageCode BlockerSetPosition = Msg(0x39);
 
 // Public codes (1000+). 0x400 is sent to the table itself by the game-over
 // controller; the rest of the table-level block belongs to the ball/serve
@@ -196,18 +266,26 @@ const int Light = 0x3ea;         // 1002 TLight
 const int PopupTarget = 0x3ee;   // 1006 TPopupTarget -- the 11 drop targets
 const int Sink = 0x3f9;          // 1017 TSink
 const int SoloTarget = 0x3fb;    // 1019 TSoloTarget -- the a_spot* bank
-const int LightRollover = 0x3f7; // 1015, the a_roll* lanes
+// 1015 is TRollover, not TLightRollover (that is 1020, below). PIRATES.DAT
+// gives it to the eleven a_roll* lanes: a_roll1..6 and a_roll8..12.
+const int LightRollover = 0x3f7; // 1015 TRollover -- the a_roll* lanes
 const int Timer = 0x408;         // 1032 TTimer
 const int LightSweeps = 0x40e;   // 1038, the light_sweeps component
 
-// UNVERIFIED: 1020. Three controllers pay a jackpot contribution on a
-// collision with this type (Storm +50,000, Treasure Hunt +20,000, Peg Leg's
-// Loot +50,000) and nothing else in the corpus names it. The bumpers and
-// rebounds are the plausible candidates by elimination, since every other
-// scoring component on this table already has a known type. Settled by
-// dumping the type id of each object in PIRATES.DAT and intersecting with the
-// components those three modes can be hit by.
-const int Unknown1020 = 0x3fc;
+// SETTLED, by dumping PIRATES.DAT's table_objects list (iattribute 1025, the
+// (type, groupIndex) pairs TPinballTable's constructor walks), and the
+// elimination guess was wrong. Type 1020 is TLightRollover, and the thirteen
+// objects PIRATES.DAT declares with it are all v_mlite*:
+//
+//   v_mlite7, v_mlite8, v_mlite37, v_mlite38, v_mlite39, v_mlite40,
+//   v_mlite42, v_mlite43, v_mlite45, v_mlite46, v_mlite47, v_mlite49,
+//   v_mlite111
+//
+// The bumpers are type 1005 (a_bump1..3 only -- there are three, not four)
+// and a_rebo1/a_rebo2 are type 1000 plain walls, so neither can be the
+// recipient. The three controllers are paying their jackpot contribution for
+// crossing a lit rollover.
+const int LightRolloverMlite = 0x3fc;  // 1020 TLightRollover, the v_mlite* set
 }  // namespace type
 
 // ---------------------------------------------------------------------------
@@ -429,10 +507,19 @@ extern component_tag<TBlocker> tag_a_bloce;
 extern component_tag<TBlocker> tag_a_blocf;
 extern component_tag<TBlocker> tag_a_blocg;
 
-// The pair of lights the common setup swaps. UNVERIFIED what they show: 504 is
-// lit and 505 cleared for the duration of every mode and the swap is reversed
-// at teardown, which reads like a "mode in progress / no mode" indicator pair.
-// Settled by locating them in PIRATES.DAT.
+// The pair of lights the common setup swaps. Located in PIRATES.DAT: v_lite504
+// is group 412 at screen (244,146) and v_lite505 group 413 at (233,144) --
+// one visual state each (attribute 100 = [1]), 8x9 pixels, sitting side by
+// side high on the left of the playfield, immediately below a_bloce (246,124)
+// and a_blocf (275,73). The DAT gives position, not meaning -- but position is
+// enough to drop the "mode in progress / no mode" reading, because these two
+// lamps sit on the blocker passage rather than anywhere a mode banner would
+// go, and they are already driven as a route-indicator pair by two handlers
+// that have nothing to do with modes: pirates_part1.cpp's SwapBankRoute (every
+// drop-bank completion) and pirates_part3.cpp's kickback, both of which assert
+// 504 and clear 505 to mean "the playfield path is the live one". A mode doing
+// the same at start and reversing it at teardown is the mode claiming that
+// route for its duration, which is the reading the three slices now share.
 component_tag<TLight> tag_v_lite504 = {"v_lite504"};
 component_tag<TLight> tag_v_lite505 = {"v_lite505"};
 
@@ -571,10 +658,27 @@ void Play(TSound* sound);           // vtable +0x18; the original returns the cl
 // enter a mode also flash the mode-in-progress light v_lite606 and show a
 // per-mode glyph, and the two that leave one turn v_lite606 off.
 //
-// UNVERIFIED in presentation only: the glyph arguments (0x43ab08, 0x43ab10,
-// 0x43aaa0, 0x43ab0c) are shared between modes in a pattern I have not read
-// out, and four of the twelve setters show none. Settled by disassembling
-// 0x423480..0x4235f0.
+// SETTLED by disassembling 0x00423400..0x00423650; pirates_modes_entry.cpp
+// carries the implementations and the glyph bytes, and this is the shape:
+//
+//   0x00423400  ArmModeInProgressLight:   v_lite606->Message(7, -1.0f)
+//                                         (TLightFlasherStartTimed, forever)
+//   0x00423420  ClearModeInProgressLight: v_lite606->Message(0x14, 0.0f)
+//
+// EnterIdle (0x423460) and EnterSkillShotAward (0x423440) call the clear
+// helper; the other ten call the arm helper. Exactly four of the twelve then
+// display a glyph, and the durations differ:
+//
+//   0x00423480 AttackShip    0x43ab08 "H"    1.0 s
+//   0x004234c0 Bermuda       0x43ab10 "J"    2.0 s
+//   0x00423520 Tavern        0x43aaa0 "333"  2.0 s
+//   0x00423560 TreasureHunt  0x43ab0c "I"    2.0 s
+//
+// Storm, Mutiny, SwordFight, PegLegsLoot, LavaBall, JailBreak, Idle and
+// SkillShotAward show none. Every setter then writes its state into
+// info_text_box->MessageField and calls the dispatcher (0x0042d850) with 0x4f.
+// SwordFight (0x4235c0) alone does one extra thing first: it zeroes
+// [0x43af2c]->MessageField, the volcano bank mask.
 void EnterIdle();              // 0x423460 -> state 2
 void EnterSkillShotAward();    // 0x423440 -> state 3
 void EnterAttackShip();        // 0x423480 -> state 4
@@ -586,7 +690,10 @@ void EnterMutiny();            // 0x4235a0 -> state 9
 void EnterSwordFight();        // 0x4235c0 -> state 10; also resets the volcano bank
 void EnterPegLegsLoot();       // 0x4235f0 -> state 0xb
 void StartLavaBall();          // 0x423610 -> state 0xc
-void EnterJailBreak();         // 0x423630 -> state 0xd
+// 0x423630 -> state 0xd is StartJailBreak, not a second name: pirates_awards.cpp and
+// pirates_part1.cpp both declare and call it under that spelling and
+// pirates_modes_entry.cpp defines it there, so the `EnterJailBreak` declaration that used
+// to sit on this line (dead -- no definition, no call site) is gone.
 
 // Board-level helpers the controllers drive. All live in the 0x423000-0x42d000
 // range and belong to the collectible / scoring slices of the port.
@@ -636,8 +743,19 @@ void PrepareTreasureBoard();           // 0x42ce80 -- Peg Leg's Loot's 0x4f help
 // non-zero while something is still on screen. The dispatcher checks it before
 // re-spelling a text-box timer expiry as a mode tick.
 //
-// UNVERIFIED which TTextBox field that is -- the offset is confirmed by three
-// independent uses, the name is not.
+// SETTLED: +0x5e is CurrentMessage, the head of the text box's message queue,
+// and it is a TTextBoxMessage* rather than a timer. Full Tilt's
+// TTextBox::Display is CADET.EXE 0x0041de40 (type 1033's vtable is 0x00435858,
+// Message at 0x0041e110). Its first test is `cmp DWORD PTR [ebx+0x5e],0`
+// at 0x0041de55, exactly where upstream's TTextBox::DisplayInternal tests
+// `if (CurrentMessage && !strcmp(text, PreviousMessage->Text) && ...)`, and it
+// immediately dereferences the *other* pointer, [ebx+0x62], as
+// PreviousMessage->Text ([[ebx+0x62]+4]) and PreviousMessage->Glyph
+// ([[ebx+0x62]+0x14]). So +0x5e = CurrentMessage, +0x62 = PreviousMessage.
+//
+// The behaviour the dispatcher is testing for is unchanged -- non-null means
+// something is queued or on screen -- so read this predicate as
+// `box->CurrentMessage != nullptr`.
 bool AnnouncementPending(TTextBox* box);
 
 // Glyph runs. Skulduggery announces progress as single characters in a symbol
@@ -684,10 +802,23 @@ extern int mode_scratch_counter;
 // start.
 //
 // UNVERIFIED whether that aliasing is a deliberate single "wheel position"
-// concept or a second bug of the v_lite551 kind. It cannot be decided from the
-// code: nothing resets it per-mode except the shared setup, and the dispatcher
-// never touches it. Settled only by instrumenting a real game -- clear a Sword
-// Fight group, then start a Treasure Hunt, and see which X arms first.
+// concept or a second bug of the v_lite551 kind. Still undecidable from the
+// code, and now for a stated reason. An objdump pass over all of PIRATES.EXE's
+// .text finds exactly nine references to 0x00435d04 and no others:
+//
+//   0x00424597 read   0x0042459c add   0x004245c7 = 0   (the award slice)
+//   0x00425117 read   0x0042512f = 0   0x0042523c inc
+//   0x00425440 read   0x00425484 inc
+//   0x0042aada = 0                                      (StartOfEveryMode)
+//
+// There is no fourth writer, no per-mode save/restore pair and no read by the
+// dispatcher, so the binary contains nothing that distinguishes "one cursor on
+// purpose" from "three cursors that collided". The experiment that would:
+// start a Sword
+// Fight, clear exactly one award group so the cursor lands on 1, let it time
+// out, then start a Treasure Hunt without an intervening mode and watch which
+// "X" arms -- the first if the cell is reset somewhere outside this corpus,
+// the second if the aliasing is real. The same run also answers modes 1897.
 int WheelCursor = 0;
 
 // 0x435d2c / 0x435d40 -- Storm's severity, computed once at mode start: the
@@ -707,10 +838,29 @@ char StormNameFormat[64] = {0};
 // i.e. a mode started FROM the skill shot does not feed a ball, because the
 // launcher already served one.
 //
-// UNVERIFIED name: analysis/pirates-rules.md calls this cell "not in skill
-// shot", which is the inverse of what the two writers do. Settled by reading
-// the launcher handler (0x425e70), the only other reader.
-bool SkillShotActive = false;
+// Settled by a full-image census, and both earlier readings were off. The
+// launcher handler (0x00425e70) is NOT a reader -- it never touches the cell,
+// so there was nothing there to settle it with. objdump over all of
+// PIRATES.EXE's .text gives four writers and nine readers:
+//
+//   0x00425df4  = 1   SkulduggeryCompleteIdle (0x00425de0), which starts a
+//                     mode from idle play without going near the skill shot
+//   0x0042aca2  = 1   the skill-shot controller's 0x4f (0x0042abf0)
+//   0x0042aa29  = 1   the N-M-A-X cheat, and only while the register is 2
+//   0x0042aba1  = 0   Idle's 0x4f (0x0042ab90)
+//   readers: 0x0042adce, 0x0042b0f1, 0x0042b46d, 0x0042c0ce, 0x0042c4a4,
+//            0x0042ca5e, 0x0042cc6e, 0x0042d024 and the compare in
+//            0x0042ab90 -- every one a `cmp ds:0x435d30,0` in a mode
+//            controller's "sweep finished" arm, gating the lava-sink eject.
+//
+// So analysis/pirates-rules.md's "not in skill shot" is inverted, and this
+// file's `SkillShotActive` is too narrow: SkulduggeryCompleteIdle sets it
+// while entering an ordinary mode. What the three setters have in common is
+// that a ball is already live when the mode starts -- served by the skill
+// shot, or still in play after spelling SKULDUGGERY -- and what the readers do
+// with it is decline to feed another from the lava sink. Renamed accordingly;
+// the polarity and every call site are unchanged.
+bool ModeStartedWithBallInPlay = false;
 
 // 0x435d48 -- collisions with type-1006 TPopupTargets this ball, incremented
 // by the dispatcher and zeroed by the skill shot's 0x4f. The drain bonus's
@@ -745,9 +895,17 @@ const int BermudaSpokes[4][4] = {
 // the finale.
 bool RestartCollectionCycle = false;
 
-// 0x43aba0 -- cleared by the lockdown controller and read nowhere in either
-// corpus. UNVERIFIED: a flag owned by the ball/serve slice. Settled by
-// grepping the remaining ~118 handler-less components for its writer.
+// 0x43aba0 -- settled, negatively, and that is the complete answer: nothing
+// reads it. An objdump pass over all of PIRATES.EXE's .text
+// (0x00401000-0x00435000) finds exactly two references and both are stores --
+// `mov DWORD PTR ds:0x43aba0,0x0` at 0x00425f62 inside s_launcher1's handler,
+// and `mov DWORD PTR ds:0x43aba0,ebx` at 0x0042d74f in the dispatcher region.
+// No load appears anywhere in the image. So it is not "a flag owned by some
+// other slice" waiting to be found; it is write-only in the shipped binary,
+// the same shape as Dragon's _DAT_00439b04. There is nothing to sweep the
+// handler-less components for. pirates_part2.cpp declares the same cell as
+// `unknown_43aba0` and carries the same note; the two should collapse to one
+// definition whenever the globals get a shared home.
 int LockdownFlagUnknown = 0;
 
 // ---------------------------------------------------------------------------
@@ -1008,7 +1166,7 @@ void StartOfEveryMode()
 	WheelCursor = 0;
 	// ResetGoldLights(0) and ResetSkulduggeryLights(0) -- 0x423870 / 0x423b70,
 	// the collectible slice's business.
-	tag_a_bloce.Component->Message(ft::BlockerRestartTimeout, 1.0f);
+	tag_a_bloce.Component->Message(ft::BlockerSetPosition, 1.0f);
 	tag_v_lite504.Component->Message(ft::LightResetAndTurnOn, 0.0f);
 	tag_v_lite505.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 
@@ -1030,7 +1188,7 @@ void EndOfEveryMode()
 {
 	RestoreBanksAndLetters();
 	tag_v_lite606.Component->MessageField++;  // modes completed this game
-	tag_a_bloce.Component->Message(ft::BlockerRestartTimeout, 0.0f);
+	tag_a_bloce.Component->Message(ft::BlockerSetPosition, 0.0f);
 	tag_v_lite504.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 	tag_v_lite505.Component->Message(ft::LightResetAndTurnOn, 0.0f);
 }
@@ -1044,7 +1202,7 @@ void ModeSweepFinished(float timeLimit)
 {
 	// Release whatever the lava sink is holding, unless the ball came from the
 	// launcher (a mode started by the skill shot needs no extra feed).
-	if (!SkillShotActive)
+	if (!ModeStartedWithBallInPlay)
 		EjectLavaSink(0.0f);
 
 	tag_mode_timer.Component->Message(ft::TimerSet, timeLimit);
@@ -1103,7 +1261,7 @@ void IdleController(MessageCode code)
 {
 	if (code == ft::MissionComplete)
 	{
-		SkillShotActive = false;
+		ModeStartedWithBallInPlay = false;
 		if (midi::CurrentMusic() != idle_music)
 			midi::PlayMusic(idle_music);
 		return;
@@ -1128,14 +1286,14 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 	switch (code)
 	{
 	case ft::MissionComplete:
-		SkillShotActive = true;
+		ModeStartedWithBallInPlay = true;
 		TargetsDroppedThisBall = 0;
-		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, Forever);
-		tag_a_bloce.Component->Message(ft::BlockerRestartTimeout, 0.0f);
+		tag_a_blocc.Component->Message(ft::BlockerSetPosition, Forever);
+		tag_a_bloce.Component->Message(ft::BlockerSetPosition, 0.0f);
 		tag_v_lite504.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite505.Component->Message(ft::LightResetAndTurnOn, 0.0f);
-		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, 0.0f);
-		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, Forever);
+		tag_a_blocf.Component->Message(ft::BlockerSetPosition, 0.0f);
+		tag_a_blocg.Component->Message(ft::BlockerSetPosition, Forever);
 		return;
 
 	case ft::MissionStarted:
@@ -1174,23 +1332,26 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 		EnterIdle();
 		return;
 	// The five mode slots. Note they go to the *state* setters, not through
-	// StartSelectedMode, so SkillShotActive stays set and the mode's sweep
+	// StartSelectedMode, so ModeStartedWithBallInPlay stays set and the mode's sweep
 	// will not feed a ball from the lava sink.
-	case 3: SetMode(Mode::Bermuda); Handler(ft::MissionComplete, nullptr); return;
-	case 4: SetMode(Mode::AttackShip); Handler(ft::MissionComplete, nullptr); return;
-	case 5: SetMode(Mode::TreasureHunt); Handler(ft::MissionComplete, nullptr); return;
-	case 6: SetMode(Mode::Tavern); Handler(ft::MissionComplete, nullptr); return;
-	case 7: SetMode(Mode::Storm); Handler(ft::MissionComplete, nullptr); return;
+	//
+	// Fixed: these five used to be `SetMode(X); Handler(MissionComplete, nullptr)`, which
+	// dropped what the setters do besides writing the register. The listing settles it --
+	// the skill-shot controller's arms are plain tail calls, `call 0x004234c0` for slot 3
+	// at 0x0042ac67 and so on -- and each setter also arms the mode-in-progress light
+	// (0x00423400: v_lite606->Message(7, -1.0f)) and, for four of them, shows a glyph:
+	// Bermuda "J" 2.0 s, AttackShip "H" 1.0 s, TreasureHunt "I" 2.0 s, Tavern "333" 2.0 s,
+	// Storm none. pirates_modes_entry.cpp's Enter* routines are exactly those setters, so
+	// calling them is both shorter and faithful.
+	case 3: EnterBermuda(); return;
+	case 4: EnterAttackShip(); return;
+	case 5: EnterTreasureHunt(); return;
+	case 6: EnterTavern(); return;
+	case 7: EnterStorm(); return;
 	default:
 		// Unreachable: the cursor is clamped to 0..8 above.
 		return;
 	}
-
-	// UNVERIFIED in one respect: the original calls the *setter* functions
-	// (0x4234c0 etc.), which also set the wheel light and show a glyph, where
-	// the five lines above only set the register and broadcast. The difference
-	// is cosmetic for the state machine but not for the display. Settled by
-	// disassembling 0x423480..0x423560 and inlining what they do.
 }
 
 // ---------------------------------------------------------------------------
@@ -1237,12 +1398,12 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 		mode_scratch_counter = 1;
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepAttackShip);
 		RaiseShipDropBank();
-		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, Forever);
-		tag_a_bloce.Component->Message(ft::BlockerRestartTimeout, 1.0f);
+		tag_a_blocc.Component->Message(ft::BlockerSetPosition, Forever);
+		tag_a_bloce.Component->Message(ft::BlockerSetPosition, 1.0f);
 		tag_v_lite504.Component->Message(ft::LightResetAndTurnOn, 0.0f);
 		tag_v_lite505.Component->Message(ft::LightResetAndTurnOff, 0.0f);
-		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, 0.0f);
-		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, 0.0f);
+		tag_a_blocf.Component->Message(ft::BlockerSetPosition, 0.0f);
+		tag_a_blocg.Component->Message(ft::BlockerSetPosition, 0.0f);
 		AddScoreAt(nullptr, BonusAttackShip);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_ATTACK_SHIP), Forever);
 		tag_v_lite4.Component->Message(ft::LightFlasherStartTimed, Forever);
@@ -1451,9 +1612,9 @@ void StormController(MessageCode code, TPinballComponent* caller)
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepStorm);
 		midi::PlayMusic(storm_mutiny_music);
 		Play(tag_tabb67wave.Component);
-		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, 0.0f);
-		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, Forever);
-		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, 0.0f);
+		tag_a_blocc.Component->Message(ft::BlockerSetPosition, 0.0f);
+		tag_a_blocf.Component->Message(ft::BlockerSetPosition, Forever);
+		tag_a_blocg.Component->Message(ft::BlockerSetPosition, 0.0f);
 		// Storm is the only mode that re-raises all three drop banks: every
 		// target on the table is a bailing target.
 		RaiseTavernDropBank();
@@ -1693,15 +1854,15 @@ void TreasureHuntController(MessageCode code, TPinballComponent* caller)
 		}
 
 	case ft::Collision:
-		if (ComponentTypeOf(caller) == type::Unknown1020)
+		if (ComponentTypeOf(caller) == type::LightRolloverMlite)
 			AddToJackpot(20000);
 		return;
 
 	case ft::MissionComplete:
 		StartOfEveryMode();
-		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, Forever);
-		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, Forever);
-		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, Forever);
+		tag_a_blocc.Component->Message(ft::BlockerSetPosition, Forever);
+		tag_a_blocf.Component->Message(ft::BlockerSetPosition, Forever);
+		tag_a_blocg.Component->Message(ft::BlockerSetPosition, Forever);
 		AddScoreAt(nullptr, BonusTreasureHunt);
 		ClearTreasureXLights();
 		// The orbits are taken out of play for the duration: their trip wires
@@ -1804,9 +1965,9 @@ void MutinyController(MessageCode code, TPinballComponent* caller)
 		Play(tag_tabb73wave.Component);
 		// All three blockers released: Mutiny wants the ball loose in the
 		// bumper field, not funnelled at an objective.
-		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, 0.0f);
-		tag_a_blocf.Component->Message(ft::BlockerRestartTimeout, 0.0f);
-		tag_a_blocg.Component->Message(ft::BlockerRestartTimeout, 0.0f);
+		tag_a_blocc.Component->Message(ft::BlockerSetPosition, 0.0f);
+		tag_a_blocf.Component->Message(ft::BlockerSetPosition, 0.0f);
+		tag_a_blocg.Component->Message(ft::BlockerSetPosition, 0.0f);
 		Display(tag_info_text_box.Component, GetRcString(STR_HINT_MUTINY), Forever);
 		return;
 
@@ -1897,7 +2058,14 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 	// UNVERIFIED, and it is a real gap: nothing resets the shared WheelCursor
 	// for Sword Fight except StartOfEveryMode. So the award a Sword Fight
 	// hands out depends on what a *previous* mode left in that cell, since
-	// Treasure Hunt and Bermuda Triangle advance the same int. See WheelCursor.
+	// Treasure Hunt and Bermuda Triangle advance the same int.
+	//
+	// Confirmed as a gap in the binary rather than a gap in the reading: the
+	// nine references to 0x00435d04 listed on WheelCursor are the whole set,
+	// and the only zeroing writer among them is StartOfEveryMode's
+	// 0x0042aada. There is no Sword-Fight-specific reset to have missed. What
+	// the binary cannot say is whether that was the design; see WheelCursor
+	// for the one play session that would discriminate.
 }
 
 // ---------------------------------------------------------------------------
@@ -1941,7 +2109,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		}
 
 	case ft::Collision:
-		if (ComponentTypeOf(caller) == type::Unknown1020)
+		if (ComponentTypeOf(caller) == type::LightRolloverMlite)
 			AddToJackpot(50000);
 		return;
 
@@ -2054,10 +2222,18 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		// Clear the SIX mode wheel lights -- v_lite552..557 only. v_lite558
 		// (Sword Fight) and v_lite559 (Peg Leg's Loot itself) are left lit.
 		//
-		// UNVERIFIED whether that is deliberate. It means that after the
-		// finale the random pool is six wide, not seven, so Sword Fight cannot
-		// be offered again until the next finale. Settled by playing past one
-		// finale and watching the wheel.
+		// UNVERIFIED whether that is deliberate, and the binary is exhausted on
+		// it. The teardown is a fully unrolled run of six identical
+		// `push 0x14` sends at 0x0042d3a1, 0x0042d3b0, 0x0042d3bf, 0x0042d3ce,
+		// 0x0042d3dd and 0x0042d3ec -- v_lite552 (0x0043c2dc) through
+		// v_lite557 (0x0043c354) -- with no loop, no index table and no
+		// seventh send following, so there is no dropped iteration or
+		// off-by-one artefact to appeal to: the source asked for six. What
+		// stays open is only the intent, and the consequence if it was an
+		// oversight: after the finale the random pool is six wide, not seven,
+		// so Sword Fight cannot be offered again until the next finale.
+		// Settled by playing past one finale and watching whether v_lite558
+		// ever goes out.
 		tag_v_lite552.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite553.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite554.Component->Message(ft::LightResetAndTurnOff, 0.0f);

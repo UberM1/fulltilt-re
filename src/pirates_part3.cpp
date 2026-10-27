@@ -38,7 +38,7 @@
 //   7       TLightFlasherStartTimed (7, +0)          v_lite569 phase 2 -> 1
 //   9       TLightTurnOnTimed (9, +0)                v_lite569 phase 3 -> 2
 //   0x1c    TLightGroupStepBackward (24, +4)         the three rotated lane groups
-//   0x39    FT-only, see FtMessageCode::TBlockerHold the four a_bloc* blockers
+//   0x39    FT-only, see FtMessageCode::TBlockerSetPosition the four a_bloc* blockers
 //   0x46    ControlTimerExpired (60, +10)            a_kick2's and v_lite569's trigger
 //   0x4a    ControlCollision (63, +11)               both one-ways
 //   0x4c    FT-only, see FtMessageCode::TMagnetDisarm a_kick1
@@ -107,12 +107,18 @@ extern TPinballComponent*& a_kick1; // DAT_0043bbd4 -- the kickback armed by the
 
 // The three light groups both flipper buttons rotate.
 //
-// UNVERIFIED: which lights lane_winds_light_group holds. pirates-rules.md §7 reads the
-// manual's "the flippers also rotate the wind letter lights and the island lane lights"
-// onto these three groups, and the two island groups are pinned by name, but the first is
-// either the five W-I-N-D-S letters (v_lite533..537, which part1 drives individually) or
-// the four wind-lane indicator pairs. Dumping the group's member list out of PIRATES.DAT
-// would settle it; nothing in the rules branches on the answer.
+// Settled from PIRATES.DAT. `lane_winds_light_group` is group 531, and its member list
+// (iattribute 1027, the array TLightGroup's constructor walks) is
+// [401, 402, 403, 404, 405] = v_lite533, v_lite534, v_lite535, v_lite536, v_lite537 --
+// the five W-I-N-D-S letters, the same five pirates_part1.cpp drives individually. Not
+// the wind-lane indicator pairs, which live in their own groups (right_wind,
+// south_wind, west_wind, east_wind_1, east_wind_2, three members each).
+//
+// The five are the five rollover lanes, two left and three right: v_lite533 and
+// v_lite534 sit at screen x=216,232 over a_roll5/a_roll4, and v_lite535..537 at
+// x=396,412,427 over a_roll1/a_roll2/a_roll3. The two island groups are
+// island_lane_top (groups 406-408 = v_lite538..540) and island_lane_bottom
+// (409-411 = v_lite541..543), both pinned by name as before.
 extern TLightGroup*& lane_winds_lights;          // DAT_0043b7b4
 extern TLightGroup*& island_lane_top_lights;     // DAT_0043babc
 extern TLightGroup*& island_lane_bottom_lights;  // DAT_0043bb2c
@@ -156,23 +162,59 @@ extern int BallsInBrig;
 // yet.
 
 namespace FtMessageCode {
-// 0x39, sent only to the a_bloc* blockers and to a_cannon. The float is a hold time: 0.0
-// closes the blocker now, a positive value holds it open that long, -1.0 indefinitely.
-// Arithmetically 0x39 would be upstream's TGateDisable under the +4 rule, which cannot be
-// what a blocker does with it, so part2 reads it as a code FT added to TBlocker.
+// 0x39 -- SETTLED, and it is not a hold time. Full Tilt's TBlocker::Message is at
+// CADET.EXE 0x00414f80 (byte-identical at the same address in PIRATES.EXE, same build),
+// and it dispatches codes 0x37..0x3c through a jump table at 0x00415398 plus 0x45,
+// 0x3f3 (SetTiltLock), 0x3fe (PlayerChanged) and 0x402 (Reset). The 0x39 arm is
+// 0x004150ce and it does this:
 //
-// Note that pirates_part1.cpp spells the same code MessageCode::TBlockerRestartTimeout
-// instead -- a behavioural name for an upstream constant whose value (59) is not 0x39.
-// This file follows part2: the name is equally unverified either way, but part2's constant
-// carries the value the binary actually sends.
-// UNVERIFIED: the name and the float's exact meaning. FT's TBlocker::Message is engine
-// code and outside this corpus.
-constexpr auto TBlockerHold = static_cast<MessageCode>(0x39);
+//     edi = (int)floor(value)                  -- 0x42afff then 0x42afd8, the floor/ftol
+//     clamp the *old* index against ListBitmap->size()   (0x00415130..0x0041515e)
+//     clear the per-position byte at [this + old + 0x76]
+//     [this + 0x7e] = edi                      -- the current position index
+//     if (edi >= 0)  set [this + edi + 0x76] = 1 and show sprite edi
+//     else           SpriteSet(none)           -- 0x004151eb, via 0x41cfa0
+//
+// So the float is a POSITION INDEX, not a duration: a Full Tilt TBlocker is a
+// multi-position moving wall, one visual state and one collision-flag byte per position,
+// and -1 means "no position" -- retracted, nothing active, sprite off. The rest of the
+// family confirms the reading: 0x3b (0x00415245) sends itself 0x39 with
+// ListBitmap->size()-1 and plays the enable sound [+0xae]; 0x3c (0x00415284) sends itself
+// 0x39 with -1.0f and plays the disable sound [+0xb2]; 0x3a animates toward a position.
+//
+// The numbering that looked wrong is fine once the real pair is known. CADET.EXE's own
+// DrainBallBlockerControl (0x00423480) sends 0x38 where upstream's DrainBallBlockerControl
+// sends TBlockerEnable (52, i.e. +4) and 0x45 where upstream sends TBlockerRestartTimeout
+// (59) -- so 0x37/0x38 are Disable/Enable in the +4 band, RestartTimeout is 0x45, and
+// 0x39-0x3c are four codes Full Tilt added below them.
+//
+// Consequence for the port, flagged because it is not this file's to fix: the engine's
+// TBlocker (reference/SpaceCadetPinball/TBlocker.cpp) has no case for 0x39, and its
+// `float UnknownP7e` is in fact this int position index -- which is also why Dragon's
+// gargoyle rocks compare the same offset against -1 as an int. pirates_part1.cpp used to
+// send upstream's TBlockerRestartTimeout (59) here, which is a different code; it now
+// sends this one, so all three slices agree on what the binary sends.
+constexpr auto TBlockerSetPosition = static_cast<MessageCode>(0x39);
 
-// 0x4c -- "disarm the holding field". Sent to the six s_magnet*, to a_kout1/a_kout2 and,
-// here, to a_kick1.
-// UNVERIFIED: whether a disarmed kickback can still catch a ball; that is decided inside
-// the component class.
+// 0x4c -- SETTLED. The three classes that answer it all mean "disarm", but they are three
+// different classes with three different mechanisms, read out of CADET.EXE:
+//
+//   TMagnet   (type 1042, Message 0x004166c0): 0x4b sets ActiveFlag ([this+0x5]) to 1,
+//             0x4c clears it and kills the hold timer. The magnet's capture circle is
+//             installed with &ActiveFlag (0x00416873: `lea ecx,[esi+0x5]`), and
+//             TEdgeManager skips edges whose ActiveFlag is clear -- so a disarmed magnet
+//             cannot catch a ball at all.
+//   TKickout  (type 1012, Message 0x004163a0): same ActiveFlag pair, and 0x4c additionally
+//             releases a ball it is already holding (0x00416443..0x00416473).
+//   TKickback (type 1014, Message 0x00415d70, which is what a_kick1 and a_kick2 are):
+//             0x4c sets a *suppression* dword [this+0x86] to 1 and 0x4b clears it. In
+//             TKickback::Collision (0x00415ba0) that dword only short-circuits the arming
+//             of the kick timer (0x00415bd7); DefaultCollision still runs at 0x00415c05.
+//
+// So the answer differs by device: a disarmed KICKBACK still catches and bounces the ball,
+// it just does not kick it. A disarmed magnet or kickout is out of the world entirely.
+// a_kick1 is type 1014 in PIRATES.DAT, so the brig release below leaves the ball path
+// solid and only cancels the kick.
 constexpr auto TMagnetDisarm = static_cast<MessageCode>(0x4c);
 }
 
@@ -230,10 +272,14 @@ void TavernWindowLightControl(MessageCode code, TPinballComponent* caller)
 // MessageCode::TLightTurnOn -- the value a TFlipper sends its control function when the
 // button goes down. Spelled with upstream's name here for the same reason upstream does.
 //
-// UNVERIFIED: that TLightGroupStepBackward is the direction the manual calls "to the
-// right". 0x1c is 28, which is 24 at +4, and 24 is StepBackward; whether that reads as
-// rightward on the playfield depends on the groups' member order in PIRATES.DAT. The code
-// sent is what matters and it is pinned.
+// Settled: StepBackward does read as "to the right" on this playfield. 0x1c is 28, which
+// is 24 at +4, and 24 is TLightGroupStepBackward, whose body (TLightGroup.cpp) gives each
+// light the state of its *predecessor* -- so the lit pattern walks toward higher indices.
+// All three groups are listed in PIRATES.DAT in left-to-right screen order:
+// lane_winds 401..405 at x=216,232,396,412,427; island_lane_top 406..408 at
+// x=312,328,344; island_lane_bottom 409..411 at x=312,328,345. Higher index = further
+// right, so one 0x1c step moves every lit lane light one lane rightward, and since both
+// buttons send 0x1c the player cannot walk one back.
 void FlipperLaneRotateControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::TLightTurnOn) // binary 1 -- flipper button pressed
@@ -255,10 +301,12 @@ void FlipperLaneRotateControl(MessageCode code, TPinballComponent* caller)
 // handled inside the component.
 //
 // The six blocker and indicator messages are pirates_part1.cpp's SwapBankRoute with one
-// difference: a_blocg is held open indefinitely (-1.0) where a bank completion closes it
-// (0.0). So the kick leaves the ball path in the same configuration a completed drop bank
-// does -- a_blocc and a_blocf shut, a_bloce held a second, v_lite504 lit as the live path
-// -- but with a_blocg left open for the ball the kicker has just thrown.
+// difference: a_blocg is retracted (-1.0) where a bank completion drives it to position 0
+// (0.0). Reading those floats as positions rather than durations (see
+// FtMessageCode::TBlockerSetPosition), the kick leaves the ball path in the same
+// configuration a completed drop bank does -- a_blocc and a_blocf at position 0, a_bloce
+// at position 1, v_lite504 lit as the live path -- but with a_blocg taken out of the world
+// entirely, clearing the way for the ball the kicker has just thrown.
 //
 // v_lite544 is a_kick2's armed lamp, and the direction of its message is the tell:
 // pirates_part1.cpp's two return lanes arm the kicker with
@@ -270,23 +318,41 @@ void FlipperLaneRotateControl(MessageCode code, TPinballComponent* caller)
 // [esp+0x8]. It is AddScoreFor(caller, 0), and as everywhere else that also makes a_kick2
 // the active scoring component, so a kickback breaks whatever combo ladder was running.
 //
-// UNVERIFIED: which outlane this is. pirates_part1.cpp calls the a_kick2 + s_bwal610 pair
-// the *left* outlane kickback, armed by the return lanes; pirates_part2.cpp gives that
-// description to a_kick1, armed by the two multiballs. Both cannot be the left outlane.
-// The arming evidence is solid on both sides, so the likeliest reading is two kickbacks on
-// opposite outlanes -- but the handler bodies do not say which is which, and only the
-// table geometry in PIRATES.DAT would.
+// Half settled, from PIRATES.DAT's geometry, and it kills the reading the two slices had
+// settled on. Both kickbacks are on the SAME side -- the left -- not on opposite outlanes.
+// Table X is positive to the left of screen (v_lite533 at screen x=216 has 501 X=+5.72,
+// v_lite537 at x=427 has X=-6.62) and Y grows toward the drain, which sits at X=0
+// (v_lite570 X=0.0005 Y=13.71, v_lite569 X=1e-6 Y=15.34). Attribute 600 gives:
+//
+//   a_kick2    X 5.23..6.25   Y 12.98        screen (209,380)
+//   s_bwal610  X 5.21..6.54   Y 11.70..13.67 (no sprite; the wall behind a_kick2)
+//   v_lite544  X 5.70         Y 12.74        screen (211,362)
+//   a_kick1    X 6.92..7.94   Y 14.02        screen (173,392)
+//   a_flip1    screen x 266..306             a_flip2 screen x 332..373
+//
+// So a_kick2 is the inner of the two, with s_bwal610 overlapping it and v_lite544 sitting
+// directly on it -- which independently confirms this slice's a_kick2 + s_bwal610 +
+// v_lite544 triple -- and a_kick1 is further out and lower. Nothing is on the right (-X)
+// side at that height.
+//
+// UNVERIFIED, and now narrower: which of the two left-side lanes the manual calls the
+// outlane. a_kick1 is the outer and lower of the pair, which is where an outlane kickback
+// belongs, making a_kick2 the inner return/kickback lane -- but that is a reading of two
+// coordinates, not evidence. Locating the left-side wall chain (the type-1000 s_bwal*
+// runs, attribute 600) between the two would settle it; nothing in the rules branches on
+// the answer. pirates_part1.cpp's and pirates_part2.cpp's "left outlane" wording should
+// both be corrected to "left side" by whoever owns those sentences.
 void KickbackControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::ControlTimerExpired) // binary 0x46
 		return;
 
-	blocC->Message(FtMessageCode::TBlockerHold, 0.0f);
-	blocE->Message(FtMessageCode::TBlockerHold, 1.0f);
+	blocC->Message(FtMessageCode::TBlockerSetPosition, 0.0f);
+	blocE->Message(FtMessageCode::TBlockerSetPosition, 1.0f);
 	lite504->Message(MessageCode::TLightResetAndTurnOn, 0.0f);
 	lite505->Message(MessageCode::TLightResetAndTurnOff, 0.0f);
-	blocF->Message(FtMessageCode::TBlockerHold, 0.0f);
-	blocG->Message(FtMessageCode::TBlockerHold, -1.0f);
+	blocF->Message(FtMessageCode::TBlockerSetPosition, 0.0f);
+	blocG->Message(FtMessageCode::TBlockerSetPosition, -1.0f);
 
 	lite544->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 1.0f);
 	AddScoreFor(caller, 0); // 5000
@@ -458,14 +524,27 @@ void ShootAgainLightControl(MessageCode code, TPinballComponent* caller)
 // resting state afterwards differs. It also means a serve always rearms it, which is
 // consistent with s_launcher1 setting both ActiveFlags itself rather than relying on this.
 //
-// UNVERIFIED: the field identities behind the three offsets the listing reads --
-// [+0x42], [+0x4e], [+0x46]. They are taken from s_launcher1, whose PlungerFeedBall arm
-// guards TLightResetAndTurnOn with [+0x42], TLightTurnOnTimed with [+0x4e] and
-// TLightFlasherStartTimed with [+0x46], which pins them to LightOnFlag, ToggledOnFlag and
-// FlasherOnFlag respectively -- pirates_part2.cpp already reads them that way. Dumping
-// Full Tilt's TLight layout would confirm it directly; note the binary reads all three as
-// 32-bit where upstream declares bools, so the port's field accesses are a layout
-// approximation either way.
+// Settled directly out of Full Tilt's TLight. TLight::Message is CADET.EXE 0x0040a490,
+// dispatching codes 0..0x1a through a jump table at 0x0040ac30, and the first five arms
+// name the fields outright against upstream's TLight::Message:
+//
+//   code 0  TLightTurnOff          0x0040a4eb  [+0x42] = 0, then tests 0x46/0x4a/0x4e
+//   code 1  TLightTurnOn           0x0040a534  [+0x42] = 1, then the same three
+//   code 2  TLightGetLightOnFlag   0x0040a57d  returns [+0x42]
+//   code 3  TLightGetFlasherOnFlag 0x0040a588  returns [+0x46]
+//   code 4  TLightFlasherStart     0x0040a593  [+0x46] = 1, [+0x4e] = 0
+//
+// Upstream's TurnOff/TurnOn read `LightOnFlag = false/true; if (!FlasherOnFlag &&
+// !ToggledOffFlag && !ToggledOnFlag)`, in that order, so the layout is a stride-4 run:
+//
+//   +0x42 LightOnFlag   +0x46 FlasherOnFlag   +0x4a ToggledOffFlag
+//   +0x4e ToggledOnFlag +0x52 TurnOffAfterFlashingFg +0x56 LightOnBmpIndex
+//
+// i.e. exactly the three this handler reads, and the same three the drain reads on
+// v_lite569 at 0x00426166/0x0042616b/0x00426170. The 32-bit-vs-bool note stands: Full
+// Tilt stores all of these as dwords where upstream declares them `bool`, so the port's
+// field accesses remain a layout approximation -- but the identities are no longer a
+// guess.
 void KickbackArmedLightControl(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::ControlTimerExpired) // binary 0x46
