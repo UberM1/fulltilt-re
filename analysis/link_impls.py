@@ -35,7 +35,7 @@ def implementations(prefix):
     for path in sorted((ROOT / "src").glob(f"{prefix}_*.cpp")):
         lines = path.read_text().splitlines()
         ns, depth, ns_depth = None, 0, None
-        pending = []
+        pending, seen_addr = [], False
         for i, line in enumerate(lines):
             m = re.match(r"\s*namespace\s+(\w+)\s*\{?", line)
             if m and m.group(1) == prefix:
@@ -44,22 +44,37 @@ def implementations(prefix):
             if ns is not None and depth <= ns_depth:
                 ns = None
 
-            if line.lstrip().startswith("//"):
-                # findall, not search: a doc block may name both the handler's own
-                # address and the duplicates it also serves, on the same line.
-                hits = ADDR_COMMENT.findall(line)
-                if hits:
-                    pending.extend(int(h, 16) for h in hits)
+            stripped = line.strip()
+
+            if stripped.startswith("//"):
+                # Within one comment block, the first line that names an address claims
+                # it -- a separator rule or a title line may come first. Later lines
+                # claim only in the FUN_ spelling, which is how a handler declares the
+                # duplicate addresses it also serves.
+                #
+                # This matters because prose routinely cross-references other handlers'
+                # addresses. Pairing those with the next definition silently shadowed
+                # the real implementation three times: 0x427880, 0x426140, and both
+                # fire lizard sinks, which left one of them dead in play.
+                for h in ADDR_COMMENT.findall(line):
+                    if not seen_addr or f"FUN_{h}" in line or f"FUN_00{h}" in line:
+                        pending.append(int(h, 16))
+                        seen_addr = True
                 continue
+
+            if not stripped:
+                # A blank line ends the block. Only the comment contiguously attached
+                # to a definition describes it; a section header further up does not.
+                pending, seen_addr = [], False
+                continue
+
             d = DEFN.match(line)
             if d:
                 tail = " ".join(lines[i : i + 2])
                 if not tail.rstrip().endswith(";") and "{" in tail:
                     for a in pending:
                         out.setdefault(a, (d.group(1), path.name, ns))
-                pending = []
-            elif line.strip() and not line.strip().startswith("//"):
-                pending = []
+            pending, seen_addr = [], False
     return out
 
 
