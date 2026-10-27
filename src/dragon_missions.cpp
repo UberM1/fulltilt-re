@@ -63,7 +63,18 @@ constexpr music_track wizards_fury_music = 6;
 namespace dragon {
 
 // ---------------------------------------------------------------------------
-// Message codes (binary numbering)
+// Message codes
+//
+// Spelled with the port's own MessageCode wherever the code has an upstream
+// counterpart, with the binary's number in a trailing comment -- the convention
+// dragon_part1..4.cpp already follow. Only codes the port's engine does not speak
+// at all (the FT-only quest lifecycle, the moving part, the mode register's own
+// broadcast) keep the binary number via Msg().
+//
+// This matters in both directions. The engine *delivers* its own numbering, so a
+// branch written against the binary number never fires -- which is how the drain
+// bonus count-up came to stall forever (the text box's expiry arrives as
+// ControlTimerExpired 60, not as the binary's 0x46).
 // ---------------------------------------------------------------------------
 
 namespace ft {
@@ -103,37 +114,46 @@ constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 constexpr MessageCode LightSweepStart = MessageCode::TLightSweepStart;
 
 // TLightGroup family (delta +4).
-constexpr MessageCode GroupReset = Msg(0x26);
-constexpr MessageCode GroupGetOnCount = Msg(0x29);
-constexpr MessageCode GroupTurnOnNext = Msg(0x2d);   // upstream TLightGroupResetAndTurnOn
-constexpr MessageCode GroupTurnOffNext = Msg(0x2e);  // upstream TLightGroupResetAndTurnOff
-constexpr MessageCode GroupRestartNotifyTimer = Msg(0x2f);
-constexpr MessageCode GroupAnimationBackward = Msg(0x1e);
+constexpr MessageCode GroupReset = MessageCode::TLightGroupReset;  // binary 0x26
+constexpr MessageCode GroupGetOnCount = MessageCode::TLightGroupGetOnCount;  // binary 0x29
+constexpr MessageCode GroupTurnOnNext = MessageCode::TLightGroupResetAndTurnOn;  // binary 0x2d
+constexpr MessageCode GroupTurnOffNext = MessageCode::TLightGroupResetAndTurnOff;  // binary 0x2e
+constexpr MessageCode GroupRestartNotifyTimer = MessageCode::TLightGroupRestartNotifyTimer;  // binary 0x2f
+constexpr MessageCode GroupAnimationBackward = MessageCode::TLightGroupAnimationBackward;  // binary 0x1e
 
 // Targets and blockers (delta +4).
-constexpr MessageCode SoloTargetDisable = Msg(0x35);
-constexpr MessageCode SoloTargetEnable = Msg(0x36);
-constexpr MessageCode BlockerDisable = Msg(0x37);
-constexpr MessageCode BlockerEnable = Msg(0x38);
+constexpr MessageCode SoloTargetDisable = MessageCode::TSoloTargetDisable;  // binary 0x35
+constexpr MessageCode SoloTargetEnable = MessageCode::TSoloTargetEnable;  // binary 0x36
+constexpr MessageCode BlockerDisable = MessageCode::TBlockerDisable;  // binary 0x37
+constexpr MessageCode BlockerEnable = MessageCode::TBlockerEnable;  // binary 0x38
 
 // Gates (delta +9).
-constexpr MessageCode GateDisable = Msg(0x3e);
-constexpr MessageCode GateEnable = Msg(0x3f);
+constexpr MessageCode GateDisable = MessageCode::TGateDisable;  // binary 0x3e
+constexpr MessageCode GateEnable = MessageCode::TGateEnable;  // binary 0x3f
 
 // Sinks / kickouts / timers (delta +9..+10).
-constexpr MessageCode SinkResetTimer = Msg(0x41);
-constexpr MessageCode TimerSet = Msg(0x45);       // value = seconds, -1.0 cancels
+constexpr MessageCode SinkResetTimer = MessageCode::TSinkResetTimer;  // binary 0x41
+constexpr MessageCode TimerSet = MessageCode::TTimerResetTimer;  // binary 0x45; value = seconds, -1.0 cancels
 constexpr MessageCode TimerGetRemaining = Msg(0x48);
 
 // Control* block (delta +10, ControlCollision +11).
-constexpr MessageCode BallCaptured = Msg(0x42);
+constexpr MessageCode BallCaptured = MessageCode::ControlBallCaptured;  // binary 0x42
 // 0x43 is sent *to* a THole to let the held ball go, after `value` seconds --
 // confirmed by decompiling THole::Message at 0x416c70 (see dragon_part4.cpp).
 // 0.0 therefore means "release now", not "hold forever".
 constexpr MessageCode HoleReleaseBall = Msg(0x43);
-constexpr MessageCode TimerExpired = Msg(0x46);
+constexpr MessageCode TimerExpired = MessageCode::ControlTimerExpired;  // binary 0x46
+// LEFT at the binary number, unlike its neighbours: upstream's
+// ControlNotifyTimerExpired is 61, which is numerically the same as the binary's
+// 0x3d -- JawOpened below -- and SlayDragonController switches on both. Binding
+// this one to the engine value is what the light-group notify timers (the dragon
+// fire sweep, the death animation) actually need, but it cannot be done until
+// JawOpened/BlockerMotionDone has a port value of its own; the port's TBlocker
+// raises ControlTimerExpired for a finished motion and has no separate code, so
+// settling that is a change to the engine patch and to dragon_part2.cpp's rock
+// handlers as well. Not on the end-of-ball path, so left as it was found.
 constexpr MessageCode NotifyTimerExpired = Msg(0x47);
-constexpr MessageCode Collision = Msg(0x4a);
+constexpr MessageCode Collision = MessageCode::ControlCollision;  // binary 0x4a
 constexpr MessageCode DisableMultiplier = Msg(0x4d);
 constexpr MessageCode MissionComplete = Msg(0x4f);
 constexpr MessageCode MissionStarted = Msg(0x50);
@@ -167,9 +187,9 @@ constexpr MessageCode JawOpened = Msg(0x3d);
 constexpr MessageCode MovingPartSetPosition = Msg(0x3a);
 
 constexpr MessageCode FlipperPressed = Msg(0x01);  // same value as LightTurnOn; see EggExchange
-constexpr MessageCode SetTiltLock = Msg(0x3f3);
-constexpr MessageCode Resume = Msg(0x3f1);
-constexpr MessageCode Reset = Msg(0x402);
+constexpr MessageCode SetTiltLock = MessageCode::SetTiltLock;  // binary 0x3f3
+constexpr MessageCode Resume = MessageCode::Resume;  // binary 0x3f1
+constexpr MessageCode Reset = MessageCode::Reset;  // binary 0x402
 }  // namespace ft
 
 // Component *type* ids, from vtable slot 0. Distinct namespace from messages.
@@ -467,7 +487,7 @@ void ClearText(TTextBox* box);                                 // 0x41d930
 // The premise that half these strings carry no specifier was an artifact of
 // analysis/dragon-strings.txt, which truncates every string at its embedded
 // newline -- 3019 is "Dragon Hoard\n%ld", not "Dragon Hoard".
-void FormatWithValue(char* out, const char* fmt, int value);
+void FormatWithValue(char* out, size_t size, const char* fmt, int value);
 void ComponentHandler(MessageCode code, TPinballComponent* caller);  // 0x423060
 void Play(TSound* sound);  // vtable +0x18; the original returns the clip length
 
@@ -723,7 +743,7 @@ void DisplayTimeRemaining(int nameStringId)
 		return;
 
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(nameStringId), remaining / 1000);
+	FormatWithValue(buffer, sizeof buffer, GetRcString(nameStringId), remaining / 1000);
 	Display(tag_info_text_box.Component, buffer, 0.5f);
 }
 
@@ -1383,7 +1403,7 @@ void DragonHoardController(MessageCode code, TPinballComponent* caller)
 		// Each gem site (0x428b9c, 0x428c4c, 0x428d34, 0x428d98, 0x428dfc, 0x428e6c,
 		// 0x42909f, 0x429112) pushes AddScoreAt's return value as sprintf's one vararg.
 		const int credited = AddScoreAt(caller, gem.score);
-		FormatWithValue(buffer, GetRcString(gem.stringId), credited);
+		FormatWithValue(buffer, sizeof buffer, GetRcString(gem.stringId), credited);
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		CollectGem(gem.bit);
 	};
@@ -1663,11 +1683,11 @@ void RescueMaidenAwardWindow(TPinballComponent* caller)
 	case 0:
 		// 0x427a48 / 0x427a8d: `push 0x3d090` / `push 0x7a120` into AddScoreAt, then its
 		// return value into sprintf. 3008 is the bare "%ld", so the amount is all there is.
-		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 250000));
+		FormatWithValue(buffer, sizeof buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 250000));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 1:
-		FormatWithValue(buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 500000));
+		FormatWithValue(buffer, sizeof buffer, GetRcString(STR_BARE_NUMBER), AddScoreAt(caller, 500000));
 		Display(tag_info_text_box.Component, buffer, 2.0f);
 		break;
 	case 2:
@@ -2180,7 +2200,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	// value, so the banner is the amount actually paid, not the stored total.
 	const int superJackpot = DragonSpecialAddScore(caller, pb::MainTable->SuperJackpotScore);
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(STR_DRAGON_SLAIN), superJackpot);
+	FormatWithValue(buffer, sizeof buffer, GetRcString(STR_DRAGON_SLAIN), superJackpot);
 	Display(tag_info_text_box.Component, buffer, Forever);
 	AddScoreAt(caller, 1500000);
 	CollectJackpot(0.0f, false);
@@ -2723,9 +2743,13 @@ void MissionHandler(MessageCode code, TPinballComponent* caller)
 	// Two codes mean "re-announce the current mode": an unpause, and a timer
 	// expiry on the text box itself once its display timer has run out.
 	if (getenv("FT_AUTODRAIN") && static_cast<int>(CurrentMode()) == 11)
-		fprintf(stderr, "DBG-mh mode=11 code=%d caller=%p box=%p modetimer=%p pending=%d\n",
-		        static_cast<int>(code), static_cast<void*>(caller), static_cast<void*>(box),
-		        static_cast<void*>(tag_mode_timer.Component), (int)AnnouncementPending(box));
+		fprintf(stderr, "DBG-mh mode=11 code=%d caller=%s box=%s modetimer=%s pending=%d\n",
+		        static_cast<int>(code),
+		        caller && caller->GroupName ? caller->GroupName : "?",
+		        box && box->GroupName ? box->GroupName : "?",
+		        tag_mode_timer.Component && tag_mode_timer.Component->GroupName
+		            ? tag_mode_timer.Component->GroupName : "?",
+		        (int)AnnouncementPending(box));
 	if (code == ft::Resume ||
 	    (code == ft::TimerExpired && caller == box && !AnnouncementPending(box)))
 		code = ft::MissionStarted;

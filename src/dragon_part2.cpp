@@ -103,7 +103,7 @@ void RescueMaidenAwardWindow(TPinballComponent* caller);
 // AddScoreFor / AddScoreAt just returned -- pushed before the buffer and the format, in
 // the ordinary cdecl vararg order, which is what Ghidra was rendering as an unrelated
 // earlier expression.
-void FormatWithValue(char* out, const char* fmt, int value);
+void FormatWithValue(char* out, size_t size, const char* fmt, int value);
 
 // The moving part's current frame index, with -1 for "retracted, nothing drawn". From
 // the engine at 0x414f80: BlockerDisable (0x37) aims +0x92 at -1, BlockerEnable (0x38)
@@ -444,7 +444,7 @@ void FireRidgeOrbitControl(MessageCode code, TPinballComponent* caller)
 	lite69->Message(MessageCode::TLightTurnOn, 0.0f);
 	lite69->Message(MessageCode::TLightFlasherStartTimedThenStayOff, 20.0f);
 
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_FireRidge)), addedScore);
+	FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_FireRidge)), addedScore);
 	info_text_box->Display(Buffer, 2.0f);
 }
 
@@ -583,7 +583,7 @@ void DragonChuteControl(MessageCode code, TPinballComponent* caller)
 	// shared routine; same arithmetic either way.
 	AddToSuperJackpot(200000);
 
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_SuperJackpotUp)), 200000);
+	FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_SuperJackpotUp)), 200000);
 	info_text_box->Display(Buffer, 2.0f);
 
 	lite68->Message(MessageCode::TLightTurnOn, 0.0f);
@@ -723,7 +723,7 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
 			const int credited = AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+			FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
@@ -750,7 +750,7 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 
 	const int lit = prison_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
 	const int credited = AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+	FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (prison_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)
@@ -790,7 +790,7 @@ void WatchWindowTripControl(MessageCode code, TPinballComponent* caller)
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
 			const int credited = AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+			FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
@@ -800,7 +800,7 @@ void WatchWindowTripControl(MessageCode code, TPinballComponent* caller)
 	{
 		tabc51wave->Play(caller, "WatchWindowTrip");
 		const int credited = AddScoreFor(caller, 0);
-		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+		FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 		info_text_box->Display(Buffer, 2.0f);
 		return;
 	}
@@ -816,7 +816,7 @@ void WatchWindowTripControl(MessageCode code, TPinballComponent* caller)
 	tabc04wave->Play(caller, "WatchWindowTrip");
 	const int lit = watch_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
 	const int credited = AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+	FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (watch_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)
@@ -850,7 +850,7 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 		if (mode_timer->MessageField == ModeRescueMaiden)
 		{
 			const int credited = AddScoreFor(caller, 0);
-			FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+			FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 			info_text_box->Display(Buffer, 2.0f);
 			return;
 		}
@@ -860,7 +860,7 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 	{
 		tabc51wave->Play(caller, "GateWindowTrip");
 		const int credited = AddScoreFor(caller, 0);
-		FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+		FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 		info_text_box->Display(Buffer, 2.0f);
 		return;
 	}
@@ -875,7 +875,7 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 
 	const int lit = gate_windows->Message(MessageCode::TLightGroupGetOnCount, 0.0f);
 	const int credited = AddScoreFor(caller, lit);
-	FormatWithValue(Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
+	FormatWithValue(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_WindowLane)), credited);
 	info_text_box->Display(Buffer, 2.0f);
 
 	if (gate_windows->Message(MessageCode::TLightGroupGetLightCount, 0.0f) - lit == 1)

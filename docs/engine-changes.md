@@ -30,6 +30,7 @@ than compiling, which is why they are not in the original count.
 | `TableRules::MultiplierIsValue` | 1 | `table_rules.h`, `TPinballTable.cpp` |
 | per-table `make_links` / `ClearLinks` | 1 | `control.cpp` |
 | `UnstuckBall` through `TPinballTable::Plunger` | 1 | `control.cpp` |
+| per-table `RT_STRING` tables | all bonus-table text | `table_rules.h`, `table_rules.cpp`, `table_strings.cpp`, `pb.cpp` |
 
 ## 1. `TPinballComponent::GetComponentType()` — 17 uses
 
@@ -123,6 +124,33 @@ It dereferenced the `plunger` tag, which is Space Cadet's group name and null on
 bonus tables -- Skulduggery died there as soon as a ball sat still for twenty frames.
 It goes through `TPinballTable::Plunger` instead, which every table has because the
 loader builds it from the DAT's own plunger object.
+
+## 9. Per-table string tables
+
+`pb::get_rc_string` forwarded straight to `translations::GetTranslation`, whose `Msg`
+enum is Space Cadet's string table embedded from `pinball.exe` and nothing else.
+Dragon's Keep and Skulduggery name their messages by the resource ids of their *own*
+executables -- 1001..3076 in both -- so every one of them missed, and
+`translations.cpp` answered its `"!Missing MsgId!"` placeholder. That string is what
+the playfield drew for every message either bonus table displayed; it is the whole of
+the "the mission text does not render as it should" report.
+
+`TableRules` now carries the table's own `RcString` table (`{id, text}`, sorted) and
+`pb::get_rc_string` consults it before falling through to `translations.cpp`. Space
+Cadet's three registry rows carry none, so its ids resolve exactly as before and stay
+localisable; the bonus tables have no translations to go through, their text only ever
+existed in English.
+
+The data is **embedded**, generated into `table_strings.cpp` by
+`analysis/gen_table_strings.py` from the dumps `analysis/dump_strings.py` already
+produced. Reading it at runtime was considered and is not actually available: the
+strings live in `DRAGON.EXE` and `PIRATES.EXE`, and the port never opens those -- it
+stages only the `.DAT`, which has no `RT_STRING` resource. Embedding is also what the
+port already does for Space Cadet.
+
+The embedded strings keep their embedded newlines, which is what makes `"Fire
+Ridge\n%ld"` render as a label above its value, and they still carry the `%ld` that
+`FormatWithValue` fills.
 
 ## Not surfaced by the compiler
 

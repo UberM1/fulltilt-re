@@ -155,7 +155,7 @@ void Play(TSound* sound)
 // string at its embedded newline. Read out of the resource directly, 3007 is
 // "Fire Ridge\n%ld" and 3019 "Dragon Hoard\n%ld": label, newline, specifier, in all
 // of them.
-void FormatWithValue(char* out, const char* labelOrFormat, int value)
+void FormatWithValue(char* out, size_t size, const char* labelOrFormat, int value)
 {
 	if (!out)
 		return;
@@ -164,7 +164,7 @@ void FormatWithValue(char* out, const char* labelOrFormat, int value)
 		*out = '\0';
 		return;
 	}
-	std::snprintf(out, 128, labelOrFormat, static_cast<long>(value));
+	std::snprintf(out, size, labelOrFormat, static_cast<long>(value));
 }
 
 // 0x42c4cb -- the 15-bit LCG the table's "random in [0,n)" is built on. The 1996

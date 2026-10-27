@@ -35,6 +35,20 @@ enum class TableId
 	Skulduggery,     // PIRATES.DAT
 };
 
+// One entry of a table's own RT_STRING resource table.
+//
+// The two Full Tilt bonus tables identify their messages by the resource ids of
+// their own executables (Dragon's Keep and Skulduggery both run 1001..3076), while
+// the port's `Msg` enum is Space Cadet's string table and nothing else. Looking a
+// bonus-table id up in it misses, and translations::GetTranslation answers
+// "!Missing MsgId!" -- which is what the playfield showed for every message the
+// rules displayed.
+struct RcString
+{
+	int Id;
+	const char* Text;
+};
+
 struct TableRules
 {
 	TableId Id;
@@ -126,6 +140,18 @@ struct TableRules
 	// `options::TableKeyPrefix` already knows three tables; it needs five, and the
 	// high score file has to be namespaced per table or they overwrite each other.
 	const char* SettingsPrefix;
+
+	// The table's own RT_STRING resources, sorted by id, or null for a table whose
+	// messages are in the shared `Msg` enum. Space Cadet's three entries leave this
+	// null and keep going through translations.cpp, so they stay localisable; the
+	// bonus tables have no translations to go through -- their text only ever
+	// existed in English, in their own executables.
+	//
+	// Generated into table_strings.cpp by analysis/gen_table_strings.py from the
+	// dumps in analysis/, which is also where the reasoning for embedding rather
+	// than reading at runtime is written down.
+	const RcString* RcStrings;
+	size_t RcStringCount;
 };
 
 // The table in play. Replaces pb::FullTiltMode / pb::FullTiltDemoMode, which
@@ -133,6 +159,11 @@ struct TableRules
 extern const TableRules* CurrentTable;
 
 const TableRules* FindTableRules(TableId id);
+
+// The table's own text for a resource id, or null when it has none -- including
+// every Space Cadet id, which belongs to the shared `Msg` enum instead.
+// pb::get_rc_string consults this first and falls through to translations.cpp.
+const char* FindRcString(const TableRules* rules, int id);
 const TableRules* FindTableRulesForDat(const char* datFileName);
 
 // The DAT names pb::SelectDatFile probes, in registry order. Space Cadet's three

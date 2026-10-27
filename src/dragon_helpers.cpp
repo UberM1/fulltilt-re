@@ -44,12 +44,14 @@ namespace dragon
 {
 
 // ---------------------------------------------------------------------------
-// Message codes (binary numbering)
+// Message codes
 //
-// The subset this file sends, same values and same reasoning as
-// dragon_missions.cpp's `ft`: TLight +0, TLightGroup/target/blocker +4,
-// gate/kickout/sink +9, Control* +10, ControlCollision +11, and the public
-// 1000+ band +1 from 1016 and +2 from 1021.
+// The subset this file sends, same names and same reasoning as
+// dragon_missions.cpp's `ft`. The binary's own bands are TLight +0,
+// TLightGroup/target/blocker +4, gate/kickout/sink +9, Control* +10,
+// ControlCollision +11, and the public 1000+ band +1 from 1016 and +2 from 1021 --
+// but the port's engine speaks upstream's numbering, so each code is bound to the
+// MessageCode enumerator and the binary number is kept only as a comment.
 // ---------------------------------------------------------------------------
 
 namespace ft
@@ -74,19 +76,19 @@ constexpr MessageCode LightOverrideOff = MessageCode::TLightFtTmpOverrideOff;
 constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 
 // TLightGroup family (+4).
-constexpr MessageCode GroupGetOnCount = Msg(0x29);
+constexpr MessageCode GroupGetOnCount = MessageCode::TLightGroupGetOnCount;  // binary 0x29
 
 // Gates (+9).
-constexpr MessageCode GateDisable = Msg(0x3e);
-constexpr MessageCode GateEnable = Msg(0x3f);
+constexpr MessageCode GateDisable = MessageCode::TGateDisable;  // binary 0x3e
+constexpr MessageCode GateEnable = MessageCode::TGateEnable;  // binary 0x3f
 
 // Sinks, kickouts and timers (+9/+10).
-constexpr MessageCode KickoutRestartTimer = Msg(0x40);
-constexpr MessageCode SinkResetTimer = Msg(0x41);
-constexpr MessageCode TimerSet = Msg(0x45);   // seconds; -1.0 cancels
+constexpr MessageCode KickoutRestartTimer = MessageCode::TKickoutRestartTimer;  // binary 0x40
+constexpr MessageCode SinkResetTimer = MessageCode::TSinkResetTimer;  // binary 0x41
+constexpr MessageCode TimerSet = MessageCode::TTimerResetTimer;  // binary 0x45; seconds, -1.0 cancels
 
 // Control* block (+10).
-constexpr MessageCode TimerExpired = Msg(0x46);
+constexpr MessageCode TimerExpired = MessageCode::ControlTimerExpired;  // binary 0x46
 constexpr MessageCode MissionComplete = Msg(0x4f);
 constexpr MessageCode MissionStarted = Msg(0x50);
 constexpr MessageCode QuestAbort = Msg(0x53);
@@ -99,13 +101,15 @@ constexpr MessageCode FlipperPressed = Msg(0x01);
 // Public codes. 0x3f3/0x3f4 are below the +1 step so they are upstream's 1011 and
 // 1012 unshifted; 0x3f9 is 1016+1 = PlungerStartFeedTimer, 0x3fb is 1018+1 =
 // PlungerRelaunchBall, 0x3ff is 1021+2 = SwitchToNextPlayer and 0x400 is 1022+2 =
-// GameOver.
-constexpr MessageCode SetTiltLock = Msg(0x3f3);
-constexpr MessageCode ClearTiltLock = Msg(0x3f4);
-constexpr MessageCode PlungerStartFeedTimer = Msg(0x3f9);
-constexpr MessageCode PlungerRelaunchBall = Msg(0x3fb);
-constexpr MessageCode SwitchToNextPlayer = Msg(0x3ff);
-constexpr MessageCode TableGameOver = Msg(0x400);
+// GameOver. Bound to the upstream value, not the binary one: written as 0x3f9 the
+// end-of-ball serve was PlungerLaunchBall (1017) and fired the plunger at a ball
+// that had not been fed, and 0x400 was Reset (1024) rather than GameOver.
+constexpr MessageCode SetTiltLock = MessageCode::SetTiltLock;  // binary 0x3f3
+constexpr MessageCode ClearTiltLock = MessageCode::ClearTiltLock;  // binary 0x3f4
+constexpr MessageCode PlungerStartFeedTimer = MessageCode::PlungerStartFeedTimer;  // binary 0x3f9
+constexpr MessageCode PlungerRelaunchBall = MessageCode::PlungerRelaunchBall;  // binary 0x3fb
+constexpr MessageCode SwitchToNextPlayer = MessageCode::SwitchToNextPlayer;  // binary 0x3ff
+constexpr MessageCode TableGameOver = MessageCode::GameOver;  // binary 0x400
 }  // namespace ft
 
 const float Forever = -1.0f;
@@ -251,7 +255,7 @@ const char* GetRcString(int id);                                  // 0x409730
 void Display(TTextBox* box, const char* text, float time);        // 0x41de40, font 0
 void DisplayGlyph(TTextBox* box, const char* glyph, float time);  // 0x41de40, font 1
 void ClearText(TTextBox* box);                                    // 0x41d930
-void FormatWithValue(char* out, const char* fmt, int value);       // 0x42c76f == sprintf
+void FormatWithValue(char* out, size_t size, const char* fmt, int value); // 0x42c76f == sprintf
 void Play(TSound* sound);                                         // vtable +0x18
 extern const char* GlyphJackpot;                                  // 0x439a5c, '"'
 
@@ -644,7 +648,7 @@ static bool AnnounceBonusLine(int stringId, TPinballComponent* wave, int term)
 		return false;
 
 	char buffer[128];
-	FormatWithValue(buffer, GetRcString(stringId), term);
+	FormatWithValue(buffer, sizeof buffer, GetRcString(stringId), term);
 	Display(tag_info_text_box.Component, buffer, 2.0f);
 	PlayWave(wave);
 	return true;
