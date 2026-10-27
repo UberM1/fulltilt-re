@@ -18,6 +18,7 @@
 
 #include "pb.h"
 #include "table_rules.h"
+#include "TBlocker.h"
 #include "TSink.h"
 #include "TPinballTable.h"
 #include "TSound.h"
@@ -209,12 +210,15 @@ float ASink9TimerTime()
 // rocks' `!= -1` guard reads "it has arrived at an extended frame, not back at the
 // parked one" -- BlockerEnable aims at the last frame, BlockerDisable at -1.
 //
-// The port's TBlocker is upstream's two-state one, which spells the same distinction
-// as SpriteSet(0) vs SpriteSet(-1) alongside ActiveFlag, so ActiveFlag is the faithful
-// stand-in for "the frame index is not the parked sentinel".
+// The port's TBlocker now carries that frame index as `CurrentPosition`, so this reads
+// it directly. It used to stand in with `ActiveFlag ? 0 : -1`, which was a reasonable
+// approximation while TBlocker was upstream's two-state class and is wrong now: the
+// Full Tilt class never writes ActiveFlag, so the flag stayed 1 for the life of the
+// component and the guard was always true. a_rocka and a_rockb are the two readers.
 int BlockerUnknownP7e(TPinballComponent* blocker)
 {
-	return blocker && blocker->ActiveFlag ? 0 : -1;
+	auto part = dynamic_cast<TBlocker*>(blocker);
+	return part ? part->CurrentPosition : -1;
 }
 
 } // namespace dragon

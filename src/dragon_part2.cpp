@@ -904,12 +904,15 @@ void GateWindowTripControl(MessageCode code, TPinballComponent* caller)
 //    the +4 arithmetic that covers TBlockerDisable and TBlockerEnable does *not* extend
 //    to this one, and 0x39 -- which is in TBlocker's 0x37..0x3c jump table at 0x415398 --
 //    is a different mechanic entirely: it sets the part's position index. And
-//  * FT treats a negative TBlockerRestartTimeout as "cancel". Upstream's TBlocker clamps
-//    it with std::max(value, 0.0f), which would fire the timer immediately instead. The
-//    reading is forced by the rest of the binary: the Slay Dragon controller cancels
-//    mode_timer with the same code and -1.0f and plainly means to stop it, not to trip
-//    it. A port must take the FT semantics or MoatBlockerControl's cancel path (and the
-//    mode timer) misbehaves.
+//  * a negative value means different things to the two classes that answer 0x45, and
+//    this comment used to get it backwards. On a *TBlocker* it is clamped: 0x4152b5
+//    compares the value against the 0.0 at 0x437330 and arms with max(value, 0.0), so
+//    MoatBlockerControl's -1.0f fires the timeout immediately rather than cancelling it.
+//    Upstream's std::max(value, 0.0f) is therefore faithful, and the -1.0f is harmless
+//    only because the handler has already set MessageField = 0, so the expiry it trips
+//    falls into the "gone" branch. On a *TTimer* -- which is what `mode_timer` is, and
+//    what dragon_part3.cpp sends -1.0f to -- it cancels: 0x41b3d9 returns without
+//    arming. Upstream gave both classes the clamp; TTimer.cpp now has the cancel.
 //
 // The two durations are the blocker's own InitialDuration / ExtendedDuration (the original
 // reads them at +0x86 / +0x8a and casts int to float, exactly as upstream does), so the

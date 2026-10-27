@@ -133,14 +133,13 @@ The open questions:
 - **A few tags are typed generically** by the generated control tables, so playing a
   sound or testing `light_on()` through them needs a `static_cast` down. Safe, because
   the objects really are `TSound` / `TLight`, but unchecked.
-- **Dragon's `a_ramp5`** -- the topmost ramp, and the one reported as not working -- is
-  physically traversable (measured: `a_sink16` 0x10 -> ramp -> `a_ramp104` 0x2 ->
-  `s_hole100` 0x1, 1.06 s over 12.1 units) and has no handler, which is faithful: it is in
-  neither of `DRAGON.EXE`'s component tables. What was *not* observed in 850 s of autoplay
-  is a ball entering it uphill at all. Whether the complaint is "it scores nothing"
-  (correct) or "it cannot be shot" (a physics or diverter question) is open.
-- **The ball's z freezes while crossing a ramp wall** and stays frozen for the whole
-  traversal. Not a port bug: attribute 1305 is 0 on all six of Dragon's ramps, so
-  `BallZOffsetFlag` is false and the original takes the same branch (0x417961 onward).
-  Some other writer of z is unaccounted for, and that is the "the ball looks odd in the
-  tunnels" report.
+- ~~**Dragon's `a_ramp5`**~~ -- **fixed**, and it was the port's fault. The ramp has no
+  handler, which is faithful (it is in neither of `DRAGON.EXE`'s component tables), but it
+  was also unreachable: `a_sink16` is its only feeder and the port's `TSink` never put the
+  ejected ball on the sink's release layer. See `docs/engine-changes.md` section 12.
+- ~~**The ball's z freezes while crossing a ramp wall**~~ -- the freeze itself is
+  faithful (attribute 1305 is 0 on all six of Dragon's ramps, and `TBall::Repaint`'s own
+  guard at 0x402b1f is the same), but the *frozen value* was wrong, because `THole` was
+  reading the wrong element of attribute 408. Fixed; see `docs/engine-changes.md`
+  section 12. Whether anything still looks wrong needs eyes on a real window -- the
+  headless harness renders nothing.

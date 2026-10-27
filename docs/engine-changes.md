@@ -25,7 +25,7 @@ than compiling, which is why they are not in the original count.
 | indexed per-table music | 21 | `midi.h`, `midi.cpp` |
 | `TPinballTable::SuperJackpotScore` | 1 | `TPinballTable.h` |
 | `TLightGroup::LightAt(index)` | 2 | `TLightGroup.h` |
-| `TBlocker::UnknownP7e` | 1 | `TBlocker.h` |
+| Full Tilt's multi-position `TBlocker` | 12 components | `TBlocker.h`, `TBlocker.cpp`, `TPinballComponent.h`, `table_rules.h` |
 | `TableRules::ModeBeforeComponent` | 1 | `table_rules.h`, `control.cpp` |
 | `TableRules::MultiplierIsValue` | 1 | `table_rules.h`, `TPinballTable.cpp` |
 | per-table `make_links` / `ClearLinks` | 1 | `control.cpp` |
@@ -88,13 +88,24 @@ visible rather than papered over.
 The prison-window sweep walks a group by index to override one light at a time. Upstream's
 `TLightGroup` exposes group-wide operations and `List` but no indexed accessor.
 
-## 5. `TBlocker`'s field at `+0x7e` — 1 use
+## 5. `TBlocker`'s field at `+0x7e` — resolved
 
-Both fire lizard sink handlers read it as a **float** (`fld`, truncated through `__ftol`),
-while `GargoyleRockAControl` compares the same offset against `-1` as an **int**. Both
-readings reconcile if it is a float whose `-1.0` means "no duration", which would make the
-integer compare the one to fix. Disassembling Full Tilt's `TBlocker::Message` settles it;
-until then it is `UnknownP7e` and the port does not depend on the answer.
+There was never a contradiction: the two readings are of **two different classes** that
+happen to put a field at the same offset.
+
+On `TBlocker` it is an **int position index** — the sprite frame the moving part is
+currently showing, with `-1` for "retracted, nothing drawn". `TBlocker::Message`'s 0x39
+arm stores the truncated index straight into it (`mov DWORD PTR [ecx],edi` at
+DRAGON.EXE 0x41516b) and its step callback compares it as an integer against the target
+at `+0x92` (`cmp DWORD PTR [esi+0x7e],eax` at 0x414f18). `GargoyleRockAControl`'s
+integer compare against `-1` at 0x42381b was right all along.
+
+On `TSink` the same offset is a **float `TimerTime`**, which is what the fire lizard sink
+handlers read (verified at 0x418682, inside `TSink::Message`'s 0x41 arm). `src/dragon_part3.cpp`
+says so at its own call site.
+
+So `TBlocker::UnknownP7e` is gone, replaced by `TBlocker::CurrentPosition`, and the whole
+moving-part class behind it is section 13.
 
 
 ## 6. Per-table dispatch, and the order it runs in
@@ -173,9 +184,10 @@ and the multiplier are now done; the rest stand.
   original's jump table at 0x415398 sends 0x38 to 0x415038, which compares the value
   against the 0.0 at 0x437330 and only arms the motion timer for a strictly positive one,
   dispatching 0x3a to itself otherwise. The port's `TBlockerEnable` already guards on
-  `value > 0`. `TBlockerRestartTimeout` still clamps with `std::max(value, 0.0f)`; no
-  caller in either table passes it a negative value, so the clamp is unreachable rather
-  than wrong.
+  `value > 0`. `TBlockerRestartTimeout` still clamps with `std::max(value, 0.0f)`, which
+  section 13 confirms against 0x45's own `fcom`/`fxch` pair -- and the clamp *is*
+  reachable: `MoatBlockerControl` sends -1.0f meaning cancel, which the original fires
+  immediately instead. Harmless there; see section 13.
 - **Text-box tokens.** *Done* -- see section 10.
 
 ## 10. The symbol font
@@ -288,3 +300,261 @@ like a bug and is not: `DRAGON.EXE`'s own `TSink::Message` does the same, pushin
 callback 0x418500 into 0x41f960 at 0x41869f. The 0x41 arm, by contrast, kills nothing
 before arming, so repeated `TSinkResetTimer` messages stack timers in the original too,
 and the port matches. Both were checked because two separate passes flagged them.
+
+## 12. The two things that made the ball come back wrong
+
+Both found by enumerating every writer of the ball's z (`ball+0xa7`) and every assignment
+of its `CollisionMask` (`ball+0xf7`) in `DRAGON.EXE`, and comparing that list against the
+port's. Both are in the engine, not the rules, and both are user-visible.
+
+### `TSink` never put the ejected ball on the sink's layer
+
+A sink's eject is `TPinballTable::AddBall` -- it builds a *new* ball -- and the original
+then tells that ball which layer it belongs on and how high it sits:
+
+```
+4185c1:  call 0x402c20                      ; AddBall(BallPosition.X, BallPosition.Y)
+4185ec:  mov  DWORD PTR [edi+0x9b],0x1      ; CollisionDisabledFlag
+4185f6:  mov  DWORD PTR [edi+0xf7],eax      ; CollisionMask  = sink+0x76
+4185fc:  fld  DWORD PTR [esi+0x7a]          ; Position.Z     = sink+0x7a + Radius
+4185ff:  fadd DWORD PTR [edi+0x15b]
+418605:  fstp DWORD PTR [edi+0xa7]
+```
+
+and the constructor fills those two fields from the DAT:
+
+```
+418405:  push 0x515                         ; attribute 1301
+418425:  call query_float_attribute
+41842e:  mov  eax,[esp+0x44]                ;   absent -> visual.CollisionGroup
+418432:  mov  [esi+0x76],eax
+418455:  mov  [esi+0x76],ebx                ;   present -> 1 << (int)floor(arr[0])
+418458:  push 0x259                         ; attribute 601
+41846e:  mov  [esi+0x82],ecx                ;   [0] -> BallPosition.X
+418478:  mov  [esi+0x86],edx                ;   [1] -> BallPosition.Y
+41847e:  mov  eax,[eax+0xc]                 ;   [3] -> the return height
+418481:  mov  [esi+0x7a],eax
+```
+
+The port read 601's first two elements as the position and nothing else, and assigned
+neither field on the new ball. So every sink on every table handed the ball back on the
+base playfield layer at playfield height, whatever layer it was supposed to serve.
+
+On Dragon's Keep that is what made `a_ramp5`, the topmost ramp, look broken. Only three
+objects in the whole table carry collision group 0x10 -- the ramp, `a_sink16` and one
+wall -- and the ramp's own crossable edge goes *down*, so the sink is its only entrance.
+Measured before: the ball leaves `a_sink16`, appears on mask 0x1 at z 0.370 instead of
+0x10 at 2.353, falls free and drains 1.6 s later, never touching the ramp. Measured after:
+
+```
+t=3.48  EJECT a_sink16
+t=3.61  pos=(-6.594,-13.269) mask=0x10
+t=4.28  pos=(-6.974, -2.832) mask=0x10     <- riding the ramp, 10.4 units of it
+t=4.41  pos=(-7.115,  0.252) mask=0x8      <- and off the far end
+```
+
+Seven of Dragon's eleven sinks are the only way onto the layer they serve, so this was
+not one ramp.
+
+### `THole` read the wrong element of attribute 408
+
+```
+4168f6:  push 0x198                         ; attribute 408
+416918:  call query_float_attribute
+416929:  fld  DWORD PTR [edx+0x152]         ; table->CollisionCompOffset
+41692f:  fadd DWORD PTR [eax+0xc]           ;   + arr[3]
+416937:  fstp DWORD PTR [esi+0x8e]          ; -> ZSetValue
+```
+
+The port had `ZSetValue = zArr[2]` and added nothing. The error is not uniform, which is
+why it showed up as "the ball renders oddly in the tunnels" rather than as a fixed offset.
+Measured, before and after, from the harness's own `DBG-holerel` line:
+
+| hole | released onto | port, before | after |
+|---|---|---|---|
+| `s_hole100` | 0x1 | 0.484 | **0.370** |
+| `s_hole101` | 0x1 | 0.486 | **0.370** |
+| `s_hole118` | 0x4 | 0.482 | **2.876** |
+
+The two that return the ball to the base playfield now put it at 0.370, which is exactly
+where a freshly served ball sits -- they were holding it 0.114 high, and 0.114 is the
+amount by which a ball was measured riding above the playfield all the way from the hole
+to the drain. `s_hole118` is the other direction and much worse: it feeds layer 0x4, a
+tunnel, and the port was dropping the ball 2.394 *below* where it belongs, so for 2.29 s
+it was drawn at playfield height instead of inside the tunnel.
+
+`TBall` and `TKickout` already used element 3; `THole` was the only one that did not.
+
+## 13. `TBlocker` is two different classes
+
+The port's `TBlocker` was 3D Pinball's, and both bonus tables needed Full Tilt's. That is
+the whole of "the moving parts on the lower playfield do not move".
+
+Upstream's `TBlocker` -- decompiled from `pinball.exe` -- is a two-state prop:
+`TBlockerEnable` sets `ActiveFlag`, shows sprite 0, arms one timer and raises
+`ControlTimerExpired`; `TBlockerDisable` clears all of that. The Full Tilt engine's
+`TBlocker` is a **multi-position moving part**: a position index, one collision-edge set
+per position with its own active flag, a step timer that walks one position per tick, and
+a *second* timer that is the real `TBlockerRestartTimeout`.
+
+The two are not a build difference in the table data. The class is byte-identical at the
+same addresses in all three Full Tilt executables -- `CADET.EXE`, `DRAGON.EXE` and
+`PIRATES.EXE` all carry the constructor at 0x414d60, the timeout callback at 0x414ee0,
+the step callback at 0x414f00 and `Message` at 0x414f80, differing only in relocations
+(checked byte for byte over 0x414ee0..0x4153b0). So the divergence is between `pinball.exe`
+and the 1996 Full Tilt build, and the port inherited the former.
+
+### The state machine, arm by arm
+
+`Message` is 0x414f80. It jump-tables 0x37..0x3c at 0x415398 and then tests 0x45, 0x3f3,
+0x3fe and 0x402 by hand at 0x414f8d..0x414fce.
+
+| original | arm | what it does |
+|---|---|---|
+| 0x37 | 0x414fd3 | retract: aim `+0x92` at -1 and arm the step timer after `value` s; for `value <= 0` dispatch 0x3a(-1.0) to itself instead. Plays the sound at `+0xb2`. |
+| 0x38 | 0x415038 | the mirror, aiming at the last position (`+0x3a`'s count - 1). Plays `+0xae`. |
+| 0x39 | 0x4150ce | **set position now**: truncate the float, clear the old position's flag byte, store the new index, set its flag, show its bitmap/zmap. |
+| 0x3a | 0x4151fb | **aim**: `+0x92 = (int)value`, then arm the step timer at `+0x96` seconds. |
+| 0x3b | 0x415245 | snap fully open: 0x39(last) plus the `+0xae` sound. |
+| 0x3c | 0x415284 | snap fully closed: 0x39(-1.0) plus the `+0xb2` sound. |
+| 0x45 | 0x4152a5 | the real `TBlockerRestartTimeout`: kill `+0x8e`, re-arm it with `max(value, 0.0)` and callback 0x414ee0, which raises 0x46 = `ControlTimerExpired`. |
+| 0x3f3 | 0x415340 | `SetTiltLock` -- see below. Drop both timers, go to the home position. |
+| 0x3fe | 0x4152e9 | `PlayerChanged`: the base's player-field swap (0x413570), then the same tail. |
+| 0x402 | 0x415339 | `Reset`: `TPinballComponent::Reset` (0x413550), then the same tail. |
+
+0x3f3 is `SetTiltLock` and not, as the offsets invite, `TBlocker`'s own object type 1011.
+The sender settles it: `TPinballTable::Message` at 0x419765 broadcasts 0x3f3 to every
+component in the list and then sends 8 (`TLightTurnOffTimed`) to the table's light group,
+which is upstream's `TPinballTable::tilt()` line for line.
+
+Two timers, not one, and this is the part that matters for the rules:
+
+* `+0x8e` is armed only by 0x45 and raises `ControlTimerExpired` (0x46).
+* `+0x9a` is the step timer, armed by 0x37/0x38's delay and by every 0x3a, with callback
+  0x414f00. That callback zeroes itself, and then: if `+0x7e == +0x92` it raises **0x3d**
+  at the rules and stops; otherwise it steps `+0x7e` one towards `+0x92` through a virtual
+  `Message(0x39, ...)` and re-arms unconditionally.
+
+So `TBlockerEnable` on a Full Tilt blocker never raises `ControlTimerExpired`. That is why
+this is gated rather than replaced -- see below.
+
+### Fields and where they come from
+
+The constructor is 0x414d60, found by the only store of its vtable 0x437560 at 0x414d80.
+It calls the base with `createWall = false` (0x414d75) and builds the walls itself.
+
+| offset | field | source |
+|---|---|---|
+| `+0x76`..`+0x7d` | `PositionFlags[8]` | one per position, each handed to `install_wall` as that position's `ActiveFlagPtr` (0x414dcb..0x414df7, attribute **600** of position *i*'s state record) |
+| `+0x7e` | `CurrentPosition` | int, -1 parked |
+| `+0x82` | `HomePosition` | attribute **409**, default -1 (0x414e7c) |
+| `+0x86` / `+0x8a` | `InitialDuration` / `ExtendedDuration` | attribute **407**'s first two floats cast to int, default **55 / 5** (0x414e07) |
+| `+0x8e` | `Timer` | the timeout timer |
+| `+0x92` | `TargetPosition` | int |
+| `+0x96` | `StepTime` | attribute **903**, default **0.1** (0x414e57) |
+| `+0x9a` | `MotionTimer` | the step timer |
+| `+0x9e`..`+0xad` | the retry record | `{timer, code, value, component}`; 0x4131a0 arms it, 0x4131e0 re-sends |
+| `+0xae` / `+0xb2` | `SoundIndex4` / `SoundIndex3` | `visualStruct`, as before |
+
+The eight-position cap is the original's own: 0x414da1 asserts when
+`loader::query_visual_states(groupIndex) > 8` (assert line 0x6b3), and the flag array runs
+out exactly at `+0x7e`. The port clamps instead of asserting, because an assert there would
+take a table down over data the rules need not reach.
+
+Attributes 407 and 903 are **absent from both bonus tables' DATs** -- measured, not
+assumed: a `DBG-block ctor` line per blocker over `DRAGON.DAT` and `PIRATES.DAT` reports
+`dur=55/5 step=0.100` for all twelve. So upstream's hardcoded 55 and 5 were right and stay
+as the fallback. Attribute 409 is real and differs per part:
+
+```
+DRAGON.DAT   a_sword states=3 home=2   a_bloce 1 home=-1  a_blocf 1 home=0
+             a_jaw   states=8 home=0   a_center_post 1 home=-1
+             a_rocka states=5 home=4   a_rockb states=5 home=4
+PIRATES.DAT  a_cannon states=4 home=0  a_blocc 1 home=-1  a_bloce 2 home=1
+             a_blocf 1 home=0          a_blocg 1 home=-1
+```
+
+`a_jaw` (8 positions) and `a_cannon` (4) have no attribute 600 on any position: they are
+pure animated props. The rest install one wall set per position -- 55, 57 and 60 edges on
+`a_rocka`, `a_sword` and `a_rockb`.
+
+### A part never moves into a ball
+
+Both the 0x39 arm (0x41510e) and the step callback (0x414f35) count the balls inside the
+part's own `AABB` -- `TPinballTable::BallCountInRect`, the engine's 0x413010, reached
+through the thunk 0x413990 which simply does `ecx += 0x4a` -- and refuse to extend while
+one is there. The step callback re-arms anyway, so the part resumes by itself; a direct
+0x39 defers the *same code and value* by 0.5 s through the retry record and tries again.
+Retracting (`index < 0`) is always allowed. `+0x4a` is `AABB`, which on this path is the
+union of every position's edges because `install_wall` merges each of them into it.
+
+### What the port does now, and what Space Cadet still does
+
+`TableRules::MovingBlockers` selects the class; it is true for `DRAGON.DAT` and
+`PIRATES.DAT` and false for all three Space Cadet rows. The Space Cadet path is the old
+body **verbatim**, including the `value > 0` guard and the `std::max(value, 0.0f)` clamp,
+and the base constructor still gets `createWall = true` for it, so one wall keyed to
+`ActiveFlag` and nothing else. `control::DrainBallBlockerControl` depends on
+`TBlockerEnable`'s own timer raising `ControlTimerExpired`, which the moving class does not
+do, so this is a gate and not a replacement.
+
+A consequence worth naming: the moving class **never writes `ActiveFlag` or
+`MessageField`**. Nothing in 0x414f80 touches `+0x5`, and only the 0x402 arm's call to
+`TPinballComponent::Reset` touches `+0x6`. That is load-bearing, not an omission: Dragon's
+`CenterPostControl`, `RightOutlaneBlockerControl` and `MoatBlockerControl` park their
+armour stage (1, 2, 0) in the blocker's `MessageField` and then send `TBlockerDisable`,
+which under upstream's class zeroed it out from under them.
+
+### Message codes
+
+`MessageCode` gained five entries. 57 and 58 keep the originals' 0x39 and 0x3a because
+`src/pirates_*.cpp` and `src/dragon_missions.cpp` already cast those raw numbers; they
+collide with `ControlBallCaptured` / `ControlBallReleased`, which is harmless because
+those two only ever travel to `control::handler`. 61 likewise keeps 0x3d, colliding with
+`ControlNotifyTimerExpired` -- a collision `src/dragon_part2.cpp` documents and switches
+on deliberately.
+
+| name | value | original |
+|---|---|---|
+| `TBlockerSetPosition` | 57 | 0x39 |
+| `TBlockerMoveToPosition` | 58 | 0x3a |
+| `TBlockerSnapOpen` | **70** | 0x3b |
+| `TBlockerSnapClosed` | **71** | 0x3c |
+| `ControlBlockerMotionDone` | 61 | 0x3d |
+
+0x3b and 0x3c are **renumbered**, the only two that are. The originals' 0x3b is numerically
+59, which is already `TBlockerRestartTimeout` here -- upstream's own value for a different
+message, and the one both Space Cadet's `control.cpp` and Dragon's three armour handlers
+send. Nothing in either table's rules sends 0x3b or 0x3c (checked across `src/`), so no
+call site depends on their original numbers.
+
+### Still open
+
+* `src/dragon_common.cpp`'s `BlockerUnknownP7e` stands in for the position index with
+  `blocker->ActiveFlag ? 0 : -1`. Under the moving class `ActiveFlag` is always 1, so the
+  stand-in now always answers "extended" and the two gargoyle rock handlers' `!= -1` guard
+  is dead in the other direction. It wants to be
+  `static_cast<TBlocker*>(blocker)->CurrentPosition`, which is the real field. Owned by
+  whoever owns `src/`.
+* `src/dragon_part2.cpp` claims Full Tilt treats a negative `TBlockerRestartTimeout` as
+  *cancel*. The binary disagrees: 0x45's `fcom`/`fxch` pair at 0x4152b5..0x4152d9 computes
+  `max(value, 0.0)` and arms the timer either way, so `MoatBlockerControl`'s
+  `TBlockerRestartTimeout(-1.0f)` fires `ControlTimerExpired` on the next frame rather
+  than cancelling. It is harmless there -- the handler has already set `MessageField = 0`,
+  so the expiry takes the idle branch and does not re-arm -- but the comment is wrong and
+  the engine now matches the binary rather than the comment.
+* The port's `SpriteSet(index)` returns without clearing when `index` is past the end of
+  `ListBitmap`; the original blanks the sprite (0x4151db). `TBlocker` compensates by
+  calling `SpriteSet(-1)` itself in that case, so the difference is contained here.
+* `// UNVERIFIED:` nothing in `TBlocker` is guessed, but two things are untested rather
+  than unverified: no run has yet driven a ball into a multi-position part while it was
+  moving, so the ball-in-the-box deferral and the 0.5 s retry are read off the listing and
+  not observed; and `TBlockerSnapOpen` / `TBlockerSnapClosed` have no caller at all, so
+  their arms are dead code until a rule sends them. Driving `FT_HOLETEST`/`FT_SINKTEST`
+  into `a_rocka`'s box while `a_rocka` steps would settle the first.
+
+Measured after the change: `test/run_tables.sh` green on all three tables, `FT_HOLETEST=0..2`
+on Dragon still releasing `s_hole118`, `s_hole101` and `s_hole100`, and a 90 s `FT_AUTOPLAY`
+soak on each bonus table showing the parts actually stepping -- `a_cannon` walking 0 -> 1 ->
+2 -> 3 and back, `a_bloce` 0 <-> 1, `a_rocka`/`a_rockb`/`a_sword`/`a_jaw` reaching their home
+positions -- with no stuck ball and no crash.

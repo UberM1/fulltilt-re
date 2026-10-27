@@ -834,10 +834,113 @@ index 0445b7b..74d81f2 100644
  		if (VisualZArray[index] <= zDepth) break;
  	}
 diff --git a/SpaceCadetPinball/TBlocker.cpp b/SpaceCadetPinball/TBlocker.cpp
-index d0d77ce..9f0b3d0 100644
+index d0d77ce..1286cde 100644
 --- a/SpaceCadetPinball/TBlocker.cpp
 +++ b/SpaceCadetPinball/TBlocker.cpp
-@@ -49,7 +49,18 @@ int TBlocker::Message(MessageCode code, float value)
+@@ -6,8 +6,21 @@
+ #include "loader.h"
+ #include "render.h"
+ #include "timer.h"
++#include "TEdgeSegment.h"
++#include "TPinballTable.h"
++#include "table_rules.h"
+ 
+-TBlocker::TBlocker(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
++// Which of the two TBlocker classes this build of the table wants. Read before the
++// member initialiser list runs, because it selects the base constructor's createWall:
++// the Full Tilt class installs one wall per position itself, keyed to that position's
++// own flag, and must not also get TCollisionComponent's single ActiveFlag wall.
++static bool MovingBlockersEnabled()
++{
++	return CurrentTable && CurrentTable->MovingBlockers;
++}
++
++TBlocker::TBlocker(TPinballTable* table, int groupIndex)
++	: TCollisionComponent(table, groupIndex, !MovingBlockersEnabled())
+ {
+ 	visualStruct visual{};
+ 
+@@ -18,13 +31,76 @@ TBlocker::TBlocker(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+ 	ExtendedDuration = 5;
+ 	Threshold = 1000000000.0f;
+ 	Timer = 0;
+-	MessageField = 0;
+-	ActiveFlag = 0;
+-	SpriteSet(-1);
++	MovingPart = MovingBlockersEnabled();
++
++	if (!MovingPart)
++	{
++		// Space Cadet, verbatim as before.
++		MessageField = 0;
++		ActiveFlag = 0;
++		SpriteSet(-1);
++		return;
++	}
++
++	// --- Full Tilt, DRAGON.EXE 0x414d60 ------------------------------------------
++	//
++	// ActiveFlag stays the 1 TCollisionComponent set: the original's Message never
++	// writes +0x5, and collision is gated per position by PositionFlags instead.
++	// MessageField is cleared by the Reset message at the end, not here -- the
++	// original ends its constructor with Message(0x402, 0.0) at 0x414ec0.
++	if (groupIndex > 0)
++	{
++		// 0x414d97: query_visual_states, asserting on more than 8 (0x414da1). The
++		// port clamps rather than asserting, because an assert here would take a
++		// table down for data the rules can simply not reach.
++		int count = loader::query_visual_states(groupIndex);
++		if (count > MaxPositions)
++			count = MaxPositions;
++
++		// 0x414dcb..0x414df7: one wall per position, from attribute 600 of that
++		// position's state record, each bound to its own flag byte. Dragon's a_sword,
++		// a_jaw, a_center_post and the two rocks have no wall at all on some or all
++		// positions, which is why the lookup is the non-erroring form.
++		for (int i = 0; i < count; i++)
++		{
++			float* floatArr = loader::query_float_attribute_opt(groupIndex, i, 600);
++			if (floatArr)
++				TEdgeSegment::install_wall(floatArr, this, &PositionFlags[i], visual.CollisionGroup,
++				                           table->CollisionCompOffset, 0);
++		}
++
++		// 0x414e07..0x414e56: attribute 407 carries the two armour durations as
++		// floats, cast to int. Upstream hardcodes the 55 / 5 fallback the original
++		// uses when the attribute is absent, which is why those two lines above are
++		// still the defaults rather than being replaced.
++		if (float* durations = loader::query_float_attribute_opt(groupIndex, 0, 407))
++		{
++			InitialDuration = static_cast<int>(durations[0]);
++			ExtendedDuration = static_cast<int>(durations[1]);
++		}
++
++		// 0x414e57..0x414e7b: attribute 903, seconds per step, default 0.1.
++		if (float* step = loader::query_float_attribute_opt(groupIndex, 0, 903))
++			StepTime = *step;
++
++		// 0x414e7c..0x414ea5: attribute 409, the home position, default -1.
++		if (float* home = loader::query_float_attribute_opt(groupIndex, 0, 409))
++			HomePosition = static_cast<int>(*home);
++
++		if (getenv("FT_BLOCKDBG"))
++			fprintf(stderr, "DBG-block ctor %-12s states=%d home=%d step=%.3f dur=%d/%d walls=%zu\n",
++			        GroupName ? GroupName : "?", count, HomePosition, StepTime,
++			        InitialDuration, ExtendedDuration, EdgeList.size());
++	}
++
++	Message(MessageCode::Reset, 0.0f);
+ }
+ 
+ int TBlocker::Message(MessageCode code, float value)
+ {
++	if (MovingPart)
++		return FtMessage(code, value);
++
+ 	switch (code)
+ 	{
+ 	case MessageCode::SetTiltLock:
+@@ -49,7 +125,18 @@ int TBlocker::Message(MessageCode code, float value)
  		if (Timer)
  			timer::kill(Timer);
  		Timer = 0;
@@ -857,26 +960,352 @@ index d0d77ce..9f0b3d0 100644
  			Timer = timer::set(value, this, TimerExpired);
  		break;
  	case MessageCode::TBlockerRestartTimeout:
+@@ -60,7 +147,195 @@ int TBlocker::Message(MessageCode code, float value)
+ 	default:
+ 		break;
+ 	}
+-	
++
++	return 0;
++}
++
++// The last position in the sprite list, and -1 when there is no list at all. The
++// original spells it `list ? list->Data->Count - 1 : 0 - 1` three times over, at
++// 0x41504d, 0x415088 and 0x415245.
++int TBlocker::LastPosition() const
++{
++	return ListBitmap ? static_cast<int>(ListBitmap->size()) - 1 : -1;
++}
++
++void TBlocker::KillMotion()
++{
++	if (MotionTimer)
++	{
++		timer::kill(MotionTimer);
++		MotionTimer = 0;
++	}
++}
++
++void TBlocker::KillRetry()
++{
++	if (RetryTimer)
++	{
++		timer::kill(RetryTimer);
++		RetryTimer = 0;
++	}
++}
++
++void TBlocker::ArmMotion(float delay)
++{
++	KillMotion();
++	MotionTimer = timer::set(delay, this, MotionExpired);
++}
++
++// 0x4150ce, the 0x39 arm: show one position now.
++void TBlocker::SetPosition(MessageCode code, float value)
++{
++	// __ftol truncates towards zero, so -1.0 is -1 and 0.9 is 0.
++	const int index = static_cast<int>(value);
++
++	KillRetry();
++	KillMotion();
++
++	// 0x41510e: a part never moves into a ball. The box is the part's own AABB,
++	// which on the Full Tilt path is the union of every position's edges because
++	// install_wall merged each of them into it. Retracting (index < 0) is always
++	// allowed; extending is deferred by 0.5 s and retried, not dropped (0x4131a0,
++	// whose callback 0x4131e0 re-sends the same code and value).
++	if (index >= 0 && PinballTable->BallCountInRect(AABB))
++	{
++		RetryCode = code;
++		RetryValue = value;
++		RetryTimer = timer::set(0.5f, this, RetryExpired);
++		return;
++	}
++
++	// 0x415130: clamp the *old* index into range before clearing its flag, which
++	// matters only if the sprite list shrank under it. Kept because it is what the
++	// original does, not because a DAT is known to need it.
++	if (!ListBitmap)
++	{
++		if (CurrentPosition >= 0)
++			CurrentPosition = -1;
++	}
++	else if (static_cast<int>(ListBitmap->size()) <= CurrentPosition)
++	{
++		CurrentPosition = static_cast<int>(ListBitmap->size()) - 1;
++	}
++
++	if (CurrentPosition >= 0 && CurrentPosition < MaxPositions)
++		PositionFlags[CurrentPosition] = 0;
++
++	CurrentPosition = index;
++	if (index < 0 || !ListBitmap || index >= static_cast<int>(ListBitmap->size()))
++	{
++		// 0x4151db / 0x4151eb: no position, or no bitmap for it -- blank the sprite.
++		SpriteSet(-1);
++		return;
++	}
++
++	if (index < MaxPositions)
++		PositionFlags[index] = 1;
++	if (getenv("FT_BLOCKDBG"))
++		fprintf(stderr, "DBG-block move %-12s -> %d\n", GroupName ? GroupName : "?", index);
++	// 0x4151b4: bitmap and zmap indexed by position, placed at the bitmap's own
++	// XPosition/YPosition less the table origin -- exactly SpriteSet.
++	SpriteSet(index);
++}
++
++// 0x414f80, the Full Tilt class.
++int TBlocker::FtMessage(MessageCode code, float value)
++{
++	switch (code)
++	{
++	// 0x37 at 0x414fd3. Retract: after `value` seconds if positive, immediately
++	// otherwise -- in which case it dispatches 0x3a(-1.0) to itself. Note it does not
++	// touch MessageField or ActiveFlag; Dragon's armour handlers keep their stage in
++	// MessageField across this message.
++	case MessageCode::TBlockerDisable:
++		if (value > 0.0f)
++		{
++			TargetPosition = -1;
++			ArmMotion(value);
++		}
++		else
++		{
++			FtMessage(MessageCode::TBlockerMoveToPosition, -1.0f);
++		}
++		loader::play_sound(SoundIndex3, this, "TBlocker1");
++		break;
++
++	// 0x38 at 0x415038. The mirror image, aiming at the last position.
++	case MessageCode::TBlockerEnable:
++		if (value > 0.0f)
++		{
++			TargetPosition = LastPosition();
++			ArmMotion(value);
++		}
++		else
++		{
++			FtMessage(MessageCode::TBlockerMoveToPosition, static_cast<float>(LastPosition()));
++		}
++		loader::play_sound(SoundIndex4, this, "TBlocker2");
++		break;
++
++	// 0x39 at 0x4150ce.
++	case MessageCode::TBlockerSetPosition:
++		SetPosition(code, value);
++		break;
++
++	// 0x3a at 0x4151fb. Aim, then step there one position per StepTime.
++	case MessageCode::TBlockerMoveToPosition:
++		TargetPosition = static_cast<int>(value);
++		ArmMotion(StepTime);
++		break;
++
++	// 0x3b at 0x415245: snap fully open. Nothing in either table's rules sends it,
++	// which is what let it be renumbered away from the 59 collision below.
++	case MessageCode::TBlockerSnapOpen:
++		FtMessage(MessageCode::TBlockerSetPosition, static_cast<float>(LastPosition()));
++		loader::play_sound(SoundIndex4, this, "TBlocker2");
++		break;
++
++	// 0x3c at 0x415284: snap fully closed.
++	case MessageCode::TBlockerSnapClosed:
++		FtMessage(MessageCode::TBlockerSetPosition, -1.0f);
++		loader::play_sound(SoundIndex3, this, "TBlocker1");
++		break;
++
++	// 0x45 at 0x4152a5 -- the real TBlockerRestartTimeout, and a timer of its own,
++	// separate from the motion timer. The original computes max(value, 0.0) with an
++	// fcom/fxch pair at 0x4152b5..0x4152d9 and arms callback 0x414ee0, which raises
++	// ControlTimerExpired (0x46). So a negative value fires the timeout immediately;
++	// it is NOT a cancel, whatever src/dragon_part2.cpp's note says.
++	case MessageCode::TBlockerRestartTimeout:
++		if (Timer)
++			timer::kill(Timer);
++		Timer = timer::set(std::max(value, 0.0f), this, TimerExpired);
++		break;
++
++	// 0x3f3 at 0x4152a5's neighbour 0x415340, reached from the jg/je chain at
++	// 0x414fad. 0x3f3 is SetTiltLock, verified from the sender: TPinballTable::Message
++	// at 0x419765 broadcasts it to every component and then sends 8
++	// (TLightTurnOffTimed) to the table's light group, which is upstream's
++	// TPinballTable::tilt() line for line.
++	//
++	// 0x402 (Reset, 0x415339) runs TPinballComponent::Reset (0x413550) first; 0x3fe
++	// (PlayerChanged, 0x4152e9) runs the base's player-field swap (0x413570). Both
++	// then fall into the same tail: drop both timers and go to HomePosition.
++	case MessageCode::SetTiltLock:
++	case MessageCode::Reset:
++	case MessageCode::PlayerChanged:
++		if (code == MessageCode::Reset)
++			MessageField = 0;
++		if (Timer)
++		{
++			timer::kill(Timer);
++			Timer = 0;
++		}
++		KillMotion();
++		FtMessage(MessageCode::TBlockerSetPosition, static_cast<float>(HomePosition));
++		break;
++
++	default:
++		break;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -70,3 +345,39 @@ void TBlocker::TimerExpired(int timerId, void* caller)
+ 	blocker->Timer = 0;
+ 	control::handler(MessageCode::ControlTimerExpired, blocker);
+ }
++
++// 0x414f00.
++void TBlocker::MotionExpired(int timerId, void* caller)
++{
++	auto blocker = static_cast<TBlocker*>(caller);
++	blocker->MotionTimer = 0;
++
++	// 0x414f18: arrived. The notification goes to the rules, not to a component.
++	if (blocker->CurrentPosition == blocker->TargetPosition)
++	{
++		control::handler(MessageCode::ControlBlockerMotionDone, blocker);
++		return;
++	}
++
++	// 0x414f35: a ball inside the part stalls the step but not the timer, so the
++	// part resumes by itself once the ball has rolled off.
++	if (!blocker->PinballTable->BallCountInRect(blocker->AABB))
++	{
++		const int next = blocker->TargetPosition > blocker->CurrentPosition
++			                 ? blocker->CurrentPosition + 1
++			                 : blocker->CurrentPosition - 1;
++		blocker->Message(MessageCode::TBlockerSetPosition, static_cast<float>(next));
++	}
++
++	// 0x414f60: re-armed unconditionally, and after the step -- which has just
++	// zeroed MotionTimer itself.
++	blocker->MotionTimer = timer::set(blocker->StepTime, blocker, MotionExpired);
++}
++
++// 0x4131e0.
++void TBlocker::RetryExpired(int timerId, void* caller)
++{
++	auto blocker = static_cast<TBlocker*>(caller);
++	blocker->RetryTimer = 0;
++	blocker->Message(blocker->RetryCode, blocker->RetryValue);
++}
 diff --git a/SpaceCadetPinball/TBlocker.h b/SpaceCadetPinball/TBlocker.h
-index a42f4e2..b7bd5e5 100644
+index a42f4e2..da82a1d 100644
 --- a/SpaceCadetPinball/TBlocker.h
 +++ b/SpaceCadetPinball/TBlocker.h
-@@ -10,6 +10,15 @@ public:
+@@ -1,18 +1,104 @@
+ #pragma once
+ #include "TCollisionComponent.h"
+ 
++// Two different classes share this name.
++//
++// Upstream's TBlocker is the 3D Pinball one, decompiled from pinball.exe: a two-state
++// prop whose TBlockerEnable shows sprite 0, arms a timer and raises ControlTimerExpired,
++// and whose TBlockerDisable hides it again.
++//
++// The Full Tilt engine's TBlocker is a *multi-position moving part* -- Dragon's Keep's
++// gargoyle rocks, dragon jaw, sword, centre post and moat blocker; Skulduggery's cannon,
++// gates and lane blockers. It carries a position index, one collision-edge set per
++// position with its own active flag, a step timer that walks one position per tick, and
++// a separate timeout timer that is the real TBlockerRestartTimeout. Nothing in it ever
++// touches ActiveFlag or MessageField, which is itself load-bearing: Dragon's armour
++// handlers park their stage in MessageField across a TBlockerDisable.
++//
++// Addresses (DRAGON.EXE; the engine is byte-identical in CADET.EXE and PIRATES.EXE at
++// the same addresses, only relocations differ):
++//   0x414d60  constructor, vtable 0x437560
++//   0x414ee0  timeout-timer callback   -> control::handler(0x46 = ControlTimerExpired)
++//   0x414f00  motion-step callback     -> control::handler(0x3d) once it has arrived
++//   0x414f80  Message, jump table 0x415398 covering 0x37..0x3c, plus 0x45,
++//             0x3f3 (SetTiltLock), 0x3fe (PlayerChanged), 0x402 (Reset)
++//
++// Both classes live here, selected by TableRules::MovingBlockers. The Space Cadet path
++// is the old body verbatim, because its DrainBallBlockerControl depends on
++// TBlockerEnable's own timer raising ControlTimerExpired, which the Full Tilt machine
++// does not do -- it raises 0x3d from the step callback instead.
+ class TBlocker :
+ 	public TCollisionComponent
+ {
+ public:
++	// Full Tilt caps a blocker at 8 positions: the constructor asserts when
++	// loader::query_visual_states(groupIndex) > 8 (0x414da1, assert line 0x6b3), and
++	// the per-position flag array it fills runs +0x76..+0x7d with the position index
++	// at +0x7e immediately after it.
++	static const int MaxPositions = 8;
++
+ 	TBlocker(TPinballTable* table, int groupIndex);
+ 	int Message(MessageCode code, float value) override;
  
  	static void TimerExpired(int timerId, void* caller);
  
-+	// The field at +0x7e in the Full Tilt builds. Dragon's fire lizard sinks read it
-+	// as a float through fld; its gargoyle rocks compare the same offset against -1
-+	// as an int. Both readings reconcile if it is a float whose -1.0 means "no
-+	// duration", which is how it is typed here.
-+	//
-+	// UNVERIFIED: disassembling Full Tilt's TBlocker::Message settles it. No rule
-+	// depends on the answer -- it only reaches a sound's flash duration.
-+	float UnknownP7e = -1.0f;
++	// 0x414f00. Walks one position towards TargetPosition per StepTime, and raises
++	// MessageCode::ControlBlockerMotionDone when it is already there.
++	static void MotionExpired(int timerId, void* caller);
++
++	// 0x4131e0. A position change refused because a ball sits inside the part is
++	// retried after 0.5 s rather than dropped.
++	static void RetryExpired(int timerId, void* caller);
 +
  	int InitialDuration;
  	int ExtendedDuration;
  	int Timer;
+ 	int SoundIndex4;
+ 	int SoundIndex3;
++
++	// --- Full Tilt moving-part state. Inert when MovingPart is false. -------------
++
++	// Which of the two classes this instance is, fixed at construction from
++	// TableRules::MovingBlockers.
++	bool MovingPart = false;
++
++	// +0x76..+0x7d. One active flag per position, handed to install_wall as that
++	// position's TEdgeSegment::ActiveFlagPtr, so exactly the current position's edges
++	// collide. Upstream keys its single wall to ActiveFlag instead.
++	char PositionFlags[MaxPositions] = {};
++
++	// +0x7e. The position currently shown, -1 for "retracted, no sprite". An int, not
++	// a float: 0x41516b stores the truncated index straight into it and 0x414f18
++	// compares it against +0x92 with `cmp DWORD PTR [esi+0x7e],eax`. (TSink's +0x7e is
++	// a float TimerTime -- a different class at the same offset; see
++	// src/dragon_part3.cpp.)
++	int CurrentPosition = -1;
++
++	// +0x92. The position the step timer is walking towards.
++	int TargetPosition = -1;
++
++	// +0x82. Where Reset / SetTiltLock / PlayerChanged put it. DAT attribute 409,
++	// default -1 (0x414e7c..0x414ea5).
++	int HomePosition = -1;
++
++	// +0x96. Seconds per position step. DAT attribute 903, default 0.1
++	// (0x414e57..0x414e7b).
++	float StepTime = 0.1f;
++
++	// +0x9a. The step timer, callback 0x414f00.
++	int MotionTimer = 0;
++
++	// +0x9e..+0xad. The deferred-retry record, a four-field struct in the original
++	// {timer, code, value, component}.
++	int RetryTimer = 0;
++	MessageCode RetryCode = static_cast<MessageCode>(0);
++	float RetryValue = 0.0f;
++
++private:
++	void SetPosition(MessageCode code, float value);
++	int LastPosition() const;
++	void KillMotion();
++	void KillRetry();
++	void ArmMotion(float delay);
++	int FtMessage(MessageCode code, float value);
+ };
 diff --git a/SpaceCadetPinball/TBumper.cpp b/SpaceCadetPinball/TBumper.cpp
 index ba69e1c..41cb428 100644
 --- a/SpaceCadetPinball/TBumper.cpp
@@ -1397,7 +1826,7 @@ index 2f07d83..4196a3c 100644
  
  	auto deltaAngle = FlipperEdge->flipper_angle_delta(dt);
 diff --git a/SpaceCadetPinball/THole.cpp b/SpaceCadetPinball/THole.cpp
-index 4c930ff..04df3ba 100644
+index 4c930ff..99bbc65 100644
 --- a/SpaceCadetPinball/THole.cpp
 +++ b/SpaceCadetPinball/THole.cpp
 @@ -9,6 +9,7 @@
@@ -1443,15 +1872,21 @@ index 4c930ff..04df3ba 100644
  	if (Circle.RadiusSq == 0.0f)
  		Circle.RadiusSq = 0.001f;
  
-@@ -36,8 +57,13 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+@@ -36,8 +57,19 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
  	tCircle->place_in_grid(&AABB);
  	EdgeList.push_back(tCircle);
  
 -	ZSetValue = loader::query_float_attribute(groupIndex, 0, 408)[2];
 -	CollisionMask = static_cast<int>(floor(*loader::query_float_attribute(groupIndex, 0, 1304)));
-+	// 408 is the captured ball's z. Absent means the hole does not move the ball in z.
++	// 408 is the captured ball's z, and it is the attribute's *fourth* element plus the
++	// table's own CollisionCompOffset -- DRAGON.EXE 0x4168f6 pushes 0x198 (408), and
++	// 0x416929 reads `[table+0x152] + arr[3]` into ZSetValue at 0x416937. The port took
++	// arr[2] and added nothing, which put every captured ball 0.114 too low on
++	// s_hole100 and s_hole101 and 2.394 too *high* on s_hole118 -- that one is the
++	// tunnel the ball was reported rendering oddly in. Absent means the hole does not
++	// move the ball in z.
 +	auto zArr = loader::query_float_attribute_opt(groupIndex, 0, 408);
-+	ZSetValue = zArr ? zArr[2] : 0.0f;
++	ZSetValue = zArr ? PinballTable->CollisionCompOffset + zArr[3] : 0.0f;
 +	// 1304 is the collision layer the captured ball is moved onto. Absent means the
 +	// hole does not relayer the ball; 0 becomes layer 1 under Full Tilt's 1 << value,
 +	// which is the base playfield layer a ball already lives on.
@@ -1459,7 +1894,7 @@ index 4c930ff..04df3ba 100644
  
  	// CollisionMask difference: 3DPB - value given as is, FT: mask = 1 << value
  	if (pb::FullTiltMode)
-@@ -48,6 +74,10 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+@@ -48,6 +80,10 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
  	circle.Center.X = Circle.Center.X;
  	circle.Center.Y = Circle.Center.Y;
  
@@ -1470,7 +1905,7 @@ index 4c930ff..04df3ba 100644
  	Field.ActiveFlag = &ActiveFlag;
  	Field.CollisionComp = this;
  	Field.CollisionGroup = visual.CollisionGroup;
-@@ -63,11 +93,28 @@ int THole::Message(MessageCode code, float value)
+@@ -63,11 +99,28 @@ int THole::Message(MessageCode code, float value)
  		Timer = 0;
  		BallCapturedSecondStage = true;
  	}
@@ -1499,7 +1934,7 @@ index 4c930ff..04df3ba 100644
  	if (!BallCapturedFlag)
  	{
  		BallCapturedSecondStage = false;
-@@ -108,13 +155,50 @@ int THole::FieldEffect(TBall* ball, vector2* vecDst)
+@@ -108,13 +161,50 @@ int THole::FieldEffect(TBall* ball, vector2* vecDst)
  			ball->Position.Z += ball->Direction.Z;
  			if (ball->Position.Z <= ZSetValue)
  			{
@@ -2139,7 +2574,7 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..de365a8 100644
+index e0ccd71..6e6bb23 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
 @@ -44,6 +44,44 @@ enum class MessageCode
@@ -2187,7 +2622,42 @@ index e0ccd71..de365a8 100644
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -131,6 +169,21 @@ enum class MessageCode
+@@ -83,6 +121,34 @@ enum class MessageCode
+ 	TBlockerEnable = 52,
+ 	TBlockerRestartTimeout = 59,
+ 
++	// The rest of Full Tilt's moving-part protocol. Its TBlocker jump-tables 0x37..0x3c
++	// at DRAGON.EXE 0x415398 (byte-identical in CADET.EXE and PIRATES.EXE), and 0x37/0x38
++	// are the pair upstream calls TBlockerDisable/TBlockerEnable. The other four, and the
++	// arrival notification the step callback raises, have no 3D Pinball counterpart.
++	//
++	// 57 and 58 are the originals' own 0x39 and 0x3a and have to keep those values:
++	// src/pirates_*.cpp and src/dragon_missions.cpp already cast the raw numbers. They
++	// collide numerically with ControlBallCaptured / ControlBallReleased, which is
++	// harmless -- those two only ever travel to control::handler, never into a
++	// component's Message().
++	TBlockerSetPosition = 57,     // original 0x39, arm 0x4150ce: show position floor(value)
++	TBlockerMoveToPosition = 58,  // original 0x3a, arm 0x4151fb: step towards it
++
++	// 0x3b and 0x3c are RENUMBERED rather than kept, because the originals' 0x3b is
++	// numerically 59 -- which is already TBlockerRestartTimeout here, upstream's own
++	// value for a different message, and the one Space Cadet's control.cpp and Dragon's
++	// armour handlers both send. Nothing in either table's rules sends 0x3b or 0x3c
++	// (checked across src/), so no call site depends on the original numbers.
++	TBlockerSnapOpen = 70,        // original 0x3b, arm 0x415245
++	TBlockerSnapClosed = 71,      // original 0x3c, arm 0x415284
++
++	// Original 0x3d, raised by the step callback at 0x414f00 once the part's position
++	// index has reached its target, and delivered to the part's own ControlFunc. 61 is
++	// the original's own number, which src/dragon_part2.cpp and src/dragon_missions.cpp
++	// already cast; it is numerically ControlNotifyTimerExpired, a collision those two
++	// files document and switch on deliberately.
++	ControlBlockerMotionDone = 61,
++
+ 	TGateDisable = 53,
+ 	TGateEnable = 54,
+ 
+@@ -131,6 +197,21 @@ enum class MessageCode
  	Reset = 1024,
  };
  
@@ -2209,7 +2679,7 @@ index e0ccd71..de365a8 100644
  class TPinballComponent
  {
  public:
-@@ -143,6 +196,18 @@ public:
+@@ -143,6 +224,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -2228,7 +2698,7 @@ index e0ccd71..de365a8 100644
  	char UnusedBaseFlag;
  	char ActiveFlag;
  	int MessageField;
-@@ -156,3 +221,8 @@ private:
+@@ -156,3 +249,8 @@ private:
  	float VisualPosNormX;
  	float VisualPosNormY;
  };
@@ -3210,7 +3680,7 @@ index 7ed23b4..455a548 100644
  
  void TRollover::TimerExpired(int timerId, void* caller)
 diff --git a/SpaceCadetPinball/TSink.cpp b/SpaceCadetPinball/TSink.cpp
-index 54539bb..e492cf7 100644
+index 54539bb..cc724b3 100644
 --- a/SpaceCadetPinball/TSink.cpp
 +++ b/SpaceCadetPinball/TSink.cpp
 @@ -9,6 +9,7 @@
@@ -3221,7 +3691,7 @@ index 54539bb..e492cf7 100644
  
  TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
  {
-@@ -22,10 +23,16 @@ TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
+@@ -22,10 +23,29 @@ TSink::TSink(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
  	ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
  	SoundIndex4 = visual.SoundIndex4;
  	SoundIndex3 = visual.SoundIndex3;
@@ -3235,14 +3705,27 @@ index 54539bb..e492cf7 100644
 +	// either bonus table has been seen without it.
 +	auto floatArr = loader::query_float_attribute_opt(groupIndex, 0, 601);
 +	BallPosition = floatArr ? vector2{floatArr[0], floatArr[1]} : vector2{0.0f, 0.0f};
++	// 601's fourth element is the return height, not part of the position. Without it
++	// every sink handed the ball back at the playfield's own z.
++	BallPositionZ = floatArr ? floatArr[3] : 0.0f;
++
++	// 1301 is the layer to return the ball onto, stored as a bit index. Absent means
++	// "the sink's own layer", which is what the visual's collision group already is.
++	// Seven of Dragon's eleven sinks are the only way onto the layers they serve --
++	// a_sink16 is the sole feeder of a_ramp5's 0x10 -- so without this the ball comes
++	// back on the base playfield layer and those ramps cannot be reached at all.
++	auto releaseArr = loader::query_float_attribute_opt(groupIndex, 0, 1301);
++	ReleaseMask = releaseArr
++		              ? 1 << static_cast<int>(floor(releaseArr[0]))
++		              : visual.CollisionGroup;
 +	// 407 is the auto-eject delay; absent means eject on the next tick.
 +	TimerTime = loader::query_float_attribute(groupIndex, 0, 407, 0.0f);
-+	ft_sink_register(GroupName, this, AABB, visual.CollisionGroup, TimerTime, BallPosition,
++	ft_sink_register(GroupName, this, AABB, ReleaseMask, TimerTime, BallPosition,
 +	                 SoundIndex3, SoundIndex4); // FTDBG
  }
  
  int TSink::Message(MessageCode code, float value)
-@@ -33,10 +40,15 @@ int TSink::Message(MessageCode code, float value)
+@@ -33,10 +53,15 @@ int TSink::Message(MessageCode code, float value)
  	switch (code)
  	{
  	case MessageCode::TSinkResetTimer:
@@ -3259,7 +3742,7 @@ index 54539bb..e492cf7 100644
  	case MessageCode::PlayerChanged:
  		timer::kill(TimerExpired);
  		PlayerMessagefieldBackup[PinballTable->CurrentPlayer] = MessageField;
-@@ -64,6 +76,9 @@ void TSink::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
+@@ -64,6 +89,9 @@ void TSink::Collision(TBall* ball, vector2* nextPosition, vector2* direction, fl
  	}
  	else
  	{
@@ -3269,7 +3752,7 @@ index 54539bb..e492cf7 100644
  		ball->Disable();
  		loader::play_sound(SoundIndex4, ball, "TSink1");
  		control::handler(MessageCode::ControlCollision, this);
-@@ -74,6 +89,10 @@ void TSink::TimerExpired(int timerId, void* caller)
+@@ -74,6 +102,10 @@ void TSink::TimerExpired(int timerId, void* caller)
  {
  	auto sink = static_cast<TSink*>(caller);
  	auto table = sink->PinballTable;
@@ -3280,7 +3763,7 @@ index 54539bb..e492cf7 100644
  	if (table->BallCountInRect(sink->BallPosition, table->CollisionCompOffset * 2.0f))
  	{
  		timer::set(0.5f, sink, TimerExpired);
-@@ -81,6 +100,11 @@ void TSink::TimerExpired(int timerId, void* caller)
+@@ -81,8 +113,17 @@ void TSink::TimerExpired(int timerId, void* caller)
  	else 
  	{
  		auto ball = table->AddBall(sink->BallPosition);
@@ -3291,7 +3774,33 @@ index 54539bb..e492cf7 100644
 +			        sink->ThrowSpeedMult1, sink->ThrowSpeedMult2); // FTDBG
  		assertm(ball, "Failure to create ball in sink");
  		ball->CollisionDisabledFlag = true;
++		// 0x4185f6 and 0x4185fc, in that order: the layer, then the height, which is
++		// relative to the ball's own radius.
++		ball->CollisionMask = sink->ReleaseMask;
++		ball->Position.Z = sink->BallPositionZ + ball->Radius;
  		ball->throw_ball(&sink->BallThrowDirection, sink->ThrowAngleMult, sink->ThrowSpeedMult1,
+ 			sink->ThrowSpeedMult2);
+ 		if (sink->SoundIndex3)
+diff --git a/SpaceCadetPinball/TSink.h b/SpaceCadetPinball/TSink.h
+index d461fca..d40b2e5 100644
+--- a/SpaceCadetPinball/TSink.h
++++ b/SpaceCadetPinball/TSink.h
+@@ -14,6 +14,15 @@ public:
+ 	static void TimerExpired(int timerId, void* caller);
+ 
+ 	float TimerTime;
++	// The layer the ejected ball is put on, and the height it is put at. Both are in
++	// the originals' TSink and in neither upstream's nor, until now, this port's: the
++	// constructor at DRAGON.EXE 0x418390 reads attribute 1301 as `1 << floor(arr[0])`
++	// into +0x76, defaulting to the visual's own collision group when the attribute is
++	// absent (0x41842e), and takes attribute 601's *fourth* element into +0x7a
++	// (0x41847e), while the port read only 601[0] and 601[1] as the position. The two
++	// are then applied to the new ball in TimerExpired, at 0x4185f6 and 0x4185fc.
++	int ReleaseMask;
++	float BallPositionZ;
+ 	vector2 BallPosition{};
+ 	vector3 BallThrowDirection{};
+ 	float ThrowAngleMult;
 diff --git a/SpaceCadetPinball/TTableLayer.cpp b/SpaceCadetPinball/TTableLayer.cpp
 index 311a2e0..c196879 100644
 --- a/SpaceCadetPinball/TTableLayer.cpp
@@ -3521,6 +4030,32 @@ index 8bb598f..741f1a1 100644
  	~TTextBoxMessage();
  	float TimeLeft() const;
  	void Refresh(float time);
+diff --git a/SpaceCadetPinball/TTimer.cpp b/SpaceCadetPinball/TTimer.cpp
+index d36ade4..6369685 100644
+--- a/SpaceCadetPinball/TTimer.cpp
++++ b/SpaceCadetPinball/TTimer.cpp
+@@ -16,6 +16,21 @@ int TTimer::Message(MessageCode code, float value)
+ 	case MessageCode::TTimerResetTimer:
+ 		if (Timer)
+ 			timer::kill(Timer);
++		Timer = 0;
++		// A negative value *cancels*; it does not arm. DRAGON.EXE's TTimer::Message is
++		// at 0x41b380 and its 0x45 arm at 0x41b3bc kills the old timer, compares the
++		// value against the 0.0 at 0x437790, and returns via 0x41b3d9 without arming
++		// when it is below -- only 0x41b3df onwards calls timer::set.
++		//
++		// This matters on the bonus tables, and it is the opposite of what the same
++		// code does on a TBlocker, which clamps with max(value, 0.0) at 0x4152b5 and
++		// so fires immediately. Upstream gives both classes message 59 and both the
++		// clamp; the bonus rules send -1.0f to `mode_timer` -- a TTimer -- meaning
++		// "stop the quest clock", and with the clamp that tripped the clock instead of
++		// stopping it. No Space Cadet caller sends 59 to a TTimer at all (its only
++		// sender is control.cpp's blocker duration), so nothing there changes.
++		if (value < 0.0f)
++			break;
+ 		Timer = timer::set(value, this, TimerExpired);
+ 		break;
+ 	case MessageCode::SetTiltLock:
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
 index 4b6377c..697faae 100644
 --- a/SpaceCadetPinball/control.cpp
@@ -4496,7 +5031,7 @@ index 533a49f..965123c 100644
  	static void set(scoreStruct* score, int value);
 diff --git a/SpaceCadetPinball/table_rules.cpp b/SpaceCadetPinball/table_rules.cpp
 new file mode 100644
-index 0000000..f6e38df
+index 0000000..5c7d8a4
 --- /dev/null
 +++ b/SpaceCadetPinball/table_rules.cpp
 @@ -0,0 +1,187 @@
@@ -4552,7 +5087,7 @@ index 0000000..f6e38df
 +// Field order, because C++11 has no designated initializers:
 +//   Id, Name, DatFileName, FullTiltData, DemoData,
 +//   ScoreComponents, ScoreComponentCount, SimpleComponents, SimpleComponentCount,
-+//   MultiplierIsValue, ModeRegister, ModeControl, ModeBeforeComponent,
++//   MultiplierIsValue, MovingBlockers, ModeRegister, ModeControl, ModeBeforeComponent,
 +//   ResetRules, BallDrained, CurrentRank, CurrentMode,
 +//   MusicPrefix, MusicTrackCount, SettingsPrefix, RcStrings, RcStringCount
 +static const TableRules TableRegistry[] =
@@ -4565,21 +5100,21 @@ index 0000000..f6e38df
 +	{
 +		TableId::SpaceCadetFT, "Full Tilt! Space Cadet", "CADET.DAT", true, false,
 +		control::score_components, 88, control::simple_components, 145,
-+		false, &control_lite198_tag, &control::MissionControl, false,
++		false, false, &control_lite198_tag, &control::MissionControl, false,
 +		nullptr, nullptr, nullptr, nullptr,
 +		"TABA", 3, "CADET", nullptr, 0,
 +	},
 +	{
 +		TableId::SpaceCadet3DPB, "3D Pinball Space Cadet", "PINBALL.DAT", false, false,
 +		control::score_components, 88, control::simple_components, 145,
-+		false, &control_lite198_tag, &control::MissionControl, false,
++		false, false, &control_lite198_tag, &control::MissionControl, false,
 +		nullptr, nullptr, nullptr, nullptr,
 +		"PINBALL", 0, "3DPB", nullptr, 0,
 +	},
 +	{
 +		TableId::SpaceCadetDemo, "Full Tilt! Space Cadet (demo)", "DEMO.DAT", true, true,
 +		control::score_components, 88, control::simple_components, 145,
-+		false, &control_lite198_tag, &control::MissionControl, false,
++		false, false, &control_lite198_tag, &control::MissionControl, false,
 +		nullptr, nullptr, nullptr, nullptr,
 +		"TABA", 3, "DEMO", nullptr, 0,
 +	},
@@ -4593,13 +5128,13 @@ index 0000000..f6e38df
 +		TableId::DragonsKeep, "Dragon's Keep", "DRAGON.DAT", true, false,
 +#if FULLTILT_HAVE_BONUS_RULES
 +		dragon_score_components, 75, dragon_simple_components, 150,
-+		true,
++		true, true,
 +		// The mode register is the table's one TTextBox; each table's tag now lives
 +		// in its own namespace, so there is an unambiguous symbol to bind.
 +		&dragon::tag_info_text_box, &dragon::MissionHandler, true,
 +#else
 +		nullptr, 0, nullptr, 0,
-+		true,
++		true, true,
 +		nullptr, nullptr, false,
 +#endif
 +		nullptr, nullptr, nullptr, nullptr,
@@ -4609,11 +5144,11 @@ index 0000000..f6e38df
 +		TableId::Skulduggery, "Skulduggery", "PIRATES.DAT", true, false,
 +#if FULLTILT_HAVE_BONUS_RULES
 +		pirates_score_components, 74, pirates_simple_components, 192,
-+		true,
++		true, true,
 +		&pirates::tag_info_text_box, &pirates::Handler, true,
 +#else
 +		nullptr, 0, nullptr, 0,
-+		true,
++		true, true,
 +		nullptr, nullptr, false,
 +#endif
 +		nullptr, nullptr, nullptr, nullptr,
@@ -4689,10 +5224,10 @@ index 0000000..f6e38df
 +}
 diff --git a/SpaceCadetPinball/table_rules.h b/SpaceCadetPinball/table_rules.h
 new file mode 100644
-index 0000000..045e80a
+index 0000000..25a48af
 --- /dev/null
 +++ b/SpaceCadetPinball/table_rules.h
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,202 @@
 +#pragma once
 +
 +// A per-table rules interface, which upstream does not have.
@@ -4786,6 +5321,23 @@ index 0000000..045e80a
 +	// value of 5, indexes off the end of the array -- which is why this is a flag
 +	// and not a comment. The long note below says why no per-table array is right.
 +	bool MultiplierIsValue;
++
++	// Which TBlocker the table gets. Two different classes share the name: upstream's
++	// is 3D Pinball's two-state prop (sprite 0 / no sprite, one timer, raises
++	// ControlTimerExpired), the Full Tilt engine's is a multi-position moving part with
++	// a position index, one collision-edge set per position, a step timer and a second
++	// timeout timer -- DRAGON.EXE 0x414d60 / 0x414f80, the same bytes at the same
++	// addresses in CADET.EXE and PIRATES.EXE.
++	//
++	// So this is a flag and not a table property: the Full Tilt engine would give the
++	// moving class to CADET.DAT too, but the port's Space Cadet rules are written
++	// against the 3D Pinball one -- control::DrainBallBlockerControl needs
++	// TBlockerEnable's own timer to raise ControlTimerExpired, and the moving class
++	// raises ControlBlockerMotionDone from its step callback instead and never arms
++	// that timer at all. True only for the two bonus tables, whose parts otherwise do
++	// not move: the gargoyle rocks, dragon jaw, sword, centre post and moat blocker on
++	// Dragon's Keep, the cannon and lane blockers on Skulduggery.
++	bool MovingBlockers;
 +
 +	// Where the table keeps its mode. Space Cadet uses the dummy light `lite198`,
 +	// Dragon's Keep the MessageField of its single TTextBox `info_text_box`. The
