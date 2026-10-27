@@ -83,11 +83,11 @@ set +e
 # One awk pass: everything reaches the terminal, the log keeps only the signal,
 # and the suppressed count is recorded so a flood cannot hide in the gap.
 stdbuf -oL -eL "$bin" "$@" 2>&1 |
-	awk -v log="$log" -v noise='SDL Error: That operation is not supported' '
+	awk -v out="$log" -v noise='SDL Error: That operation is not supported' '
 		{ print }
 		index($0, noise) { n++; next }
-		{ print >> log }
-		END { if (n) printf "# suppressed %d renderer noise lines\n", n >> log }
+		{ print >> out; fflush(out) }
+		END { if (n) printf "# suppressed %d renderer noise lines\n", n >> out }
 	'
 status=${PIPESTATUS[0]}
 set -e
