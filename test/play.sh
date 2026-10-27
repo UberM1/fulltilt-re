@@ -73,9 +73,22 @@ cd -- "$rundir"
 
 # Both streams, unbuffered, to the terminal and the log. The engine reports
 # loader failures and missing components on stderr, and they scroll past.
+#
+# The SDL renderer emits "That operation is not supported" once per frame, which
+# buried the only eight meaningful lines of a 130 KB log under 4,000 copies of
+# itself -- and would bury a real SDL error just as well. Dropped from the log,
+# kept on the terminal, with a count at the end so it cannot vanish silently.
 export HOME=$rundir/home XDG_DATA_HOME=$rundir/home/.local/share
 set +e
-stdbuf -oL -eL "$bin" "$@" 2>&1 | tee -a -- "$log"
+# One awk pass: everything reaches the terminal, the log keeps only the signal,
+# and the suppressed count is recorded so a flood cannot hide in the gap.
+stdbuf -oL -eL "$bin" "$@" 2>&1 |
+	awk -v log="$log" -v noise='SDL Error: That operation is not supported' '
+		{ print }
+		index($0, noise) { n++; next }
+		{ print >> log }
+		END { if (n) printf "# suppressed %d renderer noise lines\n", n >> log }
+	'
 status=${PIPESTATUS[0]}
 set -e
 
