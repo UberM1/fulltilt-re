@@ -850,7 +850,7 @@ index 2f07d83..4196a3c 100644
  
  	auto deltaAngle = FlipperEdge->flipper_angle_delta(dt);
 diff --git a/SpaceCadetPinball/THole.cpp b/SpaceCadetPinball/THole.cpp
-index 4c930ff..f9ebfc7 100644
+index 4c930ff..d5820f8 100644
 --- a/SpaceCadetPinball/THole.cpp
 +++ b/SpaceCadetPinball/THole.cpp
 @@ -21,12 +21,27 @@ THole::THole(TPinballTable* table, int groupIndex) : TCollisionComponent(table,
@@ -899,6 +899,27 @@ index 4c930ff..f9ebfc7 100644
  
  	// CollisionMask difference: 3DPB - value given as is, FT: mask = 1 << value
  	if (pb::FullTiltMode)
+@@ -63,6 +83,20 @@ int THole::Message(MessageCode code, float value)
+ 		Timer = 0;
+ 		BallCapturedSecondStage = true;
+ 	}
++
++	// Release the captured ball after `value` seconds, or at once if it is not
++	// positive. Space Cadet never sends this -- its holes release on their own
++	// capture timer -- but the bonus tables park a ball and let it go on a rule's
++	// say-so, and without this arm the ball is captured for good.
++	if (code == MessageCode::THoleReleaseBall && BallCapturedFlag)
++	{
++		if (Timer)
++			timer::kill(Timer);
++		Timer = value > 0.0f ? timer::set(value, this, TimerExpired) : 0;
++		if (!Timer)
++			TimerExpired(0, this);
++	}
++
+ 	return 0;
+ }
+ 
 diff --git a/SpaceCadetPinball/TKickout.cpp b/SpaceCadetPinball/TKickout.cpp
 index dd31ce3..62b5594 100644
 --- a/SpaceCadetPinball/TKickout.cpp
@@ -1485,10 +1506,10 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..b83c93c 100644
+index e0ccd71..0c0302b 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
-@@ -44,6 +44,33 @@ enum class MessageCode
+@@ -44,6 +44,39 @@ enum class MessageCode
  	TLightFtTmpOverrideOff = -25,
  	TLightFtResetOverride = -26,
  
@@ -1507,6 +1528,12 @@ index e0ccd71..b83c93c 100644
 +	// and answered by the type-1043 diverters as a third synonym for their gate pair.
 +	// All they do is flip ActiveFlag, which takes the device's collision circle in and
 +	// out of the world.
++	// THole's private release code, Full Tilt only. Upstream's THole::Message
++	// answers Reset alone, so a table that releases a captured ball this way --
++	// Dragon's Keep's s_hole118 parks the ball and then lets it go -- held it
++	// forever. Numbered as the original has it, like the magnet pair below.
++	THoleReleaseBall = 67,
++
 +	TMagnetFieldEnable = 75,
 +	TMagnetFieldDisable = 76,
 +
@@ -1522,7 +1549,7 @@ index e0ccd71..b83c93c 100644
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -143,6 +170,18 @@ public:
+@@ -143,6 +176,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -1903,7 +1930,7 @@ index c407fdc..662e062 100644
  	int BallCount{};
  	int MaxBallCount;
 diff --git a/SpaceCadetPinball/TPlunger.cpp b/SpaceCadetPinball/TPlunger.cpp
-index 6f0f48e..bc1a90b 100644
+index 6f0f48e..2783509 100644
 --- a/SpaceCadetPinball/TPlunger.cpp
 +++ b/SpaceCadetPinball/TPlunger.cpp
 @@ -11,7 +11,8 @@
@@ -1978,7 +2005,16 @@ index 6f0f48e..bc1a90b 100644
  }
  
  void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
-@@ -69,6 +94,15 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -63,12 +88,24 @@ void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction,
+ 
+ int TPlunger::Message(MessageCode code, float value)
+ {
++	if (getenv("FT_AUTODRAIN"))
++		fprintf(stderr, "DBG-plunger msg=%d value=%f launcher=%d someCounter=%d multiball=%d\n",
++		        static_cast<int>(code), value, (int)LauncherFlag, SomeCounter, PinballTable->MultiballCount);
+ 	switch (code)
+ 	{
+ 	case MessageCode::PlungerInputPressed:
  		if (!PullbackStartedFlag && (!pb::FullTiltMode || PinballTable->MultiballCount > 0 && !PinballTable->
  			TiltLockFlag))
  		{
@@ -1994,7 +2030,7 @@ index 6f0f48e..bc1a90b 100644
  			PullbackStartedFlag = true;
  			Boost = 0.0;
  			Threshold = 1000000000.0;
-@@ -132,7 +166,9 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -132,7 +169,9 @@ int TPlunger::Message(MessageCode code, float value)
  				timer::kill(PullbackTimer_);
  			PullbackTimer_ = 0;
  			loader::play_sound(SoundIndexP2, this, "TPlunger3");
@@ -2005,7 +2041,7 @@ index 6f0f48e..bc1a90b 100644
  			timer::set(PullbackDelay, this, ReleasedTimer);
  		}
  		break;
-@@ -147,7 +183,9 @@ int TPlunger::Message(MessageCode code, float value)
+@@ -147,7 +186,9 @@ int TPlunger::Message(MessageCode code, float value)
  		timer::kill(PullbackTimer);
  		timer::kill(ReleasedTimer);
  
@@ -2016,7 +2052,16 @@ index 6f0f48e..bc1a90b 100644
  		break;
  	}
  	default:
-@@ -185,6 +223,12 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
+@@ -161,6 +202,8 @@ int TPlunger::Message(MessageCode code, float value)
+ void TPlunger::BallFeedTimer(int timerId, void* caller)
+ {
+ 	auto plunger = static_cast<TPlunger*>(caller);
++	if (getenv("FT_AUTODRAIN"))
++		fprintf(stderr, "DBG-plunger BallFeedTimer fired\n");
+ 	plunger->Message(MessageCode::PlungerFeedBall, 0.0);
+ }
+ 
+@@ -185,6 +228,12 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
  		plunger->Boost = plunger->MaxPullback;
  	}
  
@@ -3002,7 +3047,7 @@ index 32a904a..c11026c 100644
  	static MidiTracks active_track, NextTrack;
  	static int Volume;
 diff --git a/SpaceCadetPinball/pb.cpp b/SpaceCadetPinball/pb.cpp
-index 0762832..7a49d53 100644
+index 0762832..a2b4c25 100644
 --- a/SpaceCadetPinball/pb.cpp
 +++ b/SpaceCadetPinball/pb.cpp
 @@ -23,6 +23,7 @@
@@ -3090,7 +3135,77 @@ index 0762832..7a49d53 100644
  	}
  	else
  	{
-@@ -326,7 +340,8 @@ void pb::frame(float dtMilliSec)
+@@ -282,8 +296,69 @@ void pb::ballset(float dx, float dy)
+ 	}
+ }
+ 
++// ---- FTDBG: temporary autodrain harness (remove before finishing) ----
++#include "TDrain.h"
++void ft_autodrain_tick(float dtSec)
++{
++	static int enabled = -1;
++	if (enabled < 0)
++		enabled = getenv("FT_AUTODRAIN") ? 1 : 0;
++	if (!enabled)
++		return;
++
++	static float t = 0.0f;
++	static int stage = 0;
++	t += dtSec;
++
++	auto table = pb::MainTable;
++	if (!table)
++		return;
++
++	if (stage == 0 && t > 1.0f)
++	{
++		fprintf(stderr, "DBG-auto t=%.1f new game\n", t);
++		pb::replay_level(false);
++		stage = 1;
++		return;
++	}
++	if (stage == 1 && t > 2.5f)
++	{
++		fprintf(stderr, "DBG-auto t=%.1f launch, multiball=%d ballcount=%d\n",
++		        t, table->MultiballCount, table->BallCount);
++		pb::launch_ball();
++		stage = 2;
++		return;
++	}
++	if (stage >= 2 && t > 2.5f + 8.0f * static_cast<float>(stage - 1))
++	{
++		TBall* victim = nullptr;
++		for (auto ball : table->BallList)
++			if (ball->ActiveFlag)
++			{
++				victim = ball;
++				break;
++			}
++		fprintf(stderr, "DBG-auto t=%.1f stage=%d DRAIN victim=%p multiball=%d ballcount=%d extra=%d player=%d/%d\n",
++		        t, stage, static_cast<void*>(victim), table->MultiballCount, table->BallCount,
++		        table->ExtraBalls, table->CurrentPlayer, table->PlayerCount);
++		if (victim && table->Drain)
++		{
++			vector2 dummy{0.0f, 0.0f};
++			table->Drain->Collision(victim, &dummy, &dummy, 0.0f, nullptr);
++		}
++		else
++		{
++			fprintf(stderr, "DBG-auto     no active ball to drain\n");
++			pb::launch_ball();
++		}
++		stage++;
++	}
++}
++// ---- end FTDBG ----
++
+ void pb::frame(float dtMilliSec)
+ {
++	ft_autodrain_tick(dtMilliSec*0.001f);
+ 	if (dtMilliSec > 100)
+ 		dtMilliSec = 100;
+ 	if (dtMilliSec <= 0)
+@@ -326,7 +401,8 @@ void pb::frame(float dtMilliSec)
  	{
  		if (nudge::nudge_count > 0.5f)
  		{
@@ -3100,7 +3215,7 @@ index 0762832..7a49d53 100644
  		}
  		if (nudge::nudge_count > 1.0f)
  			MainTable->tilt(time_now);
-@@ -486,13 +501,16 @@ void pb::timed_frame(float timeDelta)
+@@ -486,13 +562,16 @@ void pb::timed_frame(float timeDelta)
  void pb::pause_continue()
  {
  	winmain::single_step ^= true;
@@ -3120,7 +3235,7 @@ index 0762832..7a49d53 100644
  		midi::music_stop();
  		Sound::Deactivate();
  	}
-@@ -514,7 +532,8 @@ void pb::pause_continue()
+@@ -514,7 +593,8 @@ void pb::pause_continue()
  				textTime = 5.0;
  				text = get_rc_string(Msg::STRING124);
  			}
@@ -3130,7 +3245,7 @@ index 0762832..7a49d53 100644
  		}
  		if (options::Options.Music && !winmain::single_step)
  			midi::music_play();
-@@ -579,7 +598,8 @@ void pb::InputDown(GameInput input)
+@@ -579,7 +659,8 @@ void pb::InputDown(GameInput input)
  		return;
  
  	if (CreditsActive)
@@ -3140,7 +3255,7 @@ index 0762832..7a49d53 100644
  	CreditsActive = false;
  	IdleTimerMs = 0;
  
-@@ -728,7 +748,8 @@ void pb::high_scores()
+@@ -728,7 +809,8 @@ void pb::high_scores()
  void pb::tilt_no_more()
  {
  	if (MainTable->TiltLockFlag)
@@ -3510,6 +3625,117 @@ index 0000000..4244ccc
 +	QuestRestart,    // original 0x53
 +	LastScorerChanged, // original 0x4d; no component consumes it, kept for fidelity
 +};
+diff --git a/SpaceCadetPinball/winmain.cpp b/SpaceCadetPinball/winmain.cpp
+index 836556f..d925f54 100644
+--- a/SpaceCadetPinball/winmain.cpp
++++ b/SpaceCadetPinball/winmain.cpp
+@@ -292,7 +292,89 @@ int winmain::WinMain(LPCSTR lpCmdLine)
+ 	return return_value;
+ }
+ 
++// ===== FT_DEBUG instrumentation (temporary) =====
++#include "TTextBox.h"
++#include "TPinballTable.h"
++#include <cstdlib>
++static void ft_dump_vscreen(const char* name)
++{
++	auto* bmp = render::vscreen;
++	if (!bmp) return;
++	char path[256];
++	snprintf(path, sizeof path, "/tmp/ftdump/%s.ppm", name);
++	FILE* f = fopen(path, "wb");
++	if (!f) return;
++	fprintf(f, "P6\n%d %d\n255\n", bmp->Width, bmp->Height);
++	for (int y = 0; y < bmp->Height; y++)
++	{
++		auto* row = bmp->BmpBufPtr1 + y * bmp->Stride;
++		for (int x = 0; x < bmp->Width; x++)
++		{
++			unsigned char px[3] = { row[x].GetRed(), row[x].GetGreen(), row[x].GetBlue() };
++			fwrite(px, 1, 3, f);
++		}
++	}
++	fclose(f);
++	fprintf(stderr, "DBG-dump %s %dx%d\n", path, bmp->Width, bmp->Height);
++}
++
++static void ft_debug_tick(unsigned frame)
++{
++	static const char* script = getenv("FT_DEBUG");
++	if (!script) return;
++	static bool once = false;
++	if (!once)
++	{
++		once = true;
++		system("mkdir -p /tmp/ftdump");
++		fprintf(stderr, "DBG-boot InfoTextBox=%p MissTextBox=%p FullTiltMode=%d\n",
++			(void*)pb::InfoTextBox, (void*)pb::MissTextBox, (int)pb::FullTiltMode);
++		if (pb::InfoTextBox)
++			fprintf(stderr, "DBG-info rect=%d,%d %dx%d font=%p bg=%p\n",
++				pb::InfoTextBox->OffsetX, pb::InfoTextBox->OffsetY,
++				pb::InfoTextBox->Width, pb::InfoTextBox->Height,
++				(void*)pb::InfoTextBox->Font, (void*)pb::InfoTextBox->BgBmp);
++		if (pb::MainTable)
++			for (auto* c : pb::MainTable->ComponentList)
++			{
++				auto* tb = dynamic_cast<TTextBox*>(c);
++				if (tb)
++					fprintf(stderr, "DBG-tb group=%s rect=%d,%d %dx%d\n",
++						c->GroupName ? c->GroupName : "(null)",
++						tb->OffsetX, tb->OffsetY, tb->Width, tb->Height);
++			}
++	}
++	if (frame == 20)
++		pb::replay_level(false);
++	if (frame == 60)
++		pb::launch_ball();
++	if (frame == 90 && pb::InfoTextBox)
++	{
++		fprintf(stderr, "DBG-rc 3007=[%s] 3003=[%s] 125=[%s]\n",
++			pb::get_rc_string(static_cast<Msg>(3007)),
++			pb::get_rc_string(static_cast<Msg>(3003)),
++			pb::get_rc_string(static_cast<Msg>(125)));
++		char buf[128];
++		snprintf(buf, sizeof buf, pb::get_rc_string(static_cast<Msg>(3007)), 123456L);
++		pb::InfoTextBox->Display(buf, -1.0f);
++	}
++	if (frame == 120)
++		ft_dump_vscreen("probe");
++	if (frame % 200 == 0 && frame > 200)
++	{
++		char n[32]; snprintf(n, sizeof n, "f%u", frame);
++		ft_dump_vscreen(n);
++	}
++	if (getenv("FT_DEBUG_FRAMES") && frame >= (unsigned)atoi(getenv("FT_DEBUG_FRAMES")))
++	{
++		ft_dump_vscreen("final");
++		{ SDL_Event e{SDL_QUIT}; SDL_PushEvent(&e); }
++	}
++}
++// ===== end FT_DEBUG instrumentation =====
++
+ void winmain::MainLoop()
++
+ {
+ 	bQuit = false;
+ 	unsigned updateCounter = 0, frameCounter = 0;
+@@ -367,6 +449,7 @@ void winmain::MainLoop()
+ 					gfrOffset = (gfrOffset + 1) % gfrDisplay.size();
+ 				}
+ 				updateCounter++;
++				ft_debug_tick(updateCounter);
+ 			}
+ 			no_time_loss = false;
+ 
+@@ -892,7 +975,7 @@ int winmain::event_handler(const SDL_Event* event)
+ 	{
+ 	case SDL_QUIT:
+ 		end_pause();
+-		bQuit = true;
++		winmain::bQuit = true;
+ 		fullscrn::shutdown();
+ 		return_value = 0;
+ 		return 0;
 diff --git a/SpaceCadetPinball/zdrv.cpp b/SpaceCadetPinball/zdrv.cpp
 index 5ed5925..20b0a6f 100644
 --- a/SpaceCadetPinball/zdrv.cpp

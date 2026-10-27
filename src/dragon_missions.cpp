@@ -2722,6 +2722,10 @@ void MissionHandler(MessageCode code, TPinballComponent* caller)
 
 	// Two codes mean "re-announce the current mode": an unpause, and a timer
 	// expiry on the text box itself once its display timer has run out.
+	if (getenv("FT_AUTODRAIN") && static_cast<int>(CurrentMode()) == 11)
+		fprintf(stderr, "DBG-mh mode=11 code=%d caller=%p box=%p modetimer=%p pending=%d\n",
+		        static_cast<int>(code), static_cast<void*>(caller), static_cast<void*>(box),
+		        static_cast<void*>(tag_mode_timer.Component), (int)AnnouncementPending(box));
 	if (code == ft::Resume ||
 	    (code == ft::TimerExpired && caller == box && !AnnouncementPending(box)))
 		code = ft::MissionStarted;

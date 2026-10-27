@@ -408,6 +408,11 @@ void PlungerControl(MessageCode code, TPinballComponent* caller)
 // multiball test, and only last the handover to mode 0xb.
 void BallDrainControl(MessageCode code, TPinballComponent* caller)
 {
+	if (getenv("FT_AUTODRAIN"))
+		fprintf(stderr, "DBG-drain enter code=%d drain_phase=%d game_over_phase=%d mode=%d ballcount=%d multiball=%d extra=%d lite40=%d saveflag=%d tilt=%d\n",
+		        static_cast<int>(code), drain_phase, game_over_phase, info_text_box ? info_text_box->MessageField : -999,
+		        TableG->BallCount, TableG->MultiballCount, TableG->ExtraBalls, lite40 ? (int)lite40->light_on() : -1,
+		        shoot_again_flag, TableG->TiltLockFlag);
 	if (code == MessageCode::ControlTimerExpired)
 	{
 		// Once the game is over the drain's timer must not feed another ball; mode 0xb
@@ -511,6 +516,8 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	// without it the released balls would suppress the end-of-game handover.
 	if (TableG->MultiballCount != 0 && game_over_phase == 0)
 	{
+		if (getenv("FT_AUTODRAIN"))
+			fprintf(stderr, "DBG-drain early-return: balls still live\n");
 		drain_phase = 0;
 		return;
 	}
@@ -518,7 +525,13 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	// Hand over to the bonus count-up. Mode 0xb is idempotent-guarded, and mode 0 (game
 	// already over, waiting for a new game) must not be disturbed.
 	if (info_text_box->MessageField == ModeEndOfBall || info_text_box->MessageField == 0)
+	{
+		if (getenv("FT_AUTODRAIN"))
+			fprintf(stderr, "DBG-drain early-return: mode=%d already end-of-ball or zero\n", info_text_box->MessageField);
 		return;
+	}
+	if (getenv("FT_AUTODRAIN"))
+		fprintf(stderr, "DBG-drain -> handing over to mode 0xb\n");
 	info_text_box->MessageField = ModeEndOfBall;
 	MissionHandler(FtMessageCode::ModeStarted, nullptr);
 }

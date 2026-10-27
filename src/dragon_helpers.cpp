@@ -659,6 +659,10 @@ static bool AnnounceBonusLine(int stringId, TPinballComponent* wave, int term)
 // hands over to mode 0 (game over); or the next ball/player is served.
 static void FinishBall()
 {
+	if (getenv("FT_AUTODRAIN"))
+		fprintf(stderr, "DBG-bonus FinishBall game_over_phase=%d multiball=%d ballcount=%d extra=%d player=%d/%d\n",
+		        game_over_phase, TableG->MultiballCount, TableG->BallCount, TableG->ExtraBalls,
+		        TableG->CurrentPlayer, TableG->PlayerCount);
 	// An extra ball or a locked ball released by the drain's game-over path can put
 	// balls back in play after the bonus started. game_over_phase distinguishes
 	// "balls are live, wait" from "those are the game-over balls, proceed".
@@ -722,6 +726,9 @@ static void FinishBall()
 // end-of-ball step so a stuck count-up cannot hang the game.
 void DrainBonusController(MessageCode code, TPinballComponent* caller)
 {
+	if (getenv("FT_AUTODRAIN"))
+		fprintf(stderr, "DBG-bonus enter code=%d step=%d quiet=%d caller=%p\n",
+		        static_cast<int>(code), BonusStep, BonusQuiet, static_cast<void*>(caller));
 	if (code == ft::TimerExpired)
 	{
 		// Only the mode's own backstop; a text-box expiry has already been remapped
