@@ -303,7 +303,7 @@ Two refinements the listings also give:
   `a_sink1` unconditionally (`ds:0x43a3c4` at `0x425d19`). Only the three
   "nothing special happened" paths swap sinks.
 * The flash duration in the handlers is `(float)(int)(X->floatAt+0x7e)` where `X` is the
-  unannotated component global `0x43a99c` — a float truncated to int and back
+  component global `0x43a99c` — `a_sink9`, per `dump_tags.py` — a float truncated to int and back
   (`fld` / `__ftol` at `0x42c7c8` / `fild` / `fstp`). Probably a DAT-supplied timer value;
   **unidentified**.
 
@@ -1361,7 +1361,9 @@ Ordered roughly by how much they would change a reimplementation.
   My readings (`THole` hold, "no longer active scorer", "mission restarted", "ball
   drained", "ramp exit", "ramp traversed") come from call-site behaviour only.
 * The float field at **`(*0x43a99c) + 0x7e`** used as the fire-lizard light flash duration.
-  `0x43a99c` is an unannotated component global sitting between `a_sink17` and `a_sink16`.
+  **Resolved:** `0x43a99c` is `a_sink9`'s `Component` field, not an unknown global --
+  `analysis/dump_tags.py binaries/win95/DRAGON.EXE` prints it, and `src/` already reads it
+  that way. Noted here because this list said otherwise.
   Unidentified.
 * **Which physical tower each lock sink is** (gate / watch / prison). The binary gives
   score and arming order but not geometry; that needs the DAT visual positions.

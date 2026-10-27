@@ -116,9 +116,13 @@ The open questions:
   of Dragon's five quests have no objective to meet at all, and Skulduggery counts and
   pays even its explicitly lost mode (string 3050 "Shipwrecked").
 - **Which physical component** several abstractly-identified ones are -- which outlane
-  `a_kick2` guards, which tower each lock belongs to. Dragon's `unknown_a99c`
-  (0x43a99c) is still unidentified and therefore null; its one reader falls back to
-  `TBlocker`'s own -1 default.
+  `a_kick2` guards, which tower each lock belongs to. (Dragon's `unknown_a99c` is no
+  longer one of them: 0x43a99c is `a_sink9`'s `Component` field. The tags are
+  `{const char* Name; TPinballComponent* Component;}` with the name string inline just
+  before, so 0x43a990 holds `"a_sink9"`, 0x43a998 the pointer to it, and 0x43a99c the
+  component -- which makes every unannotated `DAT_0043xxxx` the decompiler left bare
+  identifiable by reading the four bytes before it. `src/` already had this right; it
+  was only this list that was stale.)
 - ~~**The glyph tokens render as ASCII.**~~ -- **done**. The symbol font is the `font2`
   group of each bonus table's own DAT, 20 glyphs in `DRAGON.DAT` and 52 in `PIRATES.DAT`,
   absent from `CADET.DAT`. See `docs/engine-changes.md` section 10 for the geometry that
