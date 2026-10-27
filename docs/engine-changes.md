@@ -1,20 +1,23 @@
 # Engine changes the port needs
 
-**Done.** All ten rule files now compile with zero errors against the patched engine, and
-the engine still builds:
+**Done.** All of `src/` compiles and links against the patched engine, the engine still
+builds, and all three tables run (`test/run_tables.sh`).
 
 ```sh
-nix-build build.nix                       # engine, patched
-g++ -std=c++17 -fsyntax-only -I reference/SpaceCadetPinball -I <SDL2> src/*.cpp
+nix-build build.nix                       # engine, patched, with the rules linked in
+test/run_tables.sh                        # Space Cadet, Dragon's Keep, Skulduggery
 ```
 
-The patch is `engine/fulltilt-engine.patch` -- 100 added lines across 7 files, no
-deletions. Nothing in it changes Space Cadet's behaviour.
+The patch is `engine/fulltilt-engine.patch`. Nothing in it changes Space Cadet's
+behaviour: its registry rows carry `ModeBeforeComponent = false` and
+`MultiplierIsValue = false`, which reduce `control::handler` and
+`TPinballTable::AddScore` to exactly what upstream did.
 
 How the list was arrived at, rather than guessed: the rules were written first, against
 the originals, and then compiled against unmodified upstream headers. Every error was a
-thing the engine did not have, so the error list *was* the change list. It went 88 errors
--> 0 as each item below landed.
+thing the engine did not have, so the error list *was* the change list. It went 88
+errors -> 0 as each item below landed. The last four rows came out of linking rather
+than compiling, which is why they are not in the original count.
 
 | change | uses | files |
 |---|---|---|
@@ -23,6 +26,10 @@ thing the engine did not have, so the error list *was* the change list. It went 
 | `TPinballTable::SuperJackpotScore` | 1 | `TPinballTable.h` |
 | `TLightGroup::LightAt(index)` | 2 | `TLightGroup.h` |
 | `TBlocker::UnknownP7e` | 1 | `TBlocker.h` |
+| `TableRules::ModeBeforeComponent` | 1 | `table_rules.h`, `control.cpp` |
+| `TableRules::MultiplierIsValue` | 1 | `table_rules.h`, `TPinballTable.cpp` |
+| per-table `make_links` / `ClearLinks` | 1 | `control.cpp` |
+| `UnstuckBall` through `TPinballTable::Plunger` | 1 | `control.cpp` |
 
 ## 1. `TPinballComponent::GetComponentType()` — 17 uses
 
@@ -88,23 +95,56 @@ readings reconcile if it is a float whose `-1.0` means "no duration", which woul
 integer compare the one to fix. Disassembling Full Tilt's `TBlocker::Message` settles it;
 until then it is `UnknownP7e` and the port does not depend on the answer.
 
+
+## 6. Per-table dispatch, and the order it runs in
+
+`control::make_links` and `ClearLinks` walked `control::score_components[88]` and
+`simple_components[145]` unconditionally; they now walk `CurrentTable`'s arrays.
+`control::handler` called `MissionControl` unconditionally; it now calls
+`CurrentTable->ModeControl`.
+
+The order is a new field rather than a constant because it differs per table.
+`DRAGON.EXE`'s 0x423060 and `PIRATES.EXE`'s 0x423080 both call the mode machine and
+*then* the component's `ControlFunc`; Space Cadet's `control::handler` does the
+opposite. Many bonus-table handlers suppress their own scoring while a mode is running,
+which only works in that order -- reversed, they double-score silently.
+
+## 7. `ScoreMultiplier` is a value, not an index
+
+Already predicted below under "Not surfaced by the compiler", and linking made it
+urgent rather than theoretical: Dragon's weapon award and Skulduggery's fathom track
+write 2..5 into `TPinballTable::ScoreMultiplier`, and upstream's `AddScore` uses it to
+index `score_multipliers[5]`. `TableRules::MultiplierIsValue` selects the reading;
+the index path also gained a clamp that cannot trigger for a table staying in 0..4.
+
+## 8. `control::UnstuckBall`'s plunger
+
+It dereferenced the `plunger` tag, which is Space Cadet's group name and null on both
+bonus tables -- Skulduggery died there as soon as a ball sat still for twenty frames.
+It goes through `TPinballTable::Plunger` instead, which every table has because the
+loader builds it from the DAT's own plunger object.
+
 ## Not surfaced by the compiler
 
-These do not produce errors because no Dragon rule names them, but the table will not load
-or play correctly without them. From `simonsteiner/SpaceCadetPinball` PR #67, which solved
-the loader side independently, plus this project's own component analysis:
+These produced no errors because no rule named them, but the table will not load or play
+correctly without them. From `simonsteiner/SpaceCadetPinball` PR #67, which solved the
+loader side independently, plus this project's own component analysis. The first three
+and the multiplier are now done; the rest stand.
 
-- **Seven object types the loader skips**: 1034 launcher, 1035 ramp exits, 1036
+- **Seven object types the loader skipped**: 1034 launcher, 1035 ramp exits, 1036
   accelerators, 1037, 1038 light sweeps, 1042 magnets, 1043 diverters. Dragon's Keep uses
-  1035/1036/1038/1043; Skulduggery adds 1034/1037/1042.
-- **`loader::sound_list` holds 64**; `PIRATES.DAT` has 67 sound groups.
-- **Kicker attribute 410** is unknown to `loader::kicker`, so `query_visual` returns early
-  and `TKickout` dereferences a null `FloatArr`. 18 kickers in `DRAGON.DAT` use it.
-- **`ScoreMultiplier` is an index upstream and a value in Full Tilt.** `AddScore` in these
-  binaries is `field * score + ScoreAdded` with no indexed load, and the callers write
-  1/2/3/5/10 directly. See `reference/SpaceCadetPinball/table_rules.h`.
+  1035/1036/1038/1043; Skulduggery adds 1034/1037/1042. *Done* -- the classes are in the
+  patch, the magnets and diverters as approximations.
+- **`loader::sound_list` holds 64**; `PIRATES.DAT` has 67 sound groups. *Done.*
+- **Kicker attribute 410** was unknown to `loader::kicker`, so `query_visual` returned
+  early and `TKickout` dereferenced a null `FloatArr`. 18 kickers in `DRAGON.DAT` use it.
+  *Done.*
+- **`ScoreMultiplier` is an index upstream and a value in Full Tilt.** *Done* -- see
+  section 7.
 - **A negative timeout means *cancel*** in Full Tilt, where `TBlocker::Message` clamps with
   `std::max(value, 0.0f)` and would trip the timer instead.
 - **Text-box tokens.** Several displays pass one-character strings (`"!"`, `"#"`, `"##"`,
   `"###"`, `"####"`) with a fourth `Display` argument of 1. They are glyph tokens, not
-  text; rendering them as ASCII shows hashes on the playfield.
+  text; rendering them as ASCII shows hashes on the playfield. The tokens themselves
+  are now read out of both binaries' `.rdata` and are exact (`src/dragon_common.cpp`,
+  `src/pirates_common.cpp`); what is missing is the symbol font to draw them in.

@@ -719,19 +719,13 @@ void PrisonWindowTripControl(MessageCode code, TPinballComponent* caller)
 		break;
 
 	case ModeRescueMaiden:
-		// CONFLICT -- one of these two call sites must be deleted, and the choice is the
-		// coordinator's. The ladder (250,000 / 500,000 / jackpot / extra-ball light, then
-		// light the window) lives at this address in the binary, and that is why it is
-		// called from here. But dragon_missions.cpp has extracted it as
-		// RescueMaidenAwardWindow and *also* calls it from RescueMaidenController's
-		// Collision arm -- and because Dragon's control::handler runs MissionControl
-		// before the component handler, that call has already happened by the time this
-		// line is reached, so as the two files stand today the award fires twice.
-		//
-		// Deleting the call in RescueMaidenController is the faithful fix: the binary's
-		// FUN_00429510 only detects the four-window completion, and analysis/link_impls.py
-		// currently attributes 0x427880 to RescueMaidenAwardWindow and silently shadows
-		// this handler, which is the same disagreement seen from the mapping side.
+		// RESOLVED. The ladder (250,000 / 500,000 / jackpot / extra-ball light, then
+		// light the window) lives at this address in the binary, so this is its one
+		// call site. dragon_missions.cpp owns the body as RescueMaidenAwardWindow but
+		// no longer calls it from RescueMaidenController's Collision arm, which only
+		// detects the four-window completion -- the binary's FUN_00429510 does the
+		// same. Both calls would have fired the award twice, because Dragon's
+		// control::handler runs the mode machine before the component handler.
 		RescueMaidenAwardWindow(caller);
 		return;
 

@@ -20,7 +20,10 @@ import gen_control as g
 
 ROOT=pathlib.Path("/home/ubr/fulltilt-re")
 src=ROOT/"src"
-E=re.compile(r"^extern\s+(T\w+)\*\s+(\w+);(.*)$")
+# Both spellings: a slice that has not been retyped yet says `extern T* x;`, and
+# one that has says `extern T*& x;`. Matching only the first made this generator
+# non-idempotent -- a second run emitted an empty file and broke the link.
+E=re.compile(r"^extern\s+(T\w+)\*&?\s+(\w+);(.*)$")
 A=re.compile(r"^(T\w+)\*&\s+(\w+)\s*=\s*(tag_\w+)\.Component;")
 
 HDR = """// {pre}_components.cpp -- the cross-slice component bindings for {title}.

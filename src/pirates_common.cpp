@@ -35,9 +35,17 @@ extern TPinballTable*& TableG;
 // there and must not be dropped here.
 TPinballComponent* last_scoring_component = nullptr;
 
-// 0x00435d30 -- scratch bits shared by the mode controllers and the target banks.
-// Several unrelated mechanics pack their state into it; see the uses in
-// pirates_part1.cpp, which document which bits each owns.
+// 0x00435cf8 -- the per-mode scratch cell, shared by the mode controllers and the
+// target banks. Every mode means something different by it (ships sunk, targets
+// bailed, Peg Leg's payout step, Bermuda's progressive step, Sword Fight's
+// completed-group bitfield), which is safe only because the mode start zeroes it.
+// pirates_part1.cpp documents which bits each mechanic owns.
+//
+// The address was recorded here as 0x435d30 and that was wrong: 0x435d30 is a
+// separate one-bit flag. The `& 0x70` / `& 0xf` / `== 10` / glyph-index uses in the
+// decompile all sit on 0x435cf8, which is also what pirates_part1.cpp's own
+// declaration says. pirates_modes.cpp used to define a second cell for the same
+// address under the name ModeScratch; they are one object and this is it.
 int mode_scratch_counter = 0;
 
 namespace

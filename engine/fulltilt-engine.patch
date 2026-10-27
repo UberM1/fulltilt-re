@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index fb705ed..1ae0859 100644
+index fb705ed..1f71a4d 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -82,6 +82,8 @@ set(SOURCE_FILES
@@ -35,7 +35,7 @@ index fb705ed..1ae0859 100644
          SpaceCadetPinball/TLightRollover.cpp
          SpaceCadetPinball/TLightRollover.h
          SpaceCadetPinball/TLine.cpp
-@@ -186,6 +194,24 @@ set(SOURCE_FILES
+@@ -186,6 +194,27 @@ set(SOURCE_FILES
          SpaceCadetPinball/imstb_truetype.h
          SpaceCadetPinball/DebugOverlay.cpp
          SpaceCadetPinball/DebugOverlay.h
@@ -51,16 +51,19 @@ index fb705ed..1ae0859 100644
 +        ../src/dragon_part3.cpp
 +        ../src/dragon_part4.cpp
 +        ../src/dragon_missions.cpp
++        ../src/dragon_helpers.cpp
 +        ../src/pirates_part1.cpp
 +        ../src/pirates_part2.cpp
 +        ../src/pirates_part3.cpp
 +        ../src/pirates_modes.cpp
++        ../src/pirates_modes_entry.cpp
++        ../src/pirates_awards.cpp
 +        ../src/control_dragon.cpp
 +        ../src/control_pirates.cpp
          )
  
  # On Windows, include resource file with the icon
-@@ -196,6 +222,10 @@ endif(WIN32)
+@@ -196,6 +225,10 @@ endif(WIN32)
  
  add_executable(SpaceCadetPinball ${SOURCE_FILES})
  
@@ -1302,7 +1305,7 @@ index e0ccd71..7008127 100644
  	char ActiveFlag;
  	int MessageField;
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..cae4fee 100644
+index aa8551a..a731ada 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
 @@ -6,6 +6,7 @@
@@ -1332,7 +1335,16 @@ index aa8551a..cae4fee 100644
  	LightGroup = new TLightGroup(this, 0);
  
  	auto score1 = score::create("score1", render::background_bitmap);
-@@ -178,15 +182,78 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -95,7 +99,7 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+ 				new TWall(this, groupIndex);
+ 				break;
+ 			case 1001:
+-				Plunger = new TPlunger(this, groupIndex);
++				Plunger = new TPlunger(this, groupIndex, false);
+ 				break;
+ 			case 1002:
+ 				LightGroup->List.push_back(new TLight(this, groupIndex));
+@@ -178,15 +182,79 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
  			case 1033:
  				new TTextBox(this, groupIndex);
  				break;
@@ -1347,11 +1359,12 @@ index aa8551a..cae4fee 100644
 +			// GetComponentType() either way, so the rules still discriminate.
 +			case 1034:
 +				// s_launcher1: Skulduggery's ball launcher; that table has no plunger.
-+				// STAND-IN. CADET.EXE spawns this from TPlunger's own constructor with
-+				// a third argument of 1 where type 1001 passes 0 -- so the launcher is
-+				// a TPlunger variant, not a new class. Wiring that up means changing
-+				// TPlunger's signature, which another change owns.
-+				Plunger = new TPlunger(this, groupIndex);
++				// RECOVERED. CADET.EXE's own TPinballTable constructor (0x41a290) spawns
++				// both 1001 and 1034 from TPlunger's constructor at 0x418800, passing a
++				// third argument of 0 for 1001 and 1 for 1034, and storing both into the
++				// same table field (+0x10a, i.e. Plunger). The flag lands in TPlunger
++				// +0x96; see TPlunger.h for what reads it.
++				Plunger = new TPlunger(this, groupIndex, true);
 +				break;
 +			case 1035:
 +				// s_rexit*: ramp exits, one ramp wall (1301) each.
@@ -1412,7 +1425,7 @@ index aa8551a..cae4fee 100644
  	control::make_links(this);
  }
  
-@@ -208,6 +275,10 @@ TPinballTable::~TPinballTable()
+@@ -208,6 +276,10 @@ TPinballTable::~TPinballTable()
  		ScoreBallcount = nullptr;
  	}
  	delete LightGroup;
@@ -1423,7 +1436,7 @@ index aa8551a..cae4fee 100644
  	while (!ComponentList.empty())
  	{
  		// Component destructor removes it from the list.
-@@ -232,6 +303,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
+@@ -232,6 +304,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
  	return nullptr;
  }
  
@@ -1444,7 +1457,7 @@ index aa8551a..cae4fee 100644
  TPinballComponent* TPinballTable::find_component(int groupIndex)
  {
  	char Buffer[40]{};
-@@ -261,7 +346,15 @@ int TPinballTable::AddScore(int score)
+@@ -261,7 +347,15 @@ int TPinballTable::AddScore(int score)
  		if (BonusScore > 5000000)
  			BonusScore = 5000000;
  	}
@@ -1461,7 +1474,7 @@ index aa8551a..cae4fee 100644
  	CurScore += addedScore;
  	if (CurScore > 1000000000)
  	{
-@@ -290,9 +383,12 @@ void TPinballTable::tilt(float time)
+@@ -290,9 +384,12 @@ void TPinballTable::tilt(float time)
  {
  	if (!TiltLockFlag && !BallInDrainFlag)
  	{
@@ -1477,7 +1490,7 @@ index aa8551a..cae4fee 100644
  		loader::play_sound(SoundIndex3, nullptr, "TPinballTable1");
  		TiltTimeoutTimer = timer::set(30.0, this, tilt_timeout);
  
-@@ -315,6 +411,20 @@ void TPinballTable::port_draw()
+@@ -315,6 +412,20 @@ void TPinballTable::port_draw()
  	}
  }
  
@@ -1498,7 +1511,7 @@ index aa8551a..cae4fee 100644
  int TPinballTable::Message(MessageCode code, float value)
  {
  	const char* rc_text;
-@@ -324,25 +434,25 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -324,25 +435,25 @@ int TPinballTable::Message(MessageCode code, float value)
  	case MessageCode::LeftFlipperInputPressed:
  		if (!TiltLockFlag)
  		{
@@ -1528,7 +1541,7 @@ index aa8551a..cae4fee 100644
  		}
  		break;
  	case MessageCode::PlungerInputPressed:
-@@ -375,7 +485,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -375,7 +486,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			rc_text = pb::get_rc_string(Msg::STRING131);
  		else
  			rc_text = pb::get_rc_string(Msg::STRING127);
@@ -1538,7 +1551,7 @@ index aa8551a..cae4fee 100644
  		if (Demo)
  			Demo->Message(MessageCode::NewGame, 0.0);
  		break;
-@@ -447,8 +558,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -447,8 +559,10 @@ int TPinballTable::Message(MessageCode code, float value)
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
@@ -1551,7 +1564,7 @@ index aa8551a..cae4fee 100644
  			LightGroup->Message(MessageCode::TLightGroupLightShowAnimation, 0.2f);
  			auto time = loader::play_sound(SoundIndex1, nullptr, "TPinballTable2");
  			if (time < 0)
-@@ -479,7 +592,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -479,7 +593,8 @@ int TPinballTable::Message(MessageCode code, float value)
  					textboxText = pb::get_rc_string(Msg::STRING131);
  				else
  					textboxText = pb::get_rc_string(Msg::STRING127);
@@ -1561,7 +1574,7 @@ index aa8551a..cae4fee 100644
  				break;
  			}
  
-@@ -547,7 +661,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -547,7 +662,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			}
  
  			if (textboxText != nullptr)
@@ -1571,7 +1584,7 @@ index aa8551a..cae4fee 100644
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
-@@ -556,8 +671,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -556,8 +672,10 @@ int TPinballTable::Message(MessageCode code, float value)
  		break;
  	case MessageCode::GameOver:
  		loader::play_sound(SoundIndex2, nullptr, "TPinballTable3");
@@ -1584,7 +1597,7 @@ index aa8551a..cae4fee 100644
  		EndGameTimeoutTimer = timer::set(3.0, this, EndGame_timeout);
  		break;
  	case MessageCode::Reset:
-@@ -680,8 +797,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
+@@ -680,8 +798,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
  	}
  	if (table->Demo)
  		table->Demo->Message(MessageCode::GameOver, 0.0);
@@ -1661,32 +1674,71 @@ index c407fdc..662e062 100644
  	int BallCount{};
  	int MaxBallCount;
 diff --git a/SpaceCadetPinball/TPlunger.cpp b/SpaceCadetPinball/TPlunger.cpp
-index 6f0f48e..e159065 100644
+index 6f0f48e..770699e 100644
 --- a/SpaceCadetPinball/TPlunger.cpp
 +++ b/SpaceCadetPinball/TPlunger.cpp
-@@ -25,23 +25,34 @@ TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+@@ -1,4 +1,5 @@
+ #include "pch.h"
++#include <SDL_log.h>
+ #include "TPlunger.h"
+ 
+ 
+@@ -11,7 +12,8 @@
+ #include "timer.h"
+ #include "TPinballTable.h"
+ 
+-TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
++TPlunger::TPlunger(TPinballTable* table, int groupIndex, bool launcher)
++	: TCollisionComponent(table, groupIndex, true), LauncherFlag(launcher)
+ {
+ 	visualStruct visual{};
+ 
+@@ -24,24 +26,51 @@ TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(t
+ 	HardHitSoundId = visual.Kicker.HardHitSoundId;
  	Threshold = 1000000000.0;
  
-     // FT:MaxPullback = 50; 3DPB: MaxPullback = 100, PullbackIncrement is floored.
-+    // Skulduggery's ball launcher (object type 1034, mapped onto TPlunger) carries no
-+    // sprite list, so ListBitmap is null. The increment is "one pullback step per
-+    // eighth of a frame"; with no frames the smallest meaningful frame count is one,
-+    // which is what an unanimated plunger is. Nothing else here can be derived.
-+    auto bmpCount = ListBitmap ? ListBitmap->size() : 1u;
-+    if (bmpCount == 0)
-+        bmpCount = 1;
-     if (pb::FullTiltMode)
-     {
-         MaxPullback = 50;
+-    // FT:MaxPullback = 50; 3DPB: MaxPullback = 100, PullbackIncrement is floored.
+-    if (pb::FullTiltMode)
+-    {
+-        MaxPullback = 50;
 -        PullbackIncrement = MaxPullback / (ListBitmap->size() * 8.0f);
-+        PullbackIncrement = MaxPullback / (bmpCount * 8.0f);
-     }
-     else
-     {
-         MaxPullback = 100;
+-    }
+-    else
+-    {
+-        MaxPullback = 100;
 -        PullbackIncrement = std::floor(MaxPullback / (ListBitmap->size() * 8.0f));
-+        PullbackIncrement = std::floor(MaxPullback / (bmpCount * 8.0f));
-     }
+-    }
++	// CADET.EXE's TPlunger constructor (0x418800). 3DPB hardcodes MaxPullback and
++	// floors the increment; Full Tilt reads MaxPullback out of float attribute 402,
++	// defaulting to 50 when the group has none (0x41887f), and does not floor.
++	// Skulduggery's s_launcher1 carries 402 = 100.
++	if (pb::FullTiltMode)
++	{
++		float* maxPullbackAttr = loader::query_float_attribute_opt(groupIndex, 0, 402);
++		MaxPullback = maxPullbackAttr ? maxPullbackAttr[0] : 50.0f;
++
++		// 0x418885: the launcher skips this whole computation, so PullbackIncrement
++		// keeps the zero the calloc at 0x42acf9 left. That is not a loose end -- the
++		// launcher never charges up (see PlungerInputPressed below), and its collision
++		// boost comes from the SomeCounter path, which reads MaxPullback directly.
++		if (!LauncherFlag)
++		{
++			// 0x41888e: no sprite list, or an empty one, means one step to full.
++			PullbackIncrement = ListBitmap && !ListBitmap->empty()
++				                    ? MaxPullback / (ListBitmap->size() * 8.0f)
++				                    : MaxPullback;
++		}
++		else
++		{
++			PullbackIncrement = 0.0f;
++		}
++	}
++	else
++	{
++		MaxPullback = 100;
++		auto bmpCount = ListBitmap && !ListBitmap->empty() ? ListBitmap->size() : 1u;
++		PullbackIncrement = std::floor(MaxPullback / (bmpCount * 8.0f));
++	}
  
  	Elasticity = 0.5f;
  	Smoothness = 0.5f;
@@ -1697,13 +1749,70 @@ index 6f0f48e..e159065 100644
 +	// 601 is where the plunger feeds the ball in. Skulduggery's launcher (object type
 +	// 1034) is mapped onto TPlunger and need not carry one; absent means this component
 +	// contributes no feed point, so leave the table's existing one alone.
++	SDL_Log("DBG-PLUNGER ctor launcher=%d MaxPullback=%f incr=%f bmps=%d",
++	        (int)LauncherFlag, MaxPullback, PullbackIncrement,
++	        ListBitmap ? (int)ListBitmap->size() : -1);
 +	float* floatArr = loader::query_float_attribute_opt(groupIndex, 0, 601);
 +	if (floatArr)
 +		table->PlungerPosition = {floatArr[0], floatArr[1]};
  }
  
  void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance, TEdgeSegment* edge)
-@@ -186,7 +197,9 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
+@@ -49,6 +78,7 @@ void TPlunger::Collision(TBall* ball, vector2* nextPosition, vector2* direction,
+ 	if (PinballTable->TiltLockFlag || SomeCounter > 0) 
+ 	{
+ 		auto boost = RandFloat() * MaxPullback * 0.1f + MaxPullback;
++		SDL_Log("DBG-PLUNGER collision launch boost=%f someCounter=%d", boost, SomeCounter);
+ 		maths::basic_collision(ball, nextPosition, direction, Elasticity, Smoothness, 0, boost);
+ 		if (SomeCounter)
+ 			SomeCounter--;
+@@ -69,6 +99,15 @@ int TPlunger::Message(MessageCode code, float value)
+ 		if (!PullbackStartedFlag && (!pb::FullTiltMode || PinballTable->MultiballCount > 0 && !PinballTable->
+ 			TiltLockFlag))
+ 		{
++			// 0x4189a4: the launcher has no pullback at all. Pressing the key fires it
++			// at once, at full power, via PlungerLaunchBall -- the cannon behaviour
++			// Skulduggery's s_launcher1 needs, since it has no plunger to charge.
++			if (LauncherFlag)
++			{
++				Message(MessageCode::PlungerLaunchBall, 0.0f);
++				break;
++			}
++
+ 			PullbackStartedFlag = true;
+ 			Boost = 0.0;
+ 			Threshold = 1000000000.0;
+@@ -84,6 +123,7 @@ int TPlunger::Message(MessageCode code, float value)
+ 			}
+ 			else
+ 			{
++				SDL_Log("DBG-PLUNGER feed ball at %f,%f", PinballTable->PlungerPosition.X, PinballTable->PlungerPosition.Y);
+ 				auto ball = PinballTable->AddBall(PinballTable->PlungerPosition);
+ 				assertm(ball, "Failure to create ball in plunger");
+ 				PinballTable->MultiballCount++;
+@@ -132,7 +172,9 @@ int TPlunger::Message(MessageCode code, float value)
+ 				timer::kill(PullbackTimer_);
+ 			PullbackTimer_ = 0;
+ 			loader::play_sound(SoundIndexP2, this, "TPlunger3");
+-			SpriteSet(0);
++			// 0x418a3d: skipped for the launcher, which has no sprite list.
++			if (!LauncherFlag)
++				SpriteSet(0);
+ 			timer::set(PullbackDelay, this, ReleasedTimer);
+ 		}
+ 		break;
+@@ -147,7 +189,9 @@ int TPlunger::Message(MessageCode code, float value)
+ 		timer::kill(PullbackTimer);
+ 		timer::kill(ReleasedTimer);
+ 
+-		SpriteSet(0);
++		// 0x418cc5: skipped for the launcher, as above.
++		if (!LauncherFlag)
++			SpriteSet(0);
+ 		break;
+ 	}
+ 	default:
+@@ -186,7 +230,9 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
  	}
  
  	int index = static_cast<int>(floor(
@@ -1714,6 +1823,33 @@ index 6f0f48e..e159065 100644
  		(plunger->Boost / plunger->MaxPullback)));
  	plunger->SpriteSet(index);
  }
+diff --git a/SpaceCadetPinball/TPlunger.h b/SpaceCadetPinball/TPlunger.h
+index 86f1eec..663eb61 100644
+--- a/SpaceCadetPinball/TPlunger.h
++++ b/SpaceCadetPinball/TPlunger.h
+@@ -5,7 +5,9 @@ class TPlunger :
+ 	public TCollisionComponent
+ {
+ public:
+-	TPlunger(TPinballTable* table, int groupIndex);
++	// `launcher` is CADET.EXE's third constructor argument: 0 for the ordinary
++	// plunger (object type 1001), 1 for Skulduggery's ball launcher (1034).
++	TPlunger(TPinballTable* table, int groupIndex, bool launcher = false);
+ 	~TPlunger() override = default;
+ 	void Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
+ 	               TEdgeSegment* edge) override;
+@@ -24,4 +26,11 @@ public:
+ 	int SoundIndexP2;
+ 	bool PullbackStartedFlag{};
+ 	int SomeCounter{};
++	// CADET.EXE's TPlunger field +0x96, the last dword of the 0x9a-byte object.
++	// Four reads, all of them "this plunger has no pullback and no sprites":
++	//   ctor (0x418885)                  skip the PullbackIncrement computation
++	//   PlungerInputPressed (0x4189a4)   launch at once instead of charging up
++	//   PlungerInputReleased (0x418a3d)  skip SpriteSet(0)
++	//   Reset (0x418cc5)                 skip SpriteSet(0)
++	bool LauncherFlag{};
+ };
 diff --git a/SpaceCadetPinball/TPopupTarget.cpp b/SpaceCadetPinball/TPopupTarget.cpp
 index a2535c0..bae2e1b 100644
 --- a/SpaceCadetPinball/TPopupTarget.cpp
@@ -1971,7 +2107,7 @@ index 555c855..f28797a 100644
  }
  
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
-index 4b6377c..0bdbf1b 100644
+index 4b6377c..da027e7 100644
 --- a/SpaceCadetPinball/control.cpp
 +++ b/SpaceCadetPinball/control.cpp
 @@ -3,6 +3,7 @@
@@ -2089,6 +2225,21 @@ index 4b6377c..0bdbf1b 100644
  	{
  		if (ball.StuckCounter <= 20)
  		{
+@@ -1125,7 +1169,13 @@ void control::UnstuckBall(TBall& ball, int dt)
+ 		{
+ 			ball.Disable();
+ 			TableG->MultiballCount--;
+-			plunger->Message(MessageCode::PlungerRelaunchBall, 0);
++
++			// Not the `plunger` tag: that is Space Cadet's group name and is null on
++			// both bonus tables, which is what used to kill Skulduggery here as soon
++			// as a ball sat still for 20 frames. TPinballTable::Plunger is built from
++			// the DAT's own plunger object, so every table has one.
++			if (TableG->Plunger)
++				TableG->Plunger->Message(MessageCode::PlungerRelaunchBall, 0);
+ 		}
+ 	}
+ }
 diff --git a/SpaceCadetPinball/fullscrn.cpp b/SpaceCadetPinball/fullscrn.cpp
 index a6c31e7..87a6d69 100644
 --- a/SpaceCadetPinball/fullscrn.cpp
@@ -2647,10 +2798,10 @@ index 3a01318..170e8e4 100644
  	static float BallToBallCollision(const ray_type& ray, const TBall& ball, TEdgeSegment** edge, float collisionDistance);
 diff --git a/SpaceCadetPinball/table_rules.cpp b/SpaceCadetPinball/table_rules.cpp
 new file mode 100644
-index 0000000..24cca49
+index 0000000..c44c3b5
 --- /dev/null
 +++ b/SpaceCadetPinball/table_rules.cpp
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,161 @@
 +#include "pch.h"
 +#include "table_rules.h"
 +
@@ -2731,9 +2882,10 @@ index 0000000..24cca49
 +	},
 +
 +	// The bonus tables are registered unconditionally so SelectDatFile can find
-+	// their DAT and the identity is real; only the rule bindings wait on src/.
-+	// With null bindings the playfield loads and nothing scores, which is the
-+	// honest state of the port rather than a crash.
++	// their DAT and the identity is real. Their rules are bound behind
++	// FULLTILT_HAVE_BONUS_RULES, which is on; built with it off, the identity and
++	// the music survive and the bindings go null, which makes the playfield load
++	// and nothing score rather than crash.
 +	{
 +		TableId::DragonsKeep, "Dragon's Keep", "DRAGON.DAT", true, false,
 +#if FULLTILT_HAVE_BONUS_RULES
@@ -2971,6 +3123,55 @@ index 0000000..4244ccc
 +	QuestRestart,    // original 0x53
 +	LastScorerChanged, // original 0x4d; no component consumes it, kept for fidelity
 +};
+diff --git a/SpaceCadetPinball/winmain.cpp b/SpaceCadetPinball/winmain.cpp
+index 836556f..037210a 100644
+--- a/SpaceCadetPinball/winmain.cpp
++++ b/SpaceCadetPinball/winmain.cpp
+@@ -1,5 +1,6 @@
+ #include "pch.h"
+ #include "winmain.h"
++#include "TPinballTable.h"
+ 
+ #include "control.h"
+ #include "EmbeddedData.h"
+@@ -322,6 +323,37 @@ void winmain::MainLoop()
+ 		if (!ProcessWindowMessages() || bQuit)
+ 			break;
+ 
++		// FT_SCRIPT: temporary harness-only instrumentation. Drives a new game and a
++		// plunger press with no display, to prove the ball serve / launch path.
++		{
++			static int ftScript = -1;
++			static unsigned ftTick = 0;
++			if (ftScript < 0)
++				ftScript = SDL_getenv("FT_SCRIPT") ? 1 : 0;
++			if (ftScript)
++			{
++				++ftTick;
++				if (ftTick == 60)
++				{
++					SDL_Log("DBG-SCRIPT new_game");
++					new_game();
++				}
++				if (ftTick == 240)
++				{
++					SDL_Log("DBG-SCRIPT balls=%d multiball=%d plunger=%p",
++					        pb::MainTable->BallCount, pb::MainTable->MultiballCount,
++					        (void*)pb::MainTable->Plunger);
++					SDL_Log("DBG-SCRIPT plunger press");
++					pb::MainTable->Message(MessageCode::PlungerInputPressed, 0.0f);
++				}
++				if (ftTick == 250)
++					pb::MainTable->Message(MessageCode::PlungerInputReleased, 0.0f);
++				if (ftTick == 400)
++					SDL_Log("DBG-SCRIPT end balls=%d multiball=%d",
++					        pb::MainTable->BallCount, pb::MainTable->MultiballCount);
++			}
++		}
++
+ 		if (has_focus)
+ 		{
+ 			if (mouse_down)
 diff --git a/SpaceCadetPinball/zdrv.cpp b/SpaceCadetPinball/zdrv.cpp
 index 5ed5925..20b0a6f 100644
 --- a/SpaceCadetPinball/zdrv.cpp

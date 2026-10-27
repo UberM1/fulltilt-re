@@ -1,85 +1,118 @@
 # Linking the rules into the engine
 
-Where the project stands and what the last step is.
+Done. The three tables build from one binary, each runs its own rules, and
+`test/run_tables.sh` passes all three. What that does and does not prove is below.
 
-## What is done
+## What landed
 
-- `reference/` builds (`nix-build build.nix`), patched by `engine/fulltilt-engine.patch`.
-- All ten rule files in `src/` compile against that patched engine with **zero errors**.
-- The loader accepts Full Tilt's kicker attribute 410, its larger sound tables, and the
-  seven object types 3D Pinball never had.
+### 1. The sources are in the build
 
-## What is not
+`reference/CMakeLists.txt`'s `SOURCE_FILES` names all of `../src/*.cpp`, and the target
+gained `target_include_directories(... SpaceCadetPinball)` so the rule files resolve
+`"pch.h"` and `"control.h"` the way the engine's own translation units do. `build.nix`
+copies the repo root (filtered to `reference/` and `src/`) with
+`sourceRoot = "fulltilt-src/reference"`, because `../src` has to be inside the copied
+tree for the path to resolve.
 
-The rules compile but are not **linked**. `src/*.cpp` is not in `CMakeLists.txt`'s
-`SOURCE_FILES`, and nothing calls into them: `control::make_links` still walks Space
-Cadet's `score_components[88]` and `simple_components[145]` unconditionally.
-
-## The step
-
-Two halves, in this order.
-
-### 1. Add the sources
-
-```cmake
-set(SOURCE_FILES
-        ...
-        ../src/pirates_common.cpp
-        ../src/dragon_part1.cpp
-        ../src/dragon_part2.cpp
-        ../src/dragon_part3.cpp
-        ../src/dragon_part4.cpp
-        ../src/dragon_missions.cpp
-        ../src/pirates_part1.cpp
-        ../src/pirates_part2.cpp
-        ../src/pirates_part3.cpp
-        ../src/pirates_modes.cpp
-        ../src/control_dragon.cpp
-        ../src/control_pirates.cpp
-)
-```
-
-The two `control_<table>.cpp` are generated — regenerate rather than edit:
+Three files in `src/` are generated and must be regenerated rather than edited:
 
 ```sh
+python3 analysis/gen_glue.py          # src/<table>_components.cpp
 python3 analysis/gen_control.py binaries/win95/DRAGON.EXE  analysis/dragon-matches.txt  src/control_dragon.cpp
 python3 analysis/gen_control.py binaries/win95/PIRATES.EXE analysis/pirates-matches.txt src/control_pirates.cpp
 ```
 
-Their generated stub bodies must give way to the hand-written handlers: the generator
-emits component-derived names (`a_bump1Control`) while the implementations are named for
-what they do (`ForestBumperControl`). `analysis/link_impls.py` prints the mapping, and
-cross-checks it — it will report any handler defined outside its table's namespace, which
-would compile and then fail to link.
+Run `gen_glue.py` first: the control skeletons declare a tag `extern` with whatever
+type a `src/` file gives it, and the component files are where the concrete types
+(`TLight`, `TSound`, `TLightGroup`) for the shared components come from. Both control
+runs must report `N/N handlers wired to a reimplementation, 0 still stubs`.
 
-### 2. Dispatch per table
+### 2. The rules are bound
 
-`control::make_links` and `control::handler` are Space Cadet's by construction. They need
-to go through `CurrentTable` instead, so that:
+`FULLTILT_HAVE_BONUS_RULES` is 1. Each bonus table's registry row carries its
+`ScoreComponents` / `SimpleComponents`, its mode dispatcher (`dragon::MissionHandler`,
+`pirates::Handler`) and its mode register, which is the table's own
+`tag_info_text_box` -- unambiguous now that each table's tags live in its own
+namespace. Built with the switch off, the identity and the music survive and the
+bindings go null, which makes the playfield load and nothing score rather than crash.
 
-- `make_links` walks the current table's `ScoreComponents` / `SimpleComponents`.
-- `handler` calls the current table's `ModeControl` rather than `MissionControl`.
+### 3. Dispatch goes through the current table
 
-One ordering detail is load-bearing: **Dragon's Keep calls its mode machine *before* the
-component's own handler**, the opposite of Space Cadet. That is why so many of its
-handlers suppress their own scoring during a quest. Getting it backwards silently
-double-scores. Skulduggery's dispatcher additionally forces state 2 and re-dispatches
-after every teardown.
+`control::make_links` and `ClearLinks` walk `CurrentTable`'s arrays. `control::handler`
+calls the current table's `ModeControl`, in the order `TableRules::ModeBeforeComponent`
+gives.
 
-## After that
+**Both** bonus tables are mode-first, not just Dragon's Keep: `DRAGON.EXE`'s 0x423060
+and `PIRATES.EXE`'s 0x423080 are the same four lines -- mode machine, then the
+component's `ControlFunc`. Space Cadet is the one that runs the component first. The
+order is load-bearing because so many bonus-table handlers suppress their own scoring
+while a mode is running, which only works if the mode controller has already seen the
+message; reversed, it double-scores in silence. Skulduggery's extra force-state-2 and
+re-dispatch after a teardown is inside `pirates::Handler`, where the original has it,
+and is not repeated in the engine.
 
-The tables will load and run their own rules, which is the point — but "runs" is not
-"correct". The analysis documents carry explicit open questions that only a live table can
-settle, and they are flagged `// UNVERIFIED:` at their sites in the code. The largest:
+## What the linking turned up
 
-- **Success versus timeout is undiscriminated** on both tables. The binaries call the same
-  teardown path whether a mode is won or runs out, so a timed-out quest still lights its
-  light and still counts toward the drain bonus. Written as the binary behaves, documented
-  as unresolved; watching a real game settles it.
-- **Which physical component** several abstractly-identified ones are — which outlane
-  `a_kick2` guards, which tower each lock belongs to.
-- **The seven object types are stand-ins**, mapped onto the nearest existing class so the
-  tables load. Magnets as kickouts and diverters as blockers behave approximately, not
-  faithfully. Their real constructors are in `DRAGON.EXE` and `PIRATES.EXE`.
-- **Glyph tokens.** Several displays pass one-character strings that the original renders
-  as symbols. Rendering them as ASCII puts `#` and `!` on the playfield.
+The rules did not merely need wiring. Each slice had been written against its siblings'
+interfaces, declaring what it needed as a prototype and assuming someone defined it:
+**227 undefined symbols and 79 duplicate definitions.** Resolving them was most of the
+work, and several were latent bugs rather than missing plumbing:
+
+- **`extern T* x;` against a reference definition.** 160 declarations across the slices
+  named a component alias as a pointer where the owning file defines
+  `T*& x = tag_x.Component;`. A variable's mangled name carries no type, so these linked
+  silently and would have yielded the address of the tag's field in place of the
+  component. All retyped to `extern T*&`.
+- **Static tables of components.** `TLight* const QuestLights[5] = {tag_v_lite71.Component, ...}`
+  at namespace scope is initialised before `main`, so it captured five nulls and kept
+  them. Dragon's Keep died on its first plunger in exactly this way. They are now
+  `ComponentTable<T, N>` -- the tags, indexed through at the point of use.
+- **One `.data` cell under two names.** Five pairs in Dragon (0x434d08, 0x434d24,
+  0x434d2c, 0x439b10, 0x439b14) and one in Skulduggery (0x435cf8, which was both
+  `ModeScratch` and `mode_scratch_counter`) would have become two cells for one
+  original. Collapsed to one name each.
+- **The multiplier.** The bonus rules write multiplier *values* (2..5) into
+  `TPinballTable::ScoreMultiplier`, which upstream reads as an index into
+  `score_multipliers[5]`. Now `TableRules::MultiplierIsValue`.
+- **`control::UnstuckBall` dereferenced a null `plunger` tag** -- Space Cadet's group
+  name, absent on both bonus tables. It goes through `TPinballTable::Plunger`, which is
+  built from the DAT.
+- **Inert light overrides.** Both tables aliased the originals' 0x18/0x19/0x1a for the
+  FT light-override codes. The port numbers those -24/-25/-26, so as written they did
+  nothing to a `TLight` and hit `TLightGroupStepForward` on a light group.
+- **`analysis/link_impls.py` mis-attributed two addresses**, because a section header
+  naming an address is paired with the next definition under it. 0x427880 pointed at
+  `RescueMaidenAwardWindow` instead of `PrisonWindowTripControl` and 0x426140 at
+  `RearmMysteryAward` instead of `WellSinkControl`, each silently shadowing the real
+  handler. The two headers no longer spell the address in a form the pairing matches.
+
+What was genuinely unimplemented -- Dragon's five bonus/multiball mode controllers and
+three award helpers, Skulduggery's eleven mode setters, its playfield setup/teardown
+helpers and twenty award helpers -- was reverse engineered from the decompiled corpora
+into `src/dragon_helpers.cpp`, `src/pirates_modes_entry.cpp` and
+`src/pirates_awards.cpp`.
+
+## What "it runs" does not mean
+
+`test/run_tables.sh` passes all three tables, and its own header is the honest account
+of what that proves: the table constructs, binds and pumps the event loop. Nothing
+launches a ball, presses a flipper, enters a quest or reads a score, so every
+`// UNVERIFIED:` in `src/` is still unverified. The open questions are unchanged:
+
+- **Success versus timeout is undiscriminated** on both tables. The binaries call the
+  same teardown path either way, so a timed-out quest still lights its light and still
+  counts toward the drain bonus. Written as the binary behaves; watching a real game
+  settles it.
+- **Which physical component** several abstractly-identified ones are -- which outlane
+  `a_kick2` guards, which tower each lock belongs to. Dragon's `unknown_a99c`
+  (0x43a99c) is still unidentified and therefore null; its one reader falls back to
+  `TBlocker`'s own -1 default.
+- **The glyph tokens render as ASCII.** The tokens themselves are now read out of
+  `.rdata` and are exact, but the port has no symbol font, so `#`, `$` and `K` appear
+  on the playfield where symbols belong.
+- **`FormatWithValue`** (Dragon's 0x42c76f) takes a value the decompile loses on the
+  x87 stack at every call site. It substitutes the last credited score where the string
+  has a specifier and copies the label where it does not.
+- **A few tags are typed generically** by the generated control tables, so playing a
+  sound or testing `light_on()` through them needs a `static_cast` down. Safe, because
+  the objects really are `TSound` / `TLight`, but unchecked.

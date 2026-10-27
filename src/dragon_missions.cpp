@@ -81,9 +81,13 @@ constexpr MessageCode LightResetAndTurnOff = Msg(0x14);
 // matches the names. Pinned by RescueMaiden's window sweep (below), which
 // overrides a dark light ON and an already-lit light OFF to blink it inverted,
 // then clears the override as the cursor leaves.
-constexpr MessageCode LightOverrideOn = Msg(0x18);
-constexpr MessageCode LightOverrideOff = Msg(0x19);
-constexpr MessageCode LightClearOverride = Msg(0x1a);
+// Bound to the port's own values, not 0x18/0x19/0x1a: written as the originals'
+// numbers they were inert on a TLight and hit TLightGroupStepForward on a light
+// group, a different mechanic. A group has no case for them and forwards them to
+// each member light, which is what the originals do.
+constexpr MessageCode LightOverrideOn = MessageCode::TLightFtTmpOverrideOn;
+constexpr MessageCode LightOverrideOff = MessageCode::TLightFtTmpOverrideOff;
+constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 
 // UNVERIFIED: 0x1b, sent only to `light_sweeps` with a float selecting which
 // canned sweep to run (0..5, one per quest). 27 is not a group code under the
@@ -621,17 +625,31 @@ void SetGemMask(int m) { tag_v_lite88.Component->MessageField = m; }
 int DragonHitsLeft() { return tag_v_lite114.Component->MessageField; }
 void SetDragonHitsLeft(int n) { tag_v_lite114.Component->MessageField = n; }
 
-TLight* const QuestLights[5] = {
-	tag_v_lite71.Component, tag_v_lite72.Component, tag_v_lite73.Component,
-	tag_v_lite74.Component, tag_v_lite75.Component,
+// A static table of components has to hold the TAGS, not the components.
+//
+// These live at namespace scope and are initialised before main; control::make_links
+// does not resolve a single tag until the table is built, so `TLight* const t[] =
+// {tag_x.Component, ...}` is an array of nulls for the life of the process -- which
+// is exactly how Dragon's Keep used to die on its first plunger. Indexing through the
+// tag reads the component at the moment of use instead.
+template <class T, int N>
+struct ComponentTable
+{
+	component_tag<T>* const Tags[N];
+	T* operator[](int i) const { return Tags[i] ? Tags[i]->Component : nullptr; }
+	static int size() { return N; }
 };
 
+const ComponentTable<TLight, 5> QuestLights = {{
+	&tag_v_lite71, &tag_v_lite72, &tag_v_lite73, &tag_v_lite74, &tag_v_lite75,
+}};
+
 // PTR_PTR_0043bb78: the eight lights the dragon-fire sweep walks.
-TLight* const DragonFireLights[8] = {
-	tag_v_lite113.Component, tag_v_lite114.Component, tag_v_lite115.Component,
+const ComponentTable<TLight, 8> DragonFireLights = {{
+	&tag_v_lite113, &tag_v_lite114, &tag_v_lite115,
 	nullptr /* v_lite58 */, nullptr /* v_lite59 */, nullptr /* v_lite60 */,
 	nullptr /* v_lite61 */, nullptr /* v_lite62 */,
-};
+}};
 // UNVERIFIED: v_lite58..62 are named in the analysis from the static pointer
 // array but have no tag declared above because nothing else in this slice
 // touches them. Declare the five tags when the sweep is wired up.
@@ -644,9 +662,12 @@ TLight* const DragonFireLights[8] = {
 // inlines `LightOnFlag || ToggledOnFlag || FlasherOnFlag` at ~200 sites; that
 // is upstream's `TLight::light_on()` and it counts a *flashing* light as owned,
 // which matters because several awards flash-then-stay-on.
-bool Owned(TLight* light) { return light->light_on(); }
+// Null-tolerant, because the dragon-fire table has five entries whose tags are not
+// declared yet and because a handler can run before every tag has resolved.
+bool Owned(TLight* light) { return light && light->light_on(); }
 
-int CountOwned(TLight* const* lights, int n)
+template <int N>
+int CountOwned(const ComponentTable<TLight, N>& lights, int n)
 {
 	int count = 0;
 	for (int i = 0; i < n; i++)
@@ -655,20 +676,18 @@ int CountOwned(TLight* const* lights, int n)
 	return count;
 }
 
-TLight* const WeaponLights[4] = {
-	tag_v_lite33.Component, tag_v_lite34.Component,
-	tag_v_lite35.Component, tag_v_lite36.Component,
-};
-TLight* const ArmorLights[3] = {
-	tag_v_lite37.Component, tag_v_lite38.Component, tag_v_lite39.Component,
-};
+const ComponentTable<TLight, 4> WeaponLights = {{
+	&tag_v_lite33, &tag_v_lite34, &tag_v_lite35, &tag_v_lite36,
+}};
+const ComponentTable<TLight, 3> ArmorLights = {{
+	&tag_v_lite37, &tag_v_lite38, &tag_v_lite39,
+}};
 // Spell slots, in the order 0x423600 tests them. Slot 1's partner light
 // v_lite30 is deliberately absent: it mirrors slot 1 for display only and is
 // never tested, which is what explains the manual's "five lights, four spells".
-TLight* const SpellLights[4] = {
-	tag_v_lite28.Component, tag_v_lite29.Component,
-	tag_v_lite31.Component, tag_v_lite32.Component,
-};
+const ComponentTable<TLight, 4> SpellLights = {{
+	&tag_v_lite28, &tag_v_lite29, &tag_v_lite31, &tag_v_lite32,
+}};
 
 // Show "<quest name>  <seconds left>" for half a second, but only if the clock
 // is actually running -- the controllers all gate on this so a cancelled timer

@@ -109,8 +109,12 @@ constexpr MessageCode LightResetAndTurnOff = Msg(0x14);
 // the two orbit groups dark for the mode's duration and clear the override at
 // teardown, which is the same "borrow a light and put it back" idiom
 // Dragon's Keep uses on single lights.
-constexpr MessageCode LightOverrideOff = Msg(0x19);
-constexpr MessageCode LightClearOverride = Msg(0x1a);
+// Bound to the port's own values, not 0x18/0x19/0x1a: written as the originals'
+// numbers they were inert on a TLight and hit TLightGroupStepForward on a light
+// group, a different mechanic. A group has no case for them and forwards them to
+// each member light, which is what the originals do.
+constexpr MessageCode LightOverrideOff = MessageCode::TLightFtTmpOverrideOff;
+constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 
 // UNVERIFIED: 0x1b, sent only to `light_sweeps` with a float selecting which
 // canned sweep to run. 0x1b is not a group code under the +4 rule and
@@ -667,7 +671,12 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller);  // 0x42
 // 0x435cf8 -- the per-mode scratch counter. Every mode means something
 // different by it (ships sunk, targets bailed, the Peg Leg's payout step) and
 // StartOfEveryMode zeroes it at every mode start.
-int ModeScratch = 0;
+//
+// Owned by pirates_common.cpp. It was defined here as well, under a second name,
+// which made two cells out of one: the mode start zeroed this copy
+// while pirates_part1.cpp's target banks and pirates_awards.cpp's Bermuda step
+// wrote the other, so Bermuda's progressive never reset.
+extern int mode_scratch_counter;
 
 // 0x435d04 -- the shared cursor. It is the Treasure Hunt "X" selector, the
 // Bermuda indicated-wind selector AND the Sword Fight award selector, all
@@ -775,24 +784,37 @@ void SetSelectedSlot(ModeSlot s)
 int ModesCompleted() { return tag_v_lite606.Component->MessageField; }
 int MapPieces() { return tag_v_lite607.Component->MessageField; }
 
-// The wheel lights in slot order. Indexed by ModeSlot, never by Mode.
-TLight* const WheelLights[8] = {
-	tag_v_lite552.Component, tag_v_lite553.Component,
-	tag_v_lite554.Component, tag_v_lite555.Component,
-	tag_v_lite556.Component, tag_v_lite557.Component,
-	tag_v_lite558.Component, tag_v_lite559.Component,
+// A static table of components has to hold the TAGS, not the components.
+//
+// These live at namespace scope and are initialised before main; control::make_links
+// does not resolve a single tag until the table is built, so `TLight* const t[] =
+// {tag_x.Component, ...}` is an array of nulls for the life of the process -- which
+// is exactly how Dragon's Keep used to die on its first plunger. Indexing through the
+// tag reads the component at the moment of use instead.
+template <class T, int N>
+struct ComponentTable
+{
+	component_tag<T>* const Tags[N];
+	T* operator[](int i) const { return Tags[i] ? Tags[i]->Component : nullptr; }
+	static int size() { return N; }
 };
 
-TLightGroup* const WindGroups[8] = {
-	tag_left_island_light_group.Component,
-	tag_right_wind_light_group.Component,
-	tag_left_orbit_light_group.Component,
-	tag_right_orbit_light_group.Component,
-	tag_south_wind_light_group.Component,
-	tag_east_wind_1_light_group.Component,
-	tag_east_wind_2_light_group.Component,
-	tag_west_wind_light_group.Component,
-};
+// The wheel lights in slot order. Indexed by ModeSlot, never by Mode.
+const ComponentTable<TLight, 8> WheelLights = {{
+	&tag_v_lite552, &tag_v_lite553, &tag_v_lite554, &tag_v_lite555,
+	&tag_v_lite556, &tag_v_lite557, &tag_v_lite558, &tag_v_lite559,
+}};
+
+const ComponentTable<TLightGroup, 8> WindGroups = {{
+	&tag_left_island_light_group,
+	&tag_right_wind_light_group,
+	&tag_left_orbit_light_group,
+	&tag_right_orbit_light_group,
+	&tag_south_wind_light_group,
+	&tag_east_wind_1_light_group,
+	&tag_east_wind_2_light_group,
+	&tag_west_wind_light_group,
+}};
 
 // ---------------------------------------------------------------------------
 // Small shared predicates
@@ -803,10 +825,10 @@ TLightGroup* const WindGroups[8] = {
 // `TLight::light_on()`, and it counts a *flashing* light as owned -- which is
 // why the mode picker has to fall back to a separate flashing-only scan when
 // every wheel light is lit.
-bool Owned(TLight* light) { return light->light_on(); }
+bool Owned(TLight* light) { return light && light->light_on(); }
 
 // +0x46 alone: lit by a flasher, i.e. "selected but not yet completed".
-bool Flashing(TLight* light) { return light->FlasherOnFlag != 0; }
+bool Flashing(TLight* light) { return light && light->FlasherOnFlag != 0; }
 
 // Show "<mode name>\n<seconds left>" for half a second, but only while the
 // clock is actually running -- every controller gates on this so a cancelled
@@ -982,7 +1004,7 @@ void StartSelectedMode()
 // real shared function in the original rather than an inlined block.
 void StartOfEveryMode()
 {
-	ModeScratch = 0;
+	mode_scratch_counter = 0;
 	WheelCursor = 0;
 	// ResetGoldLights(0) and ResetSkulduggeryLights(0) -- 0x423870 / 0x423b70,
 	// the collectible slice's business.
@@ -1212,7 +1234,7 @@ void AttackShipController(MessageCode code, TPinballComponent* caller)
 		StartOfEveryMode();
 		// Pre-set to 1, not 0: the ship sink's own handler increments it, and
 		// the mode wants the first sink to read as "the first ship".
-		ModeScratch = 1;
+		mode_scratch_counter = 1;
 		tag_light_sweeps.Component->Message(ft::LightSweepStart, SweepAttackShip);
 		RaiseShipDropBank();
 		tag_a_blocc.Component->Message(ft::BlockerRestartTimeout, Forever);
@@ -1381,16 +1403,16 @@ void StormController(MessageCode code, TPinballComponent* caller)
 			// One bailed target. The Nth pays the jackpot *instead of* the
 			// per-target score and resets the count, so the jackpot hit itself
 			// is worth no points.
-			ModeScratch++;
-			if (StormJackpotPeriod == ModeScratch)
+			mode_scratch_counter++;
+			if (StormJackpotPeriod == mode_scratch_counter)
 			{
 				CollectJackpot(0.0f);
-				ModeScratch = 0;
+				mode_scratch_counter = 0;
 				return;
 			}
 			Play(tag_tabb68wave.Component);
 			AddScoreAt(caller, StormTargetScore);
-			DisplayGlyph(tag_info_text_box.Component, StormGlyphs[ModeScratch], 2.0f);
+			DisplayGlyph(tag_info_text_box.Component, StormGlyphs[mode_scratch_counter], 2.0f);
 			return;
 		}
 
@@ -1885,8 +1907,8 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 // returns slot 7 unconditionally) or through the skill shot. Start bonus
 // 1,000,000, the largest in the table. Hint 3066.
 //
-// The payout is a stepped animation driven by ModeScratch, armed when the ball
-// enters the ship sink (whose handler sets ModeScratch = 1). Steps 1..8 are
+// The payout is a stepped animation driven by mode_scratch_counter, armed when the ball
+// enters the ship sink (whose handler sets mode_scratch_counter = 1). Steps 1..8 are
 // eight glyphs at 0.25 s; step 9 is the whole payout; step 10 tears the mode
 // down and starts Lava-Ball.
 // ---------------------------------------------------------------------------
@@ -1935,7 +1957,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		return;
 
 	case ft::MissionStarted:
-		switch (ModeScratch)
+		switch (mode_scratch_counter)
 		{
 		case 0:
 			// Not armed yet: behave like every other mode's tick.
@@ -1951,8 +1973,8 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 			// fall through
 		case 2: case 3: case 4: case 5: case 6: case 7: case 8:
 			// Eight glyphs, 'L' to 'S', 0.25 s each.
-			DisplayGlyph(tag_info_text_box.Component, PegLegGlyphs[ModeScratch], 0.25f);
-			ModeScratch++;
+			DisplayGlyph(tag_info_text_box.Component, PegLegGlyphs[mode_scratch_counter], 0.25f);
+			mode_scratch_counter++;
 			return;
 
 		case 9:
@@ -1980,7 +2002,7 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 			char buffer[128];
 			FormatWithValue(buffer, GetRcString(STR_SCORE_AWARDED), total);
 			Display(tag_info_text_box.Component, buffer, 4.0f);
-			ModeScratch++;
+			mode_scratch_counter++;
 			return;
 
 			// REPRODUCED-BY-OMISSION, worth stating because the analysis gets

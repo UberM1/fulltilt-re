@@ -259,8 +259,13 @@ int DragonSpecialAddScore(TPinballComponent* caller, int score)
 	return LastCreditedScore = credited;
 }
 
-// The DAT_00434d20 = 0 inside the plunger at 0x004245b0: a new ball owes nothing to
-// whatever scored last, so no 0x4d goes out and the next scorer is the first.
+// The DAT_00434d20 = 0 inside the plunger (VA 4245b0, whose handler is in
+// dragon_part4.cpp): a new ball owes nothing to whatever scored last, so no 0x4d
+// goes out and the next scorer is the first.
+//
+// The address is spelled without its 0x here on purpose: analysis/link_impls.py
+// pairs an address in a comment with the next definition under it, and this is not
+// that function.
 void ClearLastScoringComponent()
 {
 	LastScoringComp = nullptr;
