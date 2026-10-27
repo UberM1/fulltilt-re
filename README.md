@@ -17,7 +17,7 @@ The engine is **not** the problem. `TPinballTable.cpp` builds the table from
 code (`1000` → `TWall`, `1005` → `TBumper`, …). Geometry, collision, sprites, sounds and
 physics are all data-driven and would load a new table unchanged.
 
-What is hardcoded is the **rules**: 229 components bound by group name to 56 handler
+What is hardcoded is the **rules**: 225 components bound by group name to 56 handler
 functions, plus the mission/rank system — about 4,600 lines in `control.cpp`.
 
 Three independent measurements say that code is small and localized.
@@ -91,11 +91,30 @@ Applied to the other two it yields, with no manual disassembly:
 Every Dragon handler address falls in `0x423810`–`0x428290`, i.e. rva `0x23810`–`0x28290` —
 inside the region predicted by the divergence map. The two methods agree.
 
-### 3. We have the exact binary upstream decompiled
+### 3. We have one of the two binaries upstream decompiled
 
 `binaries/win95/CADET.EXE` hashes to `3F7B5699074B83FD713657CD94671F2156DBEDC4`, the SHA-1
-named in upstream's README as the 32-bit build it was decompiled from. `control.cpp` is a
-line-by-line oracle for the CADET side of every comparison.
+upstream's README names. But it names **two** sources, and the distinction matters:
+
+```
+* pinball.exe from Windows XP (SHA-1 2A5B525E...) and its public PDB
+* CADET.EXE 32bit version from Full Tilt! Pinball (SHA-1 3F7B5699...)
+```
+
+The *symbol names* in `control.cpp` come from `pinball.exe`'s public PDB, not from
+`CADET.EXE`. So every CADET-to-`control.cpp` comparison here is a **cross-build**
+reference, not ground truth — close enough to validate a method, not close enough to
+assume agreement.
+
+The gap is measurable. `control.cpp` names 57 distinct `ControlFunc`s across its 88
+entries; `CADET.EXE` has 56 distinct handler addresses, colliding at entries 48/49, where
+`a_flip1` and `a_flip2` both bind `0x424890`. The two upstream functions differ
+(StepBackward vs StepForward), so this is not linker folding: the Full Tilt build has only
+`LeftFlipperControl`, bound to both flippers, and `RightFlipperControl` exists only in the
+PDB. Disassembling `0x424890` shows one `push 0x1c` to each of two light groups — code 24
+under the piecewise correction below, i.e. `TLightGroupStepBackward` — which confirms the
+message-code mapping by a second route and pins the divergence to the build, not to an
+error here.
 
 ## Binaries
 
@@ -195,7 +214,8 @@ analysis/   the scripts above, and their output
 binaries/   win95/ (PE32 i386, the real targets) and win31/ (NE 16-bit)
 game/       playable 32-bit install from the CD
 docs/       FULLTILT.HLP (the CD's manual) and a rules spec drawn from it
-src/        generated control_<table>.cpp skeletons (regenerable, untracked)
+src/        the reconstructed rules -- ~17,000 hand-written lines plus three generated
+            files (the two control tables and the component glue); tracked
 reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
             (untracked; re-clone with
             `git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`)

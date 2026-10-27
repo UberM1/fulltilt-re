@@ -23,7 +23,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ADDR_RE = re.compile(r"0x0{0,2}(4[0-9a-f]{5})\b")  # both 0x427f10 and 0x00427f10 occur
+# 0x427f10, 0x00427f10, and FUN_0042a220 -- the last is how a reimplementation says
+# "this function also serves that address", for handlers the binary binds twice
+# because the bodies are byte-identical. link_impls.py reads the same three forms.
+ADDR_RE = re.compile(r"(?:0x0{0,2}|FUN_0{0,2})(4[0-9a-f]{5})\b")
 
 
 def seeds(table):
