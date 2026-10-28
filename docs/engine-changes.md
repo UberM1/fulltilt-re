@@ -626,3 +626,48 @@ Worth knowing for anyone chasing this again: **it does not reproduce headlessly*
 dummy renderer lays the heap out differently and the stray write lands in padding, so
 `MALLOC_CHECK_=3` sees nothing. ASAN is the deterministic test; the abort in a real window
 was luck.
+
+## 14. `TKickback` replayed its clip ten times a second
+
+Reported twice by a player on Dragon's Keep, the second time precisely: entering the left
+drain channel, the ball is rescued, and the audio becomes deafening.
+
+Upstream collapsed the original's **two** timer callbacks into one `TimerExpired` that
+branches on `KickActiveFlag`, and in the armed branch played `HardHitSoundId` and re-armed
+*itself* every `TimerTime2` = 0.1 s. That flag is cleared only by a collision that clears
+the threshold, so a ball that touches the kickback and then leaves without one -- or is
+disabled, as a drained ball is -- leaves it armed for the rest of the game. Measured
+before the fix: `10 starts in the last 1000 ms (total 141)`, still climbing at t=17.8 s.
+After: the flag clears at t=3.88 and the counter never fires again.
+
+The original is a one-shot, two-stage animation, and the class is one shared engine class
+-- the bytes at 0x415ba0 are identical in `CADET.EXE`, `DRAGON.EXE` and `PIRATES.EXE`, at
+the same address and the same vtable slot -- so this is a correction to upstream, not a
+Full Tilt variant:
+
+| | |
+|---|---|
+| `Collision`, first touch | `KickActiveFlag = 1`, arm `TimerTime` -> **0x415c60** |
+| **0x415c60** arm | `Threshold = 0`, sprite 1, arm `TimerTime2` -> 0x415ce0. No sound, no branch, no self re-arm. |
+| `Collision`, now over the zero threshold | play the clip, clear the flag, kill the pending timer, arm `TimerTime2` -> 0x415ce0 |
+| **0x415ce0** retract | sprite 0, `Threshold` back to 1e9, notify the rules **only if the flag is already clear**, then clear it |
+
+The conditional notify is the point of the second stage: arming and timing out quietly is
+not an event, only an actual kick is.
+
+Two things came out of fixing it.
+
+**The original plays two clips on a kick, not one.** `TCollisionComponent::DefaultCollision`
+is 0x413ab0; the branch that returns 1 plays `[this+0x72]` at 0x413b2b and the softer
+branch plays `[this+0x6e]` at 0x413b58, which pins those two fields as `HardHitSoundId` and
+`SoftHitSoundId`. `TKickback::Collision` then plays `[this+0x72]` *again* at 0x415c1f. Two
+overlapping voices, once, which is bounded and is presumably why a kicker sounds louder
+than a wall.
+
+**`TKickback` has a suppressor the port did not model.** `[this+0x86]`, tested at 0x415bd7
+*before* `KickActiveFlag`: set by message 0x4c (0x415da7) and cleared by 0x4b, a tilt lock
+or a reset (0x415dd7). A suppressed kickback still stops the ball -- the collision below
+the guard still runs -- it simply never arms and never kicks. Skulduggery's rules send 0x4c
+(`src/pirates_part3.cpp`), where it was a no-op. `Message` also retracted with
+`SpriteSet(-1)` where the original uses sprite 0 (0x415e0f reads the bitmap list's entry
+0, not a hide).

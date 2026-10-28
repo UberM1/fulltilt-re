@@ -112,10 +112,10 @@ index cdee9b3..ec101e8 100644
  			// Snap X coordinate to edge box sides
 diff --git a/SpaceCadetPinball/FtAccelDebug.cpp b/SpaceCadetPinball/FtAccelDebug.cpp
 new file mode 100644
-index 0000000..45d5d75
+index 0000000..d1bf5a1
 --- /dev/null
 +++ b/SpaceCadetPinball/FtAccelDebug.cpp
-@@ -0,0 +1,640 @@
+@@ -0,0 +1,736 @@
 +// ---- FTDBG: temporary accelerator/ramp-exit harness (remove before finishing) ----
 +#include "pch.h"
 +#include "FtAccelDebug.h"
@@ -127,6 +127,7 @@ index 0000000..45d5d75
 +#include "TEdgeManager.h"
 +#include "TEdgeBox.h"
 +#include "TBlocker.h"
++#include "TKickback.h"
 +#include "TLine.h"
 +#include "TCircle.h"
 +#include "TEdgeSegment.h"
@@ -327,6 +328,101 @@ index 0000000..45d5d75
 +			if (n == 0)
 +				fprintf(stderr, "DBG-chain t=%7.2f NO ACTIVE BALL (balls=%zu)\n", gNow, table->BallList.size());
 +		}
++		return;
++	}
++
++	// FT_KICKTEST=<n>: drive the ball into TKickback n (Dragon has one, a_kick1, the left
++	// outlane kicker), then take the ball away again FT_KICKGONE ms later -- which is what
++	// the left drain channel does: the ball brushes the kicker on its way past and then
++	// drains, so it never comes back to collide a second time. Prints the kickback's own
++	// state every frame so the 0.1 s re-arm is visible next to the play_sound rate.
++	static int kickTest = -2;
++	static bool kickDriven = false;
++	if (kickTest == -2)
++	{
++		auto e = getenv("FT_KICKTEST");
++		kickTest = e ? atoi(e) : -1;
++	}
++	if (kickTest >= 0)
++	{
++		std::vector<TKickback*> kicks;
++		for (auto c : table->ComponentList)
++			if (auto k = dynamic_cast<TKickback*>(c))
++				kicks.push_back(k);
++		if (static_cast<size_t>(kickTest) >= kicks.size())
++		{
++			static bool said = false;
++			if (!said)
++			{
++				said = true;
++				fprintf(stderr, "DBG-kick  no TKickback[%d]; table has %zu\n", kickTest, kicks.size());
++			}
++			return;
++		}
++		auto kick = kicks[kickTest];
++		auto bb = active_ball(table);
++		static float driveTime = 0.0f;
++		static bool removed = false;
++		// Aim at the kickback's own wall segment rather than at its AABB: a_kick1's AABB
++		// is a degenerate line (y 12.344..12.344) and the ball has to arrive from the side
++		// the segment's normal faces, on the segment's own collision group.
++		// FT_KICKSIDE=-1 approaches from the other side.
++		if (bb && !kickDriven && gNow > 3.0f)
++		{
++			TLine* seg = nullptr;
++			for (auto e : kick->EdgeList)
++				if (auto ln = dynamic_cast<TLine*>(e))
++				{
++					seg = ln;
++					break;
++				}
++			if (!seg)
++			{
++				fprintf(stderr, "DBG-kick  kickback[%d] %s has no TLine edge (%zu edges)\n",
++				        kickTest, kick->GroupName ? kick->GroupName : "?", kick->EdgeList.size());
++				return;
++			}
++			float side = getenv("FT_KICKSIDE") ? static_cast<float>(atoi(getenv("FT_KICKSIDE"))) : 1.0f;
++			float mx = (seg->X0 + seg->X1) / 2.0f, my = (seg->Y0 + seg->Y1) / 2.0f;
++			float dx = seg->X1 - seg->X0, dy = seg->Y1 - seg->Y0;
++			float l = sqrtf(dx * dx + dy * dy);
++			float nx = -dy / l * side, ny = dx / l * side;
++			fprintf(stderr, "DBG-kick  drive into kickback[%d] %s seg=(%.3f,%.3f)->(%.3f,%.3f)"
++			        " group=0x%x n=(%.3f,%.3f) hardHit=%d softHit=%d t1=%.3f t2=%.3f active=%d\n",
++			        kickTest, kick->GroupName ? kick->GroupName : "?", seg->X0, seg->Y0, seg->X1,
++			        seg->Y1, seg->CollisionGroup, nx, ny, kick->HardHitSoundId, kick->SoftHitSoundId,
++			        kick->TimerTime, kick->TimerTime2, kick->ActiveFlag);
++			kick->ActiveFlag = 1;
++			bb->Position.X = mx + nx * 0.5f;
++			bb->Position.Y = my + ny * 0.5f;
++			bb->Position.Z = 0.0f;
++			bb->PrevPosition = bb->Position;
++			bb->Direction = {-nx, -ny, 0.0f};
++			bb->Speed = 6.0f;
++			bb->CollisionMask = seg->CollisionGroup;
++			bb->CollisionComp = nullptr;
++			bb->StuckCounter = 0;
++			kickDriven = true;
++			driveTime = gNow;
++		}
++		// Take the ball off the playfield the way TDrain::Collision does.
++		float goneMs = getenv("FT_KICKGONE") ? static_cast<float>(atoi(getenv("FT_KICKGONE"))) : 300.0f;
++		if (kickDriven && !removed && gNow - driveTime > goneMs / 1000.0f)
++		{
++			removed = true;
++			if (bb)
++			{
++				fprintf(stderr, "DBG-kick  t=%7.2f ball removed (mimics TDrain::Collision)"
++				        " kickActive=%d timer=%d threshold=%.1f\n",
++				        gNow, kick->KickActiveFlag, kick->Timer, kick->Threshold);
++				bb->Disable();
++			}
++		}
++		static int kn = 0;
++		if ((kn++ % 8) == 0)
++			fprintf(stderr, "DBG-kick  t=%7.2f kickActive=%d timer=%d threshold=%.1f ball=%s\n",
++			        gNow, kick->KickActiveFlag, kick->Timer, kick->Threshold,
++			        active_ball(table) ? "live" : "gone");
 +		return;
 +	}
 +
@@ -2225,6 +2321,187 @@ index 4c930ff..99bbc65 100644
  				loader::play_sound(SoftHitSoundId, ball, "THole2");
  				control::handler(MessageCode::ControlBallReleased, this);
  			}
+diff --git a/SpaceCadetPinball/TKickback.cpp b/SpaceCadetPinball/TKickback.cpp
+index c69e0b8..05bc4f8 100644
+--- a/SpaceCadetPinball/TKickback.cpp
++++ b/SpaceCadetPinball/TKickback.cpp
+@@ -14,6 +14,7 @@ TKickback::TKickback(TPinballTable* table, int groupIndex): TCollisionComponent(
+ 	MessageField = 0;
+ 	Timer = 0;
+ 	KickActiveFlag = 0;
++	Suppressed = 0;
+ 	TimerTime = 0.7f;
+ 	TimerTime2 = 0.1f;
+ 	Threshold = 1000000000.0f;
+@@ -21,14 +22,40 @@ TKickback::TKickback(TPinballTable* table, int groupIndex): TCollisionComponent(
+ 
+ int TKickback::Message(MessageCode code, float value)
+ {
+-	if ((code == MessageCode::SetTiltLock || code == MessageCode::Reset) && Timer)
++	// DRAGON.EXE 0x415d70. Upstream had only the SetTiltLock / Reset pair, and retracted
++	// with SpriteSet(-1) where the original uses sprite 0 (0x415e0f reads the bitmap
++	// list's entry 0, not a hide).
++	switch (code)
+ 	{
+-		timer::kill(Timer);
+-		SpriteSet(-1);
+-		Timer = 0;
+-		KickActiveFlag = 0;
+-		Threshold = 1000000000.0;
++	case MessageCode::TMagnetFieldDisable: // 0x4c at 0x415da7: suppress, nothing else
++		Suppressed = 1;
++		return 0;
++
++	case MessageCode::PlayerChanged: // 0x3fe at 0x415db8: base class only
++		TCollisionComponent::Message(code, value);
++		return 0;
++
++	case MessageCode::Reset: // 0x402 at 0x415dcb: base Reset, then the shared tail
++		TCollisionComponent::Message(code, value);
++		break;
++
++	case MessageCode::TMagnetFieldEnable: // 0x4b
++	case MessageCode::SetTiltLock:        // 0x3f3
++		break;
++
++	default:
++		return 0;
+ 	}
++
++	// The shared disarm tail, 0x415dd2 onwards. Note that it clears both flags and
++	// restores the threshold whether or not a timer was pending.
++	Suppressed = 0;
++	KickActiveFlag = 0;
++	Threshold = 1000000000.0f;
++	if (Timer)
++		timer::kill(Timer);
++	Timer = 0;
++	SpriteSet(0);
+ 	return 0;
+ }
+ 
+@@ -39,35 +66,75 @@ void TKickback::Collision(TBall* ball, vector2* nextPosition, vector2* direction
+ 	{
+ 		maths::basic_collision(ball, nextPosition, direction, Elasticity, Smoothness, 0.0,
+ 		                       Boost);
++		return;
+ 	}
+-	else
++
++	// DRAGON.EXE 0x415ba0, and the class is one shared engine class: the bytes at that
++	// address are identical in CADET.EXE, DRAGON.EXE and PIRATES.EXE, same vtable slot,
++	// same offsets. So this is a correction to upstream rather than a Full Tilt variant.
++	//
++	// The shape is a one-shot, two-stage animation:
++	//
++	//   Collision, first touch -> KickActiveFlag = 1, arm TimerTime  -> ArmExpired
++	//   ArmExpired              -> Threshold = 0, sprite 1, arm TimerTime2 -> RetractExpired
++	//   Collision, now over the zero threshold -> clear the flag, kill the pending
++	//                              timer, arm TimerTime2 -> RetractExpired
++	//   RetractExpired          -> sprite 0, Threshold back to 1e9, and notify the
++	//                              rules *only if the flag was cleared*, i.e. only if a
++	//                              ball was actually kicked.
++	//
++	// Upstream had one callback that branched on KickActiveFlag and, in the armed
++	// branch, played HardHitSoundId and re-armed *itself* every TimerTime2. The flag is
++	// only cleared by a qualifying collision, so a ball that merely passes the kickback
++	// without one left it armed forever -- replaying the clip ten times a second, which
++	// is a deafening overlap rather than a sound. A player hit it twice on Dragon's
++	// Keep: "entering the left drain channel ... the audio deafens you". Neither of the
++	// original's two callbacks plays anything.
++	// 0x415bd7 tests the suppressor first, then the flag; failing either skips straight
++	// to the collision below, so a suppressed kickback is still a wall.
++	if (!Suppressed && !KickActiveFlag)
+ 	{
+-		if (!KickActiveFlag)
+-		{
+-			Threshold = 1000000000.0;
+-			KickActiveFlag = 1;
+-			Timer = timer::set(TimerTime, this, TimerExpired);
+-		}
+-		if (DefaultCollision(ball, nextPosition, direction))
+-			KickActiveFlag = 0;
++		KickActiveFlag = 1;
++		Timer = timer::set(TimerTime, this, ArmExpired);
++	}
++
++	if (DefaultCollision(ball, nextPosition, direction))
++	{
++		// Settled: the original really does play two clips on a kick. Its
++		// DefaultCollision is 0x413ab0, and the field it plays on the branch that
++		// returns 1 is [this+0x72] at 0x413b2b -- the same HardHitSoundId that 0x415c1f
++		// then plays again. (0x413b58 plays [this+0x6e], SoftHitSoundId, on the branch
++		// that returns 0.) Two overlapping voices, once per kick, which is bounded and
++		// is presumably the point: the kicker is meant to sound louder than a wall.
++		loader::play_sound(HardHitSoundId, this, "TKickback kick"); // 0x415c1f
++		KickActiveFlag = 0;
++		if (Timer)
++			timer::kill(Timer);
++		Timer = timer::set(TimerTime2, this, RetractExpired);
+ 	}
+ }
+ 
+-void TKickback::TimerExpired(int timerId, void* caller)
++// 0x415c60. Arms the kicker: the threshold drops to zero so the next contact counts as
++// a kick, and the raised sprite goes up.
++void TKickback::ArmExpired(int timerId, void* caller)
+ {
+ 	auto kick = static_cast<TKickback*>(caller);
++	kick->Threshold = 0.0f;
++	kick->SpriteSet(1);
++	kick->Timer = timer::set(kick->TimerTime2, kick, RetractExpired);
++}
+ 
+-	if (kick->KickActiveFlag)
+-	{
+-		kick->Threshold = 0.0;
+-		kick->Timer = timer::set(kick->TimerTime2, kick, TimerExpired);
+-		loader::play_sound(kick->HardHitSoundId, kick, "TKickback");
+-		kick->SpriteSet(1);
+-	}
+-	else
+-	{
+-		kick->SpriteSet(0);
+-		kick->Timer = 0;
++// 0x415ce0. Retracts it, and reports the kick.
++void TKickback::RetractExpired(int timerId, void* caller)
++{
++	auto kick = static_cast<TKickback*>(caller);
++	kick->SpriteSet(0);
++	kick->Timer = 0;
++	kick->Threshold = 1000000000.0f;
++	// 0x415d49: the notification is conditional on the flag already being clear, which
++	// is true only when a collision cleared it -- that is, only when a ball was kicked.
++	// Arming and timing out quietly is not an event.
++	if (!kick->KickActiveFlag)
+ 		control::handler(MessageCode::ControlTimerExpired, kick);
+-	}
++	kick->KickActiveFlag = 0;
+ }
+diff --git a/SpaceCadetPinball/TKickback.h b/SpaceCadetPinball/TKickback.h
+index 1aebd4c..36dc23c 100644
+--- a/SpaceCadetPinball/TKickback.h
++++ b/SpaceCadetPinball/TKickback.h
+@@ -10,10 +10,18 @@ public:
+ 	void Collision(TBall* ball, vector2* nextPosition, vector2* direction, float distance,
+ 		TEdgeSegment* edge) override;
+ 
+-	static void TimerExpired(int timerId, void* caller);
++	// Two distinct timer callbacks, as the original has: DRAGON.EXE 0x415c60 arms the
++	// kicker and 0x415ce0 retracts it. Upstream collapsed them into one function that
++	// branches on KickActiveFlag and re-arms itself -- see the note in TKickback.cpp.
++	static void ArmExpired(int timerId, void* caller);
++	static void RetractExpired(int timerId, void* caller);
+ 
+ 	float TimerTime;
+ 	float TimerTime2;
+ 	int Timer;
+ 	int KickActiveFlag;
++	// [this+0x86] in the original: set by 0x4c and cleared by 0x4b, a tilt lock or a
++	// reset. Collision tests it *before* KickActiveFlag (0x415bd7), so a suppressed
++	// kickback still stops the ball -- it simply never arms and never kicks.
++	int Suppressed;
+ };
 diff --git a/SpaceCadetPinball/TKickout.cpp b/SpaceCadetPinball/TKickout.cpp
 index dd31ce3..79ccb2d 100644
 --- a/SpaceCadetPinball/TKickout.cpp
@@ -4746,7 +5023,7 @@ index a6c31e7..87a6d69 100644
  
  void fullscrn::window_size_changed()
 diff --git a/SpaceCadetPinball/loader.cpp b/SpaceCadetPinball/loader.cpp
-index 283e983..50710dc 100644
+index 283e983..c3f87cd 100644
 --- a/SpaceCadetPinball/loader.cpp
 +++ b/SpaceCadetPinball/loader.cpp
 @@ -43,7 +43,7 @@ int loader::sound_count = 1;
@@ -4848,7 +5125,83 @@ index 283e983..50710dc 100644
  float loader::query_float_attribute(int groupIndex, int groupIndexOffset, int firstValue, float defVal)
  {
  	if (groupIndex < 0)
-@@ -342,25 +368,28 @@ float loader::play_sound(int soundIndex, TPinballComponent *soundSource, const c
+@@ -332,35 +358,104 @@ int loader::material(int groupIndex, visualStruct* visual)
+ 	return 0;
+ }
+ 
++// ---- FTDBG: play_sound rate harness (remove before finishing) ----
++//
++// A deafening table is the same clip started many times a second: SDL_mixer mixes every
++// voice, so a sound retriggered each frame stacks. FT_SOUNDDBG=1 counts starts per sound
++// id in a 1000 ms window of pb::time_ticks and prints once per window as soon as a id
++// crosses FT_SOUNDRATE (default 12 starts/s), which no legitimate effect reaches.
++static void ft_sound_rate_note(int soundIndex, const char* info)
++{
++	static int enabled = -1;
++	if (enabled < 0)
++		enabled = getenv("FT_SOUNDDBG") ? 1 : 0;
++	if (!enabled)
++		return;
++
++	static int threshold = 0;
++	if (!threshold)
++	{
++		auto e = getenv("FT_SOUNDRATE");
++		threshold = e ? atoi(e) : 8;
++		if (threshold < 2)
++			threshold = 2;
++	}
++
++	struct Entry
++	{
++		int Id;
++		int WindowStart;
++		int WindowCount;
++		int Total;
++		bool Reported;
++		const char* Info;
++	};
++	static std::vector<Entry> entries;
++
++	Entry* en = nullptr;
++	for (auto& e : entries)
++		if (e.Id == soundIndex)
++			en = &e;
++	if (!en)
++	{
++		entries.push_back(Entry{soundIndex, pb::time_ticks, 0, 0, false, info});
++		en = &entries.back();
++	}
++
++	en->Total++;
++	en->Info = info;
++	if (pb::time_ticks - en->WindowStart >= 1000)
++	{
++		if (en->WindowCount >= threshold)
++			fprintf(stderr, "DBG-snd   LOOP sound=%-3d %-24s %d starts in the last 1000 ms"
++			        " (total %d)\n", en->Id, en->Info ? en->Info : "?", en->WindowCount, en->Total);
++		en->WindowStart = pb::time_ticks;
++		en->WindowCount = 0;
++		en->Reported = false;
++	}
++	en->WindowCount++;
++	if (!en->Reported && en->WindowCount >= threshold)
++	{
++		en->Reported = true;
++		fprintf(stderr, "DBG-snd   LOOP sound=%-3d %-24s crossed %d starts/s (total %d)\n",
++		        en->Id, en->Info ? en->Info : "?", threshold, en->Total);
++	}
++}
++// ---- end FTDBG ----
++
+ float loader::play_sound(int soundIndex, TPinballComponent *soundSource, const char *info)
+ {
+ 	if (soundIndex <= 0)
+ 		return 0.0;
++	ft_sound_rate_note(soundIndex, info);
+ 	Sound::PlaySound(sound_list[soundIndex].WavePtr, pb::time_ticks, soundSource, info);
+ 	return sound_list[soundIndex].Duration;
+ }
  
  int loader::state_id(int groupIndex, int groupIndexOffset)
  {
@@ -4883,7 +5236,7 @@ index 283e983..50710dc 100644
  	return groupIndex;
  }
  
-@@ -405,10 +434,35 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
+@@ -405,10 +500,35 @@ int loader::kicker(int groupIndex, visualKickerStruct* kicker)
  		case 406:
  			kicker->HardHitSoundId = get_sound_id(static_cast<int>(floor(*floatArr)));
  			break;
