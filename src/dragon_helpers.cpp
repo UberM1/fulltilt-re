@@ -512,9 +512,16 @@ void TowerBarrageController(MessageCode code)
 // skill shot on a_spot22. It pays 100,000 for starting, serves one ball out of fire
 // lizard sink 1 and flashes both lizard lights, and lights the "2" lamp.
 //
-// The a_kout2 feed is conditional on KeepAnnouncement: when the mode was entered
-// from the skill shot the ball is still in the gargoyle kickout and has to be
-// released, and when it was entered by the kickout's own collision it is not.
+// The a_kout2 release is conditional on KeepAnnouncement, and the condition is
+// `!KeepAnnouncement`. KeepAnnouncement is the flag the skill shot and the egg
+// exchange set so their announcement survives the transition, so the code releases
+// the kickout when the mode was *not* entered that way -- which is the entry by the
+// kickout's own collision, the one case where a ball is sitting in it.
+//
+// An earlier version of this comment had that backwards. The code is transcribed from
+// the original and is not in doubt; what the inverted comment cost was an afternoon of
+// reading the wrong branch while chasing a ball that loops in this very kickout, so it
+// is spelled out here rather than left to be re-derived.
 void GargoyleGaggleController(MessageCode code)
 {
 	if (code == ft::MissionComplete)

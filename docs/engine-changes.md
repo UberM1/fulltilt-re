@@ -558,3 +558,59 @@ on Dragon still releasing `s_hole118`, `s_hole101` and `s_hole100`, and a 90 s `
 soak on each bonus table showing the parts actually stepping -- `a_cannon` walking 0 -> 1 ->
 2 -> 3 and back, `a_bloce` 0 <-> 1, `a_rocka`/`a_rockb`/`a_sword`/`a_jaw` reaching their home
 positions -- with no stuck ball and no crash.
+
+## 13. The spliced-bitmap decoder wrote past its buffer
+
+This one is upstream's, not the port's, and it aborted a real game of Dragon's Keep:
+
+```
+DBG-hoard sweeps=... rockb=... lite46=...
+munmap_chunk(): invalid pointer
+# exit 134
+```
+
+`exit 134` is SIGABRT from glibc's own heap checker. The core dump (SIGABRT, PID 803105)
+puts the abort in `pb::uninit` -> `DatFile::~DatFile` -> `EntryData::~EntryData` ->
+`gdrv_bitmap8::~gdrv_bitmap8`, on the `delete[] BmpBufPtr1` of a 109x37 bitmap: the chunk
+header four bytes below the buffer had been overwritten with `0x00000000b426b22b`, whose
+`IS_MMAPPED` bit then sent `free` down the `munmap_chunk` path. The overwriting bytes read
+as consecutive 16-bit z depths, which names the culprit before any disassembly: something
+was writing a zmap through an index that had run off the end.
+
+**Where.** `GroupData::SplitSplicedBitmap`. A spliced bitmap encodes runs of pixels
+separated by gaps, and a gap is an **absolute advance through a framebuffer whose stride is
+the table width** -- 600, 752 or 960 by resolution -- while the destination is a small
+sprite of `bmp.Stride`. Upstream compensates for the difference once per gap:
+
+```cpp
+if (stride > bmp.Width)
+    stride += bmp.Width - tableWidth;
+dstInd += stride;
+```
+
+which is right only when the gap crosses exactly **one** row boundary. A sprite with blank
+rows in the middle emits a gap that crosses several, and the single compensation then
+leaves the index short by `(rows - 1) * (tableWidth - bmp.Width)`. Dragon's `v_lite119`
+(group 362, a 21x12 sprite) emits a gap of 2414 = 4 x 600 + 14: four rows, compensated as
+one, so the index landed at 1922 in a 252-byte bitmap and wrote `zMap.ZPtr1[1922]` 3,844
+bytes past a 504-byte buffer.
+
+The fix tracks the table-space position and recomputes the destination index per run:
+
+```cpp
+tablePos += stride;
+auto dstInd = tablePos / tableWidth * bmp.Stride + tablePos % tableWidth;
+```
+
+**Why this is safe to change in a shared decoder.** Every spliced bitmap in all three DATs
+was decoded both ways and hashed, pixels and z separately: `DRAGON.DAT` 684 spliced
+bitmaps, **3 differ** -- exactly the three resolutions of `v_lite119`, the one that
+overflowed; `PIRATES.DAT` 771, **0 differ**; `CADET.DAT` 897, **0 differ**. So Space Cadet
+and Skulduggery are bit-for-bit what they were, and only the broken sprite changes. An
+AddressSanitizer build reports the overflow at `GroupData.cpp:134` before the fix and is
+clean after, across autoplay soaks on all three tables.
+
+Worth knowing for anyone chasing this again: **it does not reproduce headlessly**. The
+dummy renderer lays the heap out differently and the stray write lands in padding, so
+`MALLOC_CHECK_=3` sees nothing. ASAN is the deterministic test; the abort in a real window
+was luck.

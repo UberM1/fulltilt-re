@@ -112,18 +112,24 @@ index cdee9b3..ec101e8 100644
  			// Snap X coordinate to edge box sides
 diff --git a/SpaceCadetPinball/FtAccelDebug.cpp b/SpaceCadetPinball/FtAccelDebug.cpp
 new file mode 100644
-index 0000000..351f11f
+index 0000000..45d5d75
 --- /dev/null
 +++ b/SpaceCadetPinball/FtAccelDebug.cpp
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,640 @@
 +// ---- FTDBG: temporary accelerator/ramp-exit harness (remove before finishing) ----
 +#include "pch.h"
 +#include "FtAccelDebug.h"
 +#include "pb.h"
 +#include "TBall.h"
 +#include "TPinballTable.h"
++#include "TPinballComponent.h"
 +#include "TTableLayer.h"
 +#include "TEdgeManager.h"
++#include "TEdgeBox.h"
++#include "TBlocker.h"
++#include "TLine.h"
++#include "TCircle.h"
++#include "TEdgeSegment.h"
 +#include <vector>
 +
 +static TBall* active_ball(TPinballTable* t);
@@ -131,6 +137,13 @@ index 0000000..351f11f
 +static std::vector<FtHoleDbgEntry> gHoles;
 +struct FtSinkDbgEntry { const char* Name; void* Comp; RectF AABB; int Group; float TimerTime; vector2 BallPos; };
 +static std::vector<FtSinkDbgEntry> gSinks;
++struct FtKoutDbgEntry
++{
++	const char* Name; void* Comp; vector2 Center; float Radius; int Group;
++	float TimerTime1, TimerTime2, SetZ, FieldMult;
++	int NotSomeFlag, ActiveFlag, ZAttrPresent; float RadiusScale; int RadiusScalePresent;
++};
++static std::vector<FtKoutDbgEntry> gKouts;
 +static std::vector<FtAccelDbgEntry> gAccels;
 +static std::vector<FtRexitDbgEntry> gRexits;
 +
@@ -317,6 +330,165 @@ index 0000000..351f11f
 +		return;
 +	}
 +
++	// FT_KOUTTEST=<n>: drive the ball into kickout n and watch for the kick.
++	// FT_KOUTREPEAT=1 re-drives every 8 s, which is how a kickout that captures once
++	// and then never lets go is told from one that is simply slow.
++	static int koutTest = -2;
++	static bool koutDriven = false;
++	if (koutTest == -2)
++	{
++		auto e = getenv("FT_KOUTTEST");
++		koutTest = e ? atoi(e) : -1;
++	}
++	if (koutTest >= 0)
++	{
++		auto bb = active_ball(table);
++		static float lastDrive = 0.0f;
++		if (getenv("FT_KOUTREPEAT") && gNow - lastDrive > 8.0f)
++			koutDriven = false;
++		if (bb && !koutDriven && gNow > 3.0f && static_cast<size_t>(koutTest) < gKouts.size())
++		{
++			auto& k = gKouts[koutTest];
++			// FT_KOUTARM=1 forces the kickout live first: Dragon's a_kout3 is a type-1029
++			// kickout that starts with ActiveFlag 0 and is armed only by a spell.
++			if (getenv("FT_KOUTARM"))
++				static_cast<TPinballComponent*>(k.Comp)->ActiveFlag = 1;
++			fprintf(stderr, "DBG-kout  drive into kout[%d] %s center=(%.3f,%.3f) r=%.3f group=0x%x"
++			        " active=%d\n",
++			        koutTest, k.Name ? k.Name : "?", k.Center.X, k.Center.Y, k.Radius, k.Group,
++			        static_cast<TPinballComponent*>(k.Comp)->ActiveFlag);
++			// FT_KOUTCENTER=1 drops the ball straight onto the mouth instead of rolling it
++			// in from outside: a_kout3's capture circle is 0.039 across (306 = 0.01 x a
++			// 3.938 field radius), too small to hit by aiming from 4 units away.
++			bool atCentre = getenv("FT_KOUTCENTER") != nullptr;
++			bb->Position.X = k.Center.X;
++			bb->Position.Y = atCentre ? k.Center.Y : k.Center.Y + k.Radius + 0.4f;
++			bb->PrevPosition = bb->Position;
++			bb->Direction = {0.0f, -1.0f, 0.0f};
++			bb->Speed = atCentre ? 0.2f : 6.0f;
++			bb->CollisionMask = k.Group;
++			bb->CollisionComp = nullptr;
++			bb->StuckCounter = 0;
++			koutDriven = true;
++			lastDrive = gNow;
++		}
++		// FT_KOUTBLOCK=1: dump every moving blocker's position, and with FT_KOUTCLEAR=1
++		// retract them all (TBlockerDisable) before the ball is driven in. The pair is the
++		// control experiment for "the kicked ball is bouncing off a rock".
++		static bool blockDumped = false;
++		if ((getenv("FT_KOUTBLOCK") || getenv("FT_KOUTCLEAR") || getenv("FT_KOUTBLOCKPOS")) &&
++			!blockDumped && gNow > 2.5f)
++		{
++			blockDumped = true;
++			for (auto c : table->ComponentList)
++			{
++				auto bl = dynamic_cast<TBlocker*>(c);
++				if (!bl)
++					continue;
++				fprintf(stderr, "DBG-koutblk %-12s movingPart=%d cur=%d target=%d home=%d flags=%d%d%d%d%d%d%d%d\n",
++				        bl->GroupName ? bl->GroupName : "?", bl->MovingPart, bl->CurrentPosition,
++				        bl->TargetPosition, bl->HomePosition, bl->PositionFlags[0], bl->PositionFlags[1],
++				        bl->PositionFlags[2], bl->PositionFlags[3], bl->PositionFlags[4],
++				        bl->PositionFlags[5], bl->PositionFlags[6], bl->PositionFlags[7]);
++				// FT_KOUTCLEAR=1 retracts every blocker; FT_KOUTBLOCKPOS=<n> parks every
++				// blocker at position n instead, which is how "which position leaves the
++				// kickout channel clear" gets answered without guessing.
++				if (auto pos = getenv("FT_KOUTBLOCKPOS"))
++					bl->Message(MessageCode::TBlockerSetPosition, static_cast<float>(atoi(pos)));
++				else if (getenv("FT_KOUTCLEAR"))
++					bl->Message(MessageCode::TBlockerSnapClosed, 0.0f);
++			}
++		}
++
++		// FT_KOUTEDGES=1: one-shot dump of every collision edge in the grid boxes around
++		// the kickout, which is how "the ball is thrown into a wall" is told from "the
++		// kickout never fires".
++		static bool edgesDumped = false;
++		if (getenv("FT_KOUTEDGES") && !edgesDumped && koutDriven &&
++			static_cast<size_t>(koutTest) < gKouts.size())
++		{
++			edgesDumped = true;
++			auto& k = gKouts[koutTest];
++			auto em = TTableLayer::edge_manager;
++			int cx = em->box_x(k.Center.X), cy = em->box_y(k.Center.Y);
++			for (int dy = -1; dy <= 1; dy++)
++				for (int dx = -1; dx <= 1; dx++)
++				{
++					int bx = cx + dx, by = cy + dy;
++					if (bx < 0 || by < 0 || bx >= em->MaxBoxX || by >= em->MaxBoxY)
++						continue;
++					auto& box = em->BoxArray[bx + by * em->MaxBoxX];
++					for (auto e : box.EdgeList)
++					{
++						auto cc = e->CollisionComponent;
++						// Only the edges that can actually stop the ball, and only the ones
++						// within a ball's reach of the kickout's mouth: the raw box dump is
++						// hundreds of lines of scenery.
++						if (!(e->CollisionGroup & 1) || !e->ActiveFlagPtr || !*e->ActiveFlagPtr)
++							continue;
++						char geo[96] = "?";
++						auto ln = dynamic_cast<TLine*>(e);
++						auto ci = dynamic_cast<TCircle*>(e);
++						float d = 1e9f;
++						if (ln)
++						{
++							snprintf(geo, sizeof geo, "line (%.3f,%.3f)->(%.3f,%.3f)", ln->X0, ln->Y0,
++							         ln->X1, ln->Y1);
++							float mx = (ln->X0 + ln->X1) / 2.0f - k.Center.X;
++							float my = (ln->Y0 + ln->Y1) / 2.0f - k.Center.Y;
++							d = sqrtf(mx * mx + my * my);
++						}
++						else if (ci)
++						{
++							snprintf(geo, sizeof geo, "circle (%.3f,%.3f) rSq=%.4f", ci->Circle.Center.X,
++							         ci->Circle.Center.Y, ci->Circle.RadiusSq);
++							float mx = ci->Circle.Center.X - k.Center.X;
++							float my = ci->Circle.Center.Y - k.Center.Y;
++							d = sqrtf(mx * mx + my * my);
++						}
++						if (d > 1.2f)
++							continue;
++						fprintf(stderr, "DBG-koutedge d=%.3f group=0x%x comp=%-12s type=%-5d %s\n",
++						        d, e->CollisionGroup, cc && cc->GroupName ? cc->GroupName : "?",
++						        cc ? ComponentTypeOf(cc) : -1, geo);
++					}
++				}
++		}
++
++		// Keep flapping the flippers during a kickout test: Dragon's a_kout3 is released by
++		// a flipper press (part2's DragonBloodLightControl / a_flip2 handler), not by a
++		// timer, so a test that never presses one cannot tell "held on purpose" from
++		// "stuck".
++		if (gNow - lastFlip > 0.2f)
++		{
++			lastFlip = gNow;
++			flipDown = !flipDown;
++			table->Message(flipDown ? MessageCode::LeftFlipperInputPressed : MessageCode::LeftFlipperInputReleased,
++			               pb::time_now);
++			table->Message(flipDown ? MessageCode::RightFlipperInputPressed : MessageCode::RightFlipperInputReleased,
++			               pb::time_now);
++		}
++
++		static int m = 0;
++		static int koutEvery = getenv("FT_KOUTTRACE") ? 1 : 16;
++		if ((m++ % koutEvery) == 0)
++		{
++			int n = 0;
++			for (auto bl : table->BallList)
++				if (bl->ActiveFlag)
++				{
++					fprintf(stderr, "DBG-kout  t=%7.2f ball%d pos=(%.3f,%.3f,%.3f) spd=%.3f mask=0x%x"
++					        " comp=%p\n",
++					        gNow, n, bl->Position.X, bl->Position.Y, bl->Position.Z, bl->Speed,
++					        bl->CollisionMask, static_cast<void*>(bl->CollisionComp));
++					n++;
++				}
++			if (n == 0)
++				fprintf(stderr, "DBG-kout  t=%7.2f NO ACTIVE BALL (balls=%zu)\n", gNow, table->BallList.size());
++		}
++		return;
++	}
++
 +	// Keep a ball in play.
 +	auto b = active_ball(table);
 +	if (!b)
@@ -374,6 +546,23 @@ index 0000000..351f11f
 +		        " timerTime=%.4f ballPos=(%.3f,%.3f) s3=%d s4=%d\n",
 +		        name ? name : "?", comp, aabb.XMin, aabb.XMax, aabb.YMin, aabb.YMax, group,
 +		        timerTime, ballPos.X, ballPos.Y, s3, s4);
++}
++
++void ft_kickout_register(const char* name, void* comp, vector2 center, float radius, int group,
++                         float timerTime1, float timerTime2, float setZ, float fieldMult,
++                         int notSomeFlag, int activeFlag, int zAttrPresent, float radiusScale,
++                         int radiusScalePresent)
++{
++	gKouts.push_back(FtKoutDbgEntry{name, comp, center, radius, group, timerTime1, timerTime2, setZ,
++	                                fieldMult, notSomeFlag, activeFlag, zAttrPresent, radiusScale,
++	                                radiusScalePresent});
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-kout  reg [%2zu] %-12s comp=%p center=(%.3f,%.3f) r=%.3f group=0x%x"
++		        " t1=%.3f t2=%.3f setZ=%.3f (408 %s) field=%.3f notSome=%d active=%d"
++		        " r306=%.4f (306 %s)\n",
++		        gKouts.size() - 1, name ? name : "?", comp, center.X, center.Y, radius, group,
++		        timerTime1, timerTime2, setZ, zAttrPresent ? "present" : "ABSENT", fieldMult,
++		        notSomeFlag, activeFlag, radiusScale, radiusScalePresent ? "present" : "ABSENT");
 +}
 +
 +void ft_hole_register(const char* name, vector2 center, float radiusSq, int group, int releaseMask, float z)
@@ -569,10 +758,10 @@ index 0000000..351f11f
 +// ---- end FTDBG ----
 diff --git a/SpaceCadetPinball/FtAccelDebug.h b/SpaceCadetPinball/FtAccelDebug.h
 new file mode 100644
-index 0000000..d917b81
+index 0000000..1b42b9b
 --- /dev/null
 +++ b/SpaceCadetPinball/FtAccelDebug.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,38 @@
 +// ---- FTDBG: temporary accelerator/ramp-exit harness (remove before finishing) ----
 +#pragma once
 +#include "maths.h"
@@ -595,6 +784,13 @@ index 0000000..d917b81
 +	bool Built;
 +};
 +void ft_hole_register(const char* name, vector2 center, float radiusSq, int group, int releaseMask, float z);
++// FT_KOUTTEST=<n> drives the ball into kickout n; the registry is filled by TKickout's
++// constructor in table order, so the index is the construction order printed by
++// "DBG-kout  reg".
++void ft_kickout_register(const char* name, void* comp, vector2 center, float radius, int group,
++                         float timerTime1, float timerTime2, float setZ, float fieldMult,
++                         int notSomeFlag, int activeFlag, int zAttrPresent, float radiusScale,
++                         int radiusScalePresent);
 +void ft_sink_register(const char* name, void* comp, RectF aabb, int group, float timerTime,
 +                      vector2 ballPos, int s3, int s4);
 +void ft_accel_register(const FtAccelDbgEntry& e);
@@ -605,10 +801,51 @@ index 0000000..d917b81
 +void ft_accel_note_hit(const char* name);
 +void ft_rexit_note_hit(const char* name, int maskIn, int maskOut);
 diff --git a/SpaceCadetPinball/GroupData.cpp b/SpaceCadetPinball/GroupData.cpp
-index 7e22d08..2b887e2 100644
+index 7e22d08..f9263f7 100644
 --- a/SpaceCadetPinball/GroupData.cpp
 +++ b/SpaceCadetPinball/GroupData.cpp
-@@ -142,7 +142,14 @@ void GroupData::SplitSplicedBitmap(const gdrv_bitmap8& srcBmp, gdrv_bitmap8& bmp
+@@ -111,23 +111,24 @@ void GroupData::SplitSplicedBitmap(const gdrv_bitmap8& srcBmp, gdrv_bitmap8& bmp
+ 	zdrv::fill(&zMap, zMap.Width, zMap.Height, 0, 0, 0xFFFF);
+ 	zMap.Resolution = srcBmp.Resolution;
+ 
++	// A gap is an absolute advance through a framebuffer whose stride is the table
++	// width, not a destination-relative one, so the destination index has to be
++	// recomputed from the table-space position on every run. Compensating the gap once
++	// by `bmp.Width - tableWidth` is only right when it crosses exactly one row
++	// boundary; a sprite with blank rows emits a gap that crosses several, and the
++	// single compensation then leaves the index thousands of pixels past the buffer.
+ 	auto tableWidth = fullscrn::resolution_array[srcBmp.Resolution].TableWidth;
+ 	auto src = reinterpret_cast<uint16_t*>(srcBmp.IndexedBmpPtr);
+ 	auto srcChar = reinterpret_cast<char**>(&src);
+-	for (int dstInd = 0;;)
++	for (int tablePos = 0;;)
+ 	{
+ 		auto stride = static_cast<int16_t>(*src++);
+ 		if (stride < 0)
+ 			break;
+ 
+-		// Stride is in terms of dst stride, hardcoded to match vScreen width in current resolution
+-		if (stride > bmp.Width)
+-		{
+-			stride += bmp.Width - tableWidth;
+-			assertm(stride >= 0, "Spliced bitmap: negative computed stride");
+-		}
+-
+-		dstInd += stride;
++		tablePos += stride;
++		auto dstInd = tablePos / tableWidth * bmp.Stride + tablePos % tableWidth;
++		assertm(dstInd >= 0 && dstInd < bmp.Stride * bmp.Height, "Spliced bitmap: index out of range");
+ 		for (auto count = *src++; count; count--)
+ 		{
+ 			auto depth = *src++;
+@@ -136,13 +137,21 @@ void GroupData::SplitSplicedBitmap(const gdrv_bitmap8& srcBmp, gdrv_bitmap8& bmp
+ 
+ 			(*srcChar)++;
+ 			dstInd++;
++			tablePos++;
+ 		}
+ 	}
+ }
  
  void GroupData::SetBitmap(gdrv_bitmap8* bmp)
  {
@@ -1989,10 +2226,10 @@ index 4c930ff..99bbc65 100644
  				control::handler(MessageCode::ControlBallReleased, this);
  			}
 diff --git a/SpaceCadetPinball/TKickout.cpp b/SpaceCadetPinball/TKickout.cpp
-index dd31ce3..62b5594 100644
+index dd31ce3..79ccb2d 100644
 --- a/SpaceCadetPinball/TKickout.cpp
 +++ b/SpaceCadetPinball/TKickout.cpp
-@@ -5,6 +5,7 @@
+@@ -5,11 +5,13 @@
  #include "control.h"
  #include "loader.h"
  #include "pb.h"
@@ -2000,7 +2237,13 @@ index dd31ce3..62b5594 100644
  #include "TBall.h"
  #include "TCircle.h"
  #include "timer.h"
-@@ -25,14 +26,32 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
+ #include "TPinballTable.h"
+ #include "TTableLayer.h"
++#include "FtAccelDebug.h"
+ 
+ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollisionComponent(
+ 	table, groupIndex, false)
+@@ -25,14 +27,43 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
  	MessageField = 0;
  	Timer = 0;
  	BallCaputeredFlag = 0;
@@ -2024,32 +2267,209 @@ index dd31ce3..62b5594 100644
 +		BallThrowDirection = visual.Kicker.ThrowBallDirection;
 +		ThrowAngleMult = visual.Kicker.ThrowBallAngleMult;
 +		ThrowSpeedMult1 = visual.Kicker.Boost;
++		ft_kickout_register(GroupName, this, Circle.Center, 0.0f, visual.CollisionGroup, TimerTime1,
++		                    TimerTime2, CollisionBallSetZ, FieldMult, NotSomeFlag, ActiveFlag, 0,
++		                    0.0f, 0); // FTDBG
 +		return;
 +	}
  	Circle.Center.X = visual.FloatArr[0];
  	Circle.Center.Y = visual.FloatArr[1];
 -	Circle.RadiusSq = *loader::query_float_attribute(groupIndex, 0, 306) * visual.FloatArr[2];
-+	// 306 scales the visual radius into the capture radius; absent means unscaled and
-+	// the zero check below clamps to the engine's own 0.001f floor.
-+	Circle.RadiusSq = loader::query_float_attribute(groupIndex, 0, 306, 0.0f) * visual.FloatArr[2];
++	// 306 scales the visual radius into the capture radius. Absent means 0.1, NOT 0:
++	// DRAGON.EXE 0x415e96 queries it and 0x415ecb writes 0x3dcccccd = 0.1f into the
++	// slot when the lookup misses, and the product is clamped to 0.001f only when it
++	// comes out exactly zero (0x415f31 compares against the 0.0 at 0x437338, 0x415f3f
++	// stores 0x3a83126f = 0.001f). The port defaulted to 0.0f and therefore always took
++	// the clamp, which is 100x too small -- Skulduggery's six s_magnet* carry neither
++	// 306 nor 408, so every one of them had a 0.001-unit capture circle instead of
++	// 0.1 x 0.670 = 0.067, i.e. could never grab a ball. CADET.DAT's three kickouts all
++	// carry 306 (0.05 / 0.9 / 0.2), so Space Cadet is measurably unaffected.
++	auto rAttr = loader::query_float_attribute_opt(groupIndex, 0, 306);
++	Circle.RadiusSq = (rAttr ? rAttr[0] : 0.1f) * visual.FloatArr[2];
  	if (Circle.RadiusSq == 0.0f)
  		Circle.RadiusSq = 0.001f;
  	auto tCircle = new TCircle(this, &ActiveFlag, visual.CollisionGroup,
-@@ -44,8 +63,12 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
+@@ -44,8 +75,20 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
  	}
  
  	Circle.RadiusSq = visual.FloatArr[2] * visual.FloatArr[2];
 -	auto zAttr = loader::query_float_attribute(groupIndex, 0, 408);
 -	CollisionBallSetZ = pb::FullTiltMode && !pb::FullTiltDemoMode ? zAttr[3] : zAttr[2];
-+	// 408 is the z the captured ball is held at. Absent means the kickout does not
-+	// move the ball in z.
++	// 408 is the z the captured ball is held at. Absent means table->CollisionCompOffset,
++	// not 0: DRAGON.EXE 0x415fdc pushes 0x198, 0x416007 takes arr[3] when the lookup
++	// hits, and 0x416012..0x41601c loads [table+0x152] -- CollisionCompOffset -- when it
++	// misses. Unlike THole (which adds CollisionCompOffset to arr[3], 0x416929) the
++	// kickout uses arr[3] alone.
++	//
++	// The element index stays data-flavour dependent, as before; only the default
++	// changes. It bites the same six s_magnet* that 306 does: they were holding the ball
++	// at z 0.0 instead of CollisionCompOffset, the TSink/THole error of section 12 again.
++	// All three CADET.DAT kickouts carry 408, so Space Cadet is measurably unaffected.
 +	auto zAttr = loader::query_float_attribute_opt(groupIndex, 0, 408);
 +	CollisionBallSetZ = !zAttr
-+		                ? 0.0f
++		                ? table->CollisionCompOffset
 +		                : CurrentTable->FullTiltData && !CurrentTable->DemoData ? zAttr[3] : zAttr[2];
  	ThrowSpeedMult2 = visual.Kicker.ThrowBallMult * 0.01f;
  	BallThrowDirection = visual.Kicker.ThrowBallDirection;
  	ThrowAngleMult = visual.Kicker.ThrowBallAngleMult;
+@@ -58,10 +101,22 @@ TKickout::TKickout(TPinballTable* table, int groupIndex, bool someFlag): TCollis
+ 	Field.CollisionComp = this;
+ 	Field.CollisionGroup = visual.CollisionGroup;
+ 	TTableLayer::edges_insert_circle(&circle, nullptr, &Field);
++	ft_kickout_register(GroupName, this, Circle.Center, visual.FloatArr[2], visual.CollisionGroup,
++	                    TimerTime1, TimerTime2, CollisionBallSetZ, FieldMult, NotSomeFlag, ActiveFlag,
++	                    zAttr ? 1 : 0, rAttr ? rAttr[0] : -1.0f, rAttr ? 1 : 0); // FTDBG
+ }
+ 
++// Original 0x4e, which has no port symbol yet: "destroy the ball you are holding".
++// Nothing in src/ or in upstream's control.cpp sends it, so the arm is reachable only
++// once the enum gains a name for it -- see analysis/dragon-kickouts.md. 78 is free in
++// MessageCode (75/76 magnet pair, 70/71 blocker snaps, 84..87 ramp/blocker, 67 hole).
++
+ int TKickout::Message(MessageCode code, float value)
+ {
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-kout  MSG %-12s code=%d value=%.4f captured=%d active=%d timer=%d\n",
++		        GroupName ? GroupName : "?", static_cast<int>(code), value, BallCaputeredFlag,
++		        ActiveFlag, Timer); // FTDBG
+ 	switch (code)
+ 	{
+ 	case MessageCode::TKickoutRestartTimer:
+@@ -72,11 +127,69 @@ int TKickout::Message(MessageCode code, float value)
+ 			Timer = timer::set(value, this, TimerExpired);
+ 		}
+ 		break;
+-	case MessageCode::SetTiltLock:
++	// 0x4b / 0x4c, the arms the port was missing. Both are in CADET.EXE's engine too --
++	// the whole class is byte-identical across CADET/DRAGON/PIRATES.EXE apart from
++	// relocations -- and neither upstream's control.cpp nor src/ sends them to a
++	// kickout, so no table_rules.h switch is needed to keep Space Cadet still.
++	case MessageCode::TMagnetFieldEnable: // 0x4b, arm 0x416439
++		ActiveFlag = 1;
++		break;
++	case MessageCode::TMagnetFieldDisable: // 0x4c, arm 0x416443
++		ActiveFlag = 0;
++		if (BallCaputeredFlag)
++		{
++			if (Timer)
++				timer::kill(Timer);
++			TimerExpired(0, this);
++			// TimerExpired has just armed the 0.05 s re-arm timer; the original kills
++			// that too (0x416466..0x41646e) and zeroes the handle, which is what makes
++			// 0x4c a real disable: ResetTimerExpired never runs, so ActiveFlag stays 0.
++			if (Timer)
++				timer::kill(Timer);
++			Timer = 0;
++		}
++		break;
++	case MessageCode::TKickoutDestroyBall: // 0x4e, arm 0x416480
++		if (BallCaputeredFlag)
++		{
++			BallCaputeredFlag = 0;
++			if (NotSomeFlag)
++				ActiveFlag = 0;
++			if (Timer)
++			{
++				timer::kill(Timer);
++				Timer = 0;
++			}
++			if (Ball)
++			{
++				// 0x4164bd calls TBall::Disable (0x402c00) and 0x4164c5 decrements
++				// [table+0x192], MultiballCount. No throw, no sound: the ball is gone.
++				Ball->Disable();
++				PinballTable->MultiballCount--;
++				Ball = nullptr;
++			}
++		}
++		break;
++	case MessageCode::SetTiltLock: // 0x3f3, arm 0x4164db
++		if (NotSomeFlag)
++			ActiveFlag = 0;
++		break;
++	case MessageCode::PlayerChanged: // 0x3fe, arm 0x4164eb
++		// Same release as Reset. The original then runs the base class's per-player
++		// MessageField save/restore (0x413570); this engine keeps no per-player
++		// MessageField on the base component -- TMagnet.cpp records the same gap -- so
++		// the release and the ActiveFlag clear are the whole of the observable
++		// behaviour here.
++		if (BallCaputeredFlag)
++		{
++			if (Timer)
++				timer::kill(Timer);
++			TimerExpired(0, this);
++		}
+ 		if (NotSomeFlag)
+ 			ActiveFlag = 0;
+ 		break;
+-	case MessageCode::Reset:
++	case MessageCode::Reset: // 0x402, arm 0x416522
+ 		if (BallCaputeredFlag)
+ 		{
+ 			if (Timer)
+@@ -85,6 +198,9 @@ int TKickout::Message(MessageCode code, float value)
+ 		}
+ 		if (NotSomeFlag)
+ 			ActiveFlag = 0;
++		// The original falls through to the base class's reset (0x413550), which zeroes
++		// MessageField; TPinballComponent::Message already does that for Reset.
++		TPinballComponent::Message(code, value);
+ 		break;
+ 	default:
+ 		break;
+@@ -100,19 +216,25 @@ void TKickout::Collision(TBall* ball, vector2* nextPosition, vector2* direction,
+ 		Ball = ball;
+ 		Threshold = 1000000000.0;
+ 		BallCaputeredFlag = 1;
++		if (ft_accel_enabled() || ft_autoplay_enabled())
++			fprintf(stderr, "DBG-kout  CAPTURE %-12s ballZ %.3f -> setZ %.3f mask=0x%x tilt=%d\n",
++			        GroupName ? GroupName : "?", ball->Position.Z, CollisionBallSetZ,
++			        ball->CollisionMask, PinballTable->TiltLockFlag); // FTDBG
+ 		ball->CollisionComp = this;
+ 		ball->Position.X = Circle.Center.X;
+ 		ball->Position.Y = Circle.Center.Y;
+ 		OriginalBallZ = ball->Position.Z;
+ 		ball->Position.Z = CollisionBallSetZ;
+ 		ball->CollisionDisabledFlag = true;
+-		if (PinballTable->TiltLockFlag)
++		if (PinballTable->TiltLockFlag) // [table+0x1b2], 0x416138
+ 		{
++			// 0x416141: dispatched through the vtable as 0x40 with 0.1f.
+ 			Message(MessageCode::TKickoutRestartTimer, 0.1f);
+ 		}
+ 		else
+ 		{
+ 			loader::play_sound(SoftHitSoundId, ball, "TKickout1");
++			// 0x41615f pushes 0x4a; the port's own number for it is ControlCollision.
+ 			control::handler(MessageCode::ControlCollision, this);
+ 		}
+ 	}
+@@ -144,6 +266,10 @@ int TKickout::FieldEffect(TBall* ball, vector2* dstVec)
+ void TKickout::TimerExpired(int timerId, void* caller)
+ {
+ 	auto kick = static_cast<TKickout*>(caller);
++	if (ft_accel_enabled() || ft_autoplay_enabled())
++		fprintf(stderr, "DBG-koutrel  %-12s captured=%d ball=%p\n",
++		        kick->GroupName ? kick->GroupName : "?", kick->BallCaputeredFlag,
++		        static_cast<void*>(kick->Ball)); // FTDBG
+ 	if (kick->BallCaputeredFlag)
+ 	{
+ 		kick->BallCaputeredFlag = 0;
+@@ -154,6 +280,14 @@ void TKickout::TimerExpired(int timerId, void* caller)
+ 			kick->Ball->Position.Z = kick->OriginalBallZ;
+ 			kick->Ball->throw_ball(&kick->BallThrowDirection, kick->ThrowAngleMult, kick->ThrowSpeedMult1,
+ 			                  kick->ThrowSpeedMult2);
++			if (ft_accel_enabled() || ft_autoplay_enabled())
++				fprintf(stderr, "DBG-koutthrow %-12s dir=(%.3f,%.3f,%.3f) angMult=%.3f m1=%.3f m2=%.3f"
++				        " -> pos=(%.3f,%.3f,%.3f) bdir=(%.3f,%.3f,%.3f) spd=%.3f\n",
++				        kick->GroupName ? kick->GroupName : "?", kick->BallThrowDirection.X,
++				        kick->BallThrowDirection.Y, kick->BallThrowDirection.Z, kick->ThrowAngleMult,
++				        kick->ThrowSpeedMult1, kick->ThrowSpeedMult2, kick->Ball->Position.X,
++				        kick->Ball->Position.Y, kick->Ball->Position.Z, kick->Ball->Direction.X,
++				        kick->Ball->Direction.Y, kick->Ball->Direction.Z, kick->Ball->Speed); // FTDBG
+ 			kick->ActiveFlag = 0;
+ 			kick->Ball = nullptr;
+ 		}
 diff --git a/SpaceCadetPinball/TLight.cpp b/SpaceCadetPinball/TLight.cpp
 index 86c9674..a317d2c 100644
 --- a/SpaceCadetPinball/TLight.cpp
@@ -2574,10 +2994,10 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..5d19e97 100644
+index e0ccd71..ddfe178 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
-@@ -44,6 +44,44 @@ enum class MessageCode
+@@ -44,6 +44,50 @@ enum class MessageCode
  	TLightFtTmpOverrideOff = -25,
  	TLightFtResetOverride = -26,
  
@@ -2605,6 +3025,12 @@ index e0ccd71..5d19e97 100644
 +	TMagnetFieldEnable = 75,
 +	TMagnetFieldDisable = 76,
 +
++	// Original 0x4e, arm 0x416480 of DRAGON.EXE's TKickout::Message: destroy the ball
++	// the kickout is holding rather than return it -- TBall::Disable at 0x4164bd and
++	// --MultiballCount at 0x4164c5. 78 is the original's own number and nothing else
++	// in this enum uses it.
++	TKickoutDestroyBall = 78,
++
 +	// 84/85/86, raised at the rules as a ball moves through a ramp. The original's
 +	// TRamp sends 84 from its plane branch when the ball changes layer onto the ramp,
 +	// 85 from its 1301 wall and 86 from its 1302 wall; a type-1035 ramp exit sends the
@@ -2622,7 +3048,7 @@ index e0ccd71..5d19e97 100644
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -83,6 +121,39 @@ enum class MessageCode
+@@ -83,6 +127,39 @@ enum class MessageCode
  	TBlockerEnable = 52,
  	TBlockerRestartTimeout = 59,
  
@@ -2662,7 +3088,7 @@ index e0ccd71..5d19e97 100644
  	TGateDisable = 53,
  	TGateEnable = 54,
  
-@@ -131,6 +202,21 @@ enum class MessageCode
+@@ -131,6 +208,21 @@ enum class MessageCode
  	Reset = 1024,
  };
  
@@ -2684,7 +3110,7 @@ index e0ccd71..5d19e97 100644
  class TPinballComponent
  {
  public:
-@@ -143,6 +229,18 @@ public:
+@@ -143,6 +235,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -2703,7 +3129,7 @@ index e0ccd71..5d19e97 100644
  	char UnusedBaseFlag;
  	char ActiveFlag;
  	int MessageField;
-@@ -156,3 +254,8 @@ private:
+@@ -156,3 +260,8 @@ private:
  	float VisualPosNormX;
  	float VisualPosNormY;
  };

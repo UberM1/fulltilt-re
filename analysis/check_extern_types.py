@@ -28,10 +28,20 @@ spellings disagree.
     python3 analysis/check_extern_types.py          # audit src/
     python3 analysis/check_extern_types.py --quiet  # exit 1 on any mismatch, no output
 
+Array extents are part of the type and are compared. They have to be: `extern T x[8];`
+against a `T x[5];` definition links just as silently as a wrong base type, and every
+access past index 4 then walks off the end of the real object into whatever the allocator
+or the linker put next -- which is how a heap block's metadata gets overrun and the abort
+lands in a `free` far away from the write. An extent left unspecified (`extern T x[];`)
+is legal C++ and agrees with any definition, so it is not reported; two *specified*
+extents that differ are.
+
 Limits, stated rather than hidden: it is a regex over declarations, not a parser. It skips
-functions, anything inside a function body (by brace depth), and arrays whose extents are
-spelled differently but mean the same. A clean run means "no two spellings disagree in a
-way this can see", which is weaker than "the types agree".
+functions, anything inside a function body (by brace depth), and extents spelled as
+constant expressions rather than literals (`[GemCount]` against `[9]`) are compared as
+text, so an agreeing pair spelled two ways reads as a mismatch and a disagreeing pair
+spelled one way reads as clean. A clean run means "no two spellings disagree in a way this
+can see", which is weaker than "the types agree".
 """
 
 import re
@@ -46,10 +56,16 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 # unindented and function-local ones are indented, which separates the two without
 # needing to parse: counting braces does not work here, because every one of these
 # files wraps its contents in `namespace dragon {` / `namespace pirates {`.
+#
+# The extents are captured whole -- `[8]`, `[8][4]`, `[]` -- because they are part of the
+# type and a disagreement in them is as silent at link time as a disagreement in the base
+# type, and more dangerous: it overruns the object rather than misreading it.
 DECL = re.compile(
     r"^(?P<extern>extern\s+)?"
     r"(?P<type>(?:const\s+)?[A-Za-z_][\w:]*(?:\s*<[^>]*>)?(?:\s*[*&]+)?)"
-    r"\s+(?P<name>[A-Za-z_]\w*)\s*(?P<tail>[\[=;])"
+    r"\s+(?P<name>[A-Za-z_]\w*)\s*"
+    r"(?P<extents>(?:\[[^\]]*\]\s*)*)"
+    r"(?P<tail>[\[=;])"
 )
 
 # Not variables.
@@ -58,17 +74,38 @@ SKIP_TYPES = {"return", "else", "case", "break", "if", "while", "for", "switch",
               "static", "inline", "void", "do", "goto", "delete", "new", "sizeof"}
 
 
-def normalise(type_text, tail):
+def normalise(type_text):
+    """The base type, without any array extents."""
     t = re.sub(r"\s+", " ", type_text.strip())
     t = t.replace("const ", "")
     t = t.replace(" *", "*").replace(" &", "&")
-    if tail == "[":
-        t += "[]"
     return t
 
 
+def normalise_extents(extents_text, tail):
+    """`[8][4]` -> ('8', '4'); `[]` -> ('',); no array at all -> ()."""
+    text = re.sub(r"\s+", "", extents_text or "")
+    if not text and tail == "[":
+        # Backtracked out of the extents group: an array whose extent the regex did
+        # not reach. Treat it as unspecified rather than as a non-array.
+        return ("",)
+    return tuple(re.findall(r"\[([^\]]*)\]", text))
+
+
+def extents_disagree(a, b):
+    """True only when both spellings say something and say different things.
+
+    `extern T x[];` leaves the extent unspecified, which is legal C++ and agrees with
+    whatever the definition says, so an empty dimension matches any dimension. The
+    *rank* still has to match: `T x[8]` against `T x[8][4]` is a real disagreement.
+    """
+    if len(a) != len(b):
+        return True
+    return any(da and db and da != db for da, db in zip(a, b))
+
+
 def declarations():
-    """{qualified name: {normalised type: [(file, line, is_extern)]}}"""
+    """{qualified name: {(base type, extents tuple): [(file, line, is_extern)]}}"""
     # The brace may be on the same line as the keyword or on the next one -- both
     # spellings occur in these files, and treating the next-line form as an unnamed
     # frame suppressed every declaration in pirates_common.cpp.
@@ -90,7 +127,10 @@ def declarations():
             if not any(f is None for f in stack):
                 m = DECL.match(code)
                 if m and m.group("type").split()[0] not in SKIP_TYPES and "(" not in code:
-                    t = normalise(m.group("type"), m.group("tail"))
+                    t = (
+                        normalise(m.group("type")),
+                        normalise_extents(m.group("extents"), m.group("tail")),
+                    )
                     namespace = "::".join(f for f in stack if f)
                     name = m.group("name")
                     key = f"{namespace}::{name}" if namespace else name
@@ -124,14 +164,28 @@ def main():
         # declared `extern T*&` elsewhere agrees. Only genuine disagreement counts, and
         # `T*` versus `T*&` is genuine -- it yields the address of the field, not the
         # component.
+        #
+        # Extents are the other half: two spellings that share a base type still
+        # disagree if one says `[5]` and the other `[8]`, and an unspecified `[]`
+        # agrees with both. So a name is only reported when some pair of its spellings
+        # genuinely conflicts.
+        keys = sorted(spellings)
+        conflict = any(
+            a[0] != b[0] or extents_disagree(a[1], b[1])
+            for i, a in enumerate(keys)
+            for b in keys[i + 1:]
+        )
+        if not conflict:
+            continue
         bad += 1
         if quiet:
             continue
         print(f"{name}:")
         for t, where in sorted(spellings.items()):
+            spelling = t[0] + "".join(f"[{d}]" for d in t[1])
             for file, lineno, is_extern in where:
                 kind = "extern" if is_extern else "DEFN  "
-                print(f"    {kind} {t:<28} {file}:{lineno}")
+                print(f"    {kind} {spelling:<28} {file}:{lineno}")
     if not quiet:
         print(f"\n{len(decls)} shared names, {bad} with disagreeing spellings")
     return 1 if bad else 0
