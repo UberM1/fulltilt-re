@@ -152,7 +152,7 @@ constexpr MessageCode TimerExpired = MessageCode::ControlTimerExpired;  // binar
 // raises ControlTimerExpired for a finished motion and has no separate code, so
 // settling that is a change to the engine patch and to dragon_part2.cpp's rock
 // handlers as well. Not on the end-of-ball path, so left as it was found.
-constexpr MessageCode NotifyTimerExpired = Msg(0x47);
+constexpr MessageCode NotifyTimerExpired = MessageCode::ControlNotifyTimerExpired;  // binary 0x47
 constexpr MessageCode Collision = MessageCode::ControlCollision;  // binary 0x4a
 constexpr MessageCode DisableMultiplier = Msg(0x4d);
 constexpr MessageCode MissionComplete = Msg(0x4f);
@@ -173,7 +173,7 @@ constexpr MessageCode RampComplete = Msg(0x56);
 // the part's ControlFunc rather than at any component's Message(). So the generic
 // reading in dragon_part2.cpp is the right one -- "the jaw has finished moving",
 // in whichever direction -- and the name here is the local meaning, not the code's.
-constexpr MessageCode JawOpened = Msg(0x3d);
+constexpr MessageCode JawOpened = MessageCode::ControlBlockerMotionDone;  // binary 0x3d
 
 // 0x3a, settled, and the name is exact: it is one arm of the moving-part class's
 // Message override at 0x414f80 (shared, byte for byte, by DRAGON.EXE and CADET.EXE),

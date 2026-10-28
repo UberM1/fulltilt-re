@@ -2574,7 +2574,7 @@ index 317be2c..d271e66 100644
  	{
  		auto& spriteData = ListBitmap->at(index);
 diff --git a/SpaceCadetPinball/TPinballComponent.h b/SpaceCadetPinball/TPinballComponent.h
-index e0ccd71..6e6bb23 100644
+index e0ccd71..5d19e97 100644
 --- a/SpaceCadetPinball/TPinballComponent.h
 +++ b/SpaceCadetPinball/TPinballComponent.h
 @@ -44,6 +44,44 @@ enum class MessageCode
@@ -2622,7 +2622,7 @@ index e0ccd71..6e6bb23 100644
  	TLightGroupNull = 0,
  	TLightGroupStepBackward = 24,
  	TLightGroupStepForward = 25,
-@@ -83,6 +121,34 @@ enum class MessageCode
+@@ -83,6 +121,39 @@ enum class MessageCode
  	TBlockerEnable = 52,
  	TBlockerRestartTimeout = 59,
  
@@ -2648,16 +2648,21 @@ index e0ccd71..6e6bb23 100644
 +	TBlockerSnapClosed = 71,      // original 0x3c, arm 0x415284
 +
 +	// Original 0x3d, raised by the step callback at 0x414f00 once the part's position
-+	// index has reached its target, and delivered to the part's own ControlFunc. 61 is
-+	// the original's own number, which src/dragon_part2.cpp and src/dragon_missions.cpp
-+	// already cast; it is numerically ControlNotifyTimerExpired, a collision those two
-+	// files document and switch on deliberately.
-+	ControlBlockerMotionDone = 61,
++	// index has reached its target, and delivered to the part's own ControlFunc.
++	//
++	// 87, not the original's own 61. Full Tilt's 0x3d and its 0x47 are two different
++	// codes and the port's enum already spends 61 on the second of them
++	// (ControlNotifyTimerExpired, which TLightGroup raises), so keeping the original's
++	// number here made one value mean two things. That was survivable only while the
++	// rules spelled both as raw casts; the moment either was bound to its symbol the
++	// switch had two identical labels and would not compile. The port's numbering is
++	// the port's -- nothing outside it reads these -- so this one moves.
++	ControlBlockerMotionDone = 87,
 +
  	TGateDisable = 53,
  	TGateEnable = 54,
  
-@@ -131,6 +197,21 @@ enum class MessageCode
+@@ -131,6 +202,21 @@ enum class MessageCode
  	Reset = 1024,
  };
  
@@ -2679,7 +2684,7 @@ index e0ccd71..6e6bb23 100644
  class TPinballComponent
  {
  public:
-@@ -143,6 +224,18 @@ public:
+@@ -143,6 +229,18 @@ public:
  	void SpriteSet(int index) const;
  	void SpriteSetBall(int index, vector2i pos, float depth) const;
  
@@ -2698,7 +2703,7 @@ index e0ccd71..6e6bb23 100644
  	char UnusedBaseFlag;
  	char ActiveFlag;
  	int MessageField;
-@@ -156,3 +249,8 @@ private:
+@@ -156,3 +254,8 @@ private:
  	float VisualPosNormX;
  	float VisualPosNormY;
  };
@@ -2708,7 +2713,7 @@ index e0ccd71..6e6bb23 100644
 +	return component ? component->GetComponentType() : 0;
 +}
 diff --git a/SpaceCadetPinball/TPinballTable.cpp b/SpaceCadetPinball/TPinballTable.cpp
-index aa8551a..6bad534 100644
+index aa8551a..2c620b0 100644
 --- a/SpaceCadetPinball/TPinballTable.cpp
 +++ b/SpaceCadetPinball/TPinballTable.cpp
 @@ -6,6 +6,7 @@
@@ -2749,7 +2754,7 @@ index aa8551a..6bad534 100644
  				break;
  			case 1002:
  				LightGroup->List.push_back(new TLight(this, groupIndex));
-@@ -178,15 +184,69 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
+@@ -178,15 +184,72 @@ TPinballTable::TPinballTable(): TPinballComponent(nullptr, -1, false)
  			case 1033:
  				new TTextBox(this, groupIndex);
  				break;
@@ -2817,10 +2822,13 @@ index aa8551a..6bad534 100644
  	pb::InfoTextBox = dynamic_cast<TTextBox*>(find_component("info_text_box"));
 -	pb::MissTextBox = dynamic_cast<TTextBox*>(find_component("mission_text_box"));
 +	pb::MissTextBox = dynamic_cast<TTextBox*>(find_component_opt("mission_text_box"));
++	if (CurrentTable && CurrentTable->UnstuckBoundsExtra)
++		UnstuckBoundsExtra = dynamic_cast<TCollisionComponent*>(
++			find_component_opt(CurrentTable->UnstuckBoundsExtra));
  	control::make_links(this);
  }
  
-@@ -208,6 +268,10 @@ TPinballTable::~TPinballTable()
+@@ -208,6 +271,10 @@ TPinballTable::~TPinballTable()
  		ScoreBallcount = nullptr;
  	}
  	delete LightGroup;
@@ -2831,7 +2839,7 @@ index aa8551a..6bad534 100644
  	while (!ComponentList.empty())
  	{
  		// Component destructor removes it from the list.
-@@ -232,6 +296,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
+@@ -232,6 +299,20 @@ TPinballComponent* TPinballTable::find_component(LPCSTR componentName)
  	return nullptr;
  }
  
@@ -2852,7 +2860,7 @@ index aa8551a..6bad534 100644
  TPinballComponent* TPinballTable::find_component(int groupIndex)
  {
  	char Buffer[40]{};
-@@ -261,7 +339,15 @@ int TPinballTable::AddScore(int score)
+@@ -261,7 +342,15 @@ int TPinballTable::AddScore(int score)
  		if (BonusScore > 5000000)
  			BonusScore = 5000000;
  	}
@@ -2869,7 +2877,7 @@ index aa8551a..6bad534 100644
  	CurScore += addedScore;
  	if (CurScore > 1000000000)
  	{
-@@ -290,9 +376,12 @@ void TPinballTable::tilt(float time)
+@@ -290,9 +379,12 @@ void TPinballTable::tilt(float time)
  {
  	if (!TiltLockFlag && !BallInDrainFlag)
  	{
@@ -2885,7 +2893,7 @@ index aa8551a..6bad534 100644
  		loader::play_sound(SoundIndex3, nullptr, "TPinballTable1");
  		TiltTimeoutTimer = timer::set(30.0, this, tilt_timeout);
  
-@@ -315,6 +404,20 @@ void TPinballTable::port_draw()
+@@ -315,6 +407,20 @@ void TPinballTable::port_draw()
  	}
  }
  
@@ -2906,7 +2914,7 @@ index aa8551a..6bad534 100644
  int TPinballTable::Message(MessageCode code, float value)
  {
  	const char* rc_text;
-@@ -324,25 +427,25 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -324,25 +430,25 @@ int TPinballTable::Message(MessageCode code, float value)
  	case MessageCode::LeftFlipperInputPressed:
  		if (!TiltLockFlag)
  		{
@@ -2936,7 +2944,7 @@ index aa8551a..6bad534 100644
  		}
  		break;
  	case MessageCode::PlungerInputPressed:
-@@ -375,7 +478,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -375,7 +481,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			rc_text = pb::get_rc_string(Msg::STRING131);
  		else
  			rc_text = pb::get_rc_string(Msg::STRING127);
@@ -2946,7 +2954,7 @@ index aa8551a..6bad534 100644
  		if (Demo)
  			Demo->Message(MessageCode::NewGame, 0.0);
  		break;
-@@ -447,8 +551,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -447,8 +554,10 @@ int TPinballTable::Message(MessageCode code, float value)
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
@@ -2959,7 +2967,7 @@ index aa8551a..6bad534 100644
  			LightGroup->Message(MessageCode::TLightGroupLightShowAnimation, 0.2f);
  			auto time = loader::play_sound(SoundIndex1, nullptr, "TPinballTable2");
  			if (time < 0)
-@@ -479,7 +585,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -479,7 +588,8 @@ int TPinballTable::Message(MessageCode code, float value)
  					textboxText = pb::get_rc_string(Msg::STRING131);
  				else
  					textboxText = pb::get_rc_string(Msg::STRING127);
@@ -2969,7 +2977,7 @@ index aa8551a..6bad534 100644
  				break;
  			}
  
-@@ -547,7 +654,8 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -547,7 +657,8 @@ int TPinballTable::Message(MessageCode code, float value)
  			}
  
  			if (textboxText != nullptr)
@@ -2979,7 +2987,7 @@ index aa8551a..6bad534 100644
  			JackpotScoreFlag = false;
  			BonusScoreFlag = false;
  			UnknownP71 = 0;
-@@ -556,8 +664,10 @@ int TPinballTable::Message(MessageCode code, float value)
+@@ -556,8 +667,10 @@ int TPinballTable::Message(MessageCode code, float value)
  		break;
  	case MessageCode::GameOver:
  		loader::play_sound(SoundIndex2, nullptr, "TPinballTable3");
@@ -2992,7 +3000,7 @@ index aa8551a..6bad534 100644
  		EndGameTimeoutTimer = timer::set(3.0, this, EndGame_timeout);
  		break;
  	case MessageCode::Reset:
-@@ -658,6 +768,24 @@ int TPinballTable::BallCountInRect(const RectF& rect)
+@@ -658,6 +771,24 @@ int TPinballTable::BallCountInRect(const RectF& rect)
  	return count;
  }
  
@@ -3017,7 +3025,7 @@ index aa8551a..6bad534 100644
  int TPinballTable::BallCountInRect(const vector2& pos, float margin)
  {
  	RectF rect{};
-@@ -680,8 +808,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
+@@ -680,8 +811,13 @@ void TPinballTable::EndGame_timeout(int timerId, void* caller)
  	}
  	if (table->Demo)
  		table->Demo->Message(MessageCode::GameOver, 0.0);
@@ -3034,10 +3042,14 @@ index aa8551a..6bad534 100644
  
  void TPinballTable::LightShow_timeout(int timerId, void* caller)
 diff --git a/SpaceCadetPinball/TPinballTable.h b/SpaceCadetPinball/TPinballTable.h
-index c407fdc..5551fb9 100644
+index c407fdc..f2425e8 100644
 --- a/SpaceCadetPinball/TPinballTable.h
 +++ b/SpaceCadetPinball/TPinballTable.h
-@@ -10,6 +10,8 @@ class TPlunger;
+@@ -7,9 +7,12 @@ class TBall;
+ struct scoreStruct;
+ class TFlipper;
+ class TPlunger;
++class TCollisionComponent;
  class TDrain;
  class TDemo;
  class TLightGroup;
@@ -3046,7 +3058,7 @@ index c407fdc..5551fb9 100644
  
  struct score_struct_super
  {
-@@ -29,6 +31,7 @@ public:
+@@ -29,6 +32,7 @@ public:
  	TPinballTable();
  	~TPinballTable() override;
  	TPinballComponent* find_component(LPCSTR componentName);
@@ -3054,7 +3066,7 @@ index c407fdc..5551fb9 100644
  	TPinballComponent* find_component(int groupIndex);
  	int AddScore(int score);
  	void ChangeBallCount(int count);
-@@ -38,12 +41,21 @@ public:
+@@ -38,12 +42,21 @@ public:
  	TBall* AddBall(vector2 position);
  	int BallCountInRect(const RectF& rect);
  	int BallCountInRect(const vector2& pos, float margin);
@@ -3076,7 +3088,18 @@ index c407fdc..5551fb9 100644
  	TFlipper* FlipperL;
  	TFlipper* FlipperR;
  	scoreStruct* CurScoreStruct;
-@@ -73,6 +85,14 @@ public:
+@@ -63,6 +76,10 @@ public:
+ 	int PlayerCount;
+ 	int CurrentPlayer;
+ 	TPlunger* Plunger;
++	// Resolved once here from TableRules::UnstuckBoundsExtra, because
++	// control::UnstuckBall runs for every ball on every frame and must not do a linear
++	// scan of ComponentList to find it. Null on Space Cadet.
++	TCollisionComponent* UnstuckBoundsExtra = nullptr;
+ 	TDrain* Drain;
+ 	TDemo* Demo{};
+ 	int XOffset{};
+@@ -73,6 +90,14 @@ public:
  	std::vector<TBall*> BallList;
  	std::vector<TFlipper*> FlipperList;
  	TLightGroup* LightGroup;
@@ -3091,7 +3114,7 @@ index c407fdc..5551fb9 100644
  	float GravityDirVectMult{};
  	float GravityAngleX{};
  	float GravityAnglY{};
-@@ -85,6 +105,12 @@ public:
+@@ -85,6 +110,12 @@ public:
  	bool BonusScoreFlag{};
  	int JackpotScore{};
  	bool JackpotScoreFlag{};
@@ -4057,7 +4080,7 @@ index d36ade4..6369685 100644
  		break;
  	case MessageCode::SetTiltLock:
 diff --git a/SpaceCadetPinball/control.cpp b/SpaceCadetPinball/control.cpp
-index 4b6377c..697faae 100644
+index 4b6377c..4ad3505 100644
 --- a/SpaceCadetPinball/control.cpp
 +++ b/SpaceCadetPinball/control.cpp
 @@ -1,8 +1,10 @@
@@ -4189,24 +4212,49 @@ index 4b6377c..697faae 100644
  }
  
  void control::pbctrl_bdoor_controller(char key)
-@@ -1112,9 +1181,13 @@ void control::cheat_bump_rank()
+@@ -1112,9 +1181,38 @@ void control::cheat_bump_rank()
  
  void control::UnstuckBall(TBall& ball, int dt)
  {
 -	if (!CheckBallInControlBounds(ball, *flip1) &&
 -		!CheckBallInControlBounds(ball, *flip2) &&
 -		!CheckBallInControlBounds(ball, *plunger))
-+	// Space Cadet's rules bind these by the hardcoded group names "a_flip1", "a_flip2"
-+	// and "plunger". Both Full Tilt bonus tables have the flippers but no group named
-+	// "plunger" (Dragon's is named differently, Skulduggery launches with s_launcher1),
-+	// so the tag is null. A component the table does not have cannot bound the ball.
++	// This guard decides whether a ball that is not moving is *legitimately* still --
++	// held on a flipper, or sitting in the plunger lane -- or genuinely stuck. Get it
++	// wrong in the permissive direction and nothing happens; get it wrong here and a
++	// ball resting where it belongs is shoved every 0.6 s and then, past twenty
++	// frames, destroyed and re-served.
++	//
++	// Which is what happened. The plunger clause tested the `plunger` tag -- Space
++	// Cadet's group name, and null on both bonus tables, where the groups are
++	// `s_plunger1` and `s_launcher1`. A null tag fails the clause, so the guard never
++	// protected the lane: on Dragon's Keep a served ball jittered in place over a
++	// 0.160-unit span with its StuckCounter climbing, and at twenty frames it was
++	// destroyed and relaunched. That is the "the ball moves a bit in the launch
++	// cockpit", the "sometimes it does not launch" and the "the new ball launches
++	// itself" all at once. The relaunch a dozen lines down already went through
++	// TPinballTable::Plunger; only the guard was left behind.
++	//
++	// TPinballTable::Plunger is right for every table: TPinballTable's spawn switch
++	// stores both object type 1001 and Skulduggery's 1034 launcher into it, which is
++	// what CADET.EXE's own constructor at 0x41a290 does.
++	//
++	// The third clause is a third flipper. DRAGON.EXE's UnstuckBall (0x42c320) makes
++	// four CheckBallInControlBounds calls where CADET.EXE's (0x42ab40) makes three:
++	// 0x42c32c, 0x42c33c, 0x42c34c and 0x42c35c, on a_flip1, a_flip3, a_flip2 and
++	// s_plunger1. Dragon has four flippers and the rules check three, so "every
++	// flipper" would not be faithful; the name comes from TableRules and is null on
++	// Space Cadet.
++	auto* plungerBounds = static_cast<TCollisionComponent*>(TableG->Plunger);
++	auto* extraBounds = TableG->UnstuckBoundsExtra;
 +	if (!(flip1 && CheckBallInControlBounds(ball, *flip1)) &&
 +		!(flip2 && CheckBallInControlBounds(ball, *flip2)) &&
-+		!(plunger && CheckBallInControlBounds(ball, *plunger)))
++		!(extraBounds && CheckBallInControlBounds(ball, *extraBounds)) &&
++		!(plungerBounds && CheckBallInControlBounds(ball, *plungerBounds)))
  	{
  		if (ball.StuckCounter <= 20)
  		{
-@@ -1125,7 +1198,13 @@ void control::UnstuckBall(TBall& ball, int dt)
+@@ -1125,7 +1223,13 @@ void control::UnstuckBall(TBall& ball, int dt)
  		{
  			ball.Disable();
  			TableG->MultiballCount--;
@@ -5031,10 +5079,10 @@ index 533a49f..965123c 100644
  	static void set(scoreStruct* score, int value);
 diff --git a/SpaceCadetPinball/table_rules.cpp b/SpaceCadetPinball/table_rules.cpp
 new file mode 100644
-index 0000000..5c7d8a4
+index 0000000..7aeb1d6
 --- /dev/null
 +++ b/SpaceCadetPinball/table_rules.cpp
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,190 @@
 +#include "pch.h"
 +#include "table_rules.h"
 +
@@ -5089,7 +5137,8 @@ index 0000000..5c7d8a4
 +//   ScoreComponents, ScoreComponentCount, SimpleComponents, SimpleComponentCount,
 +//   MultiplierIsValue, MovingBlockers, ModeRegister, ModeControl, ModeBeforeComponent,
 +//   ResetRules, BallDrained, CurrentRank, CurrentMode,
-+//   MusicPrefix, MusicTrackCount, SettingsPrefix, RcStrings, RcStringCount
++//   MusicPrefix, MusicTrackCount, SettingsPrefix, RcStrings, RcStringCount,
++//   UnstuckBoundsExtra (trailing, so rows that leave it out get nullptr)
 +static const TableRules TableRegistry[] =
 +{
 +	// The same table in three releases: one set of rules, three data files. The
@@ -5139,6 +5188,8 @@ index 0000000..5c7d8a4
 +#endif
 +		nullptr, nullptr, nullptr, nullptr,
 +		"TABC", 7, "DRAGON", dragon_rc_strings, dragon_rc_strings_count,
++		// The third flipper DRAGON.EXE's UnstuckBall also checks, at 0x42c33c.
++		"a_flip3",
 +	},
 +	{
 +		TableId::Skulduggery, "Skulduggery", "PIRATES.DAT", true, false,
@@ -5224,10 +5275,10 @@ index 0000000..5c7d8a4
 +}
 diff --git a/SpaceCadetPinball/table_rules.h b/SpaceCadetPinball/table_rules.h
 new file mode 100644
-index 0000000..25a48af
+index 0000000..72614ae
 --- /dev/null
 +++ b/SpaceCadetPinball/table_rules.h
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,215 @@
 +#pragma once
 +
 +// A per-table rules interface, which upstream does not have.
@@ -5399,6 +5450,19 @@ index 0000000..25a48af
 +	// than reading at runtime is written down.
 +	const RcString* RcStrings;
 +	size_t RcStringCount;
++
++	// A third component whose bounds also hold a ball legitimately still, beyond the
++	// two flippers and the plunger that control::UnstuckBall always checks.
++	//
++	// The originals' UnstuckBall makes *four* CheckBallInControlBounds calls where
++	// CADET.EXE's makes three: DRAGON.EXE 0x42c320 calls it at 0x42c32c, 0x42c33c,
++	// 0x42c34c and 0x42c35c on the tags at 0x43a714, 0x43a724, 0x43a734 and 0x439d44 --
++	// a_flip1, a_flip3, a_flip2 and s_plunger1 (names from analysis/dump_tags.py).
++	// Dragon's Keep has four flippers and the rules check three of them, so "every
++	// flipper" would not be faithful either; the name goes here instead. Null on Space
++	// Cadet, which has only the two.
++	const char* UnstuckBoundsExtra;
++
 +};
 +
 +// The table in play. Replaces pb::FullTiltMode / pb::FullTiltDemoMode, which

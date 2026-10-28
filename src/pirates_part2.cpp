@@ -488,8 +488,16 @@ extern int collection_cycle_reset;
 extern int mode_scratch_counter;
 
 // DAT_00435d44 -- the last component to score, the target of ScoringComponentReplaced.
-// Owned by the scoring wrappers in pirates_part1.cpp; cleared at ball serve.
-extern int last_scoring_component;
+// Owned by the scoring wrappers in pirates_common.cpp; cleared at ball serve.
+//
+// This said `extern int` until it crashed a real game. A variable's mangled name carries
+// no type, so the mismatch against pirates_common.cpp's `TPinballComponent*` linked in
+// silence, and the clear below became a 32-bit store into an 8-byte pointer: it zeroed
+// the low half and left the high half standing, which is a non-null pointer to nothing.
+// The next component to score then passed NoteScoringComponent's null check and called
+// Message() on the wreckage -- `rdi = 0x5b9d00000000` in the core dump, the low word shot
+// off and the top word intact. One serve, one score, dead.
+extern TPinballComponent* last_scoring_component;
 
 // ---------------------------------------------------------------------------
 // The launcher -- ball serve, skill shot and Shoot Again
@@ -568,7 +576,7 @@ void LauncherControl(MessageCode code, TPinballComponent* caller)
 	// reset, and the player keeps whatever the previous ball set up.
 	if (shoot_again_phase == 0)
 	{
-		last_scoring_component = 0;
+		last_scoring_component = nullptr;
 		info_text_box->MessageField = ModeSkillShot;
 		Handler(FtMessageCode::ModeStarted, nullptr);
 

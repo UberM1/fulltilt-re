@@ -57,7 +57,7 @@ namespace FtMessageCode {
 // so it is delivered to the part's own ControlFunc, like 0x4d, and never to a
 // component's Message(). Received by a_rocka, a_rockb and (in dragon_missions.cpp)
 // a_jaw -- the three multi-frame parts on the table.
-constexpr auto BlockerMotionDone = static_cast<MessageCode>(0x3d);
+constexpr auto BlockerMotionDone = MessageCode::ControlBlockerMotionDone;  // binary 0x3d
 // A ramp component reports the ball leaving it, and completing a full traversal. Dragon
 // uses the second as a scoring trigger so a ramp pays once per pass, not per collision.
 constexpr auto RampExited = static_cast<MessageCode>(0x55);

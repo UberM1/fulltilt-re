@@ -119,6 +119,24 @@ namespace pirates {
 namespace ft {
 constexpr MessageCode Msg(int v) { return static_cast<MessageCode>(v); }
 
+// Read this before adding a constant here. Half of what follows used to be spelled as
+// the *binary's* own message numbers, and that is wrong for every code that crosses the
+// engine boundary -- anything sent to a component the engine implements, and anything
+// arriving from control::handler. Full Tilt's numbering is not the port's, and it is
+// piecewise: the TLight family happens to agree, but the TLightGroup family is +4, the
+// sink and timer codes are +9, and the Control* codes are +10.
+//
+// Spelled as raw numbers, every one of those silently missed. ft::TimerExpired was
+// Msg(0x46) = 70 while the engine sends ControlTimerExpired = 60, so the text box's
+// expiry was never re-spelled as a mode tick and *no Skulduggery mode ever displayed
+// its text*; ft::Collision was 74 against ControlCollision = 63, so no mode's collision
+// arm fired either. The table loaded, served a ball and ran no rules -- "no mission
+// text, no active start mission".
+//
+// So: bind to the port's MessageCode symbol and put the binary's number in a comment,
+// the way dragon_missions.cpp does. Use a raw Msg() only for a code that never leaves
+// this table's own rules -- the mode codes 0x4f..0x56 are the real cases.
+
 // TLight family (delta +0 from upstream).
 constexpr MessageCode LightTurnOff = Msg(0x00);
 constexpr MessageCode LightTurnOn = Msg(0x01);
@@ -155,20 +173,20 @@ constexpr MessageCode LightClearOverride = MessageCode::TLightFtResetOverride;
 // (0x644) and 1600 (0x640). So the float selects which of the group's canned
 // sweeps to run, exactly as the call sites read -- and the port's engine
 // numbering TLightSweepStart = 27 is 0x1b, which agrees.
-constexpr MessageCode LightSweepStart = Msg(0x1b);
+constexpr MessageCode LightSweepStart = MessageCode::TLightSweepStart;  // binary 0x1b
 
 // TLightGroup family (delta +4).
-constexpr MessageCode GroupStepBackward = Msg(0x1c);    // the flippers' "rotate"
-constexpr MessageCode GroupTurnOnAtIndex = Msg(0x27);
-constexpr MessageCode GroupTurnOffAtIndex = Msg(0x28);
-constexpr MessageCode GroupGetOnCount = Msg(0x29);
-constexpr MessageCode GroupGetLightCount = Msg(0x2a);
-constexpr MessageCode GroupTurnOnNext = Msg(0x2d);
-constexpr MessageCode GroupRestartNotifyTimer = Msg(0x2f);
-constexpr MessageCode GroupToggleSplitIndex = Msg(0x31);
+constexpr MessageCode GroupStepBackward = MessageCode::TLightGroupStepBackward;  // binary 0x1c    // the flippers' "rotate"
+constexpr MessageCode GroupTurnOnAtIndex = MessageCode::TLightGroupTurnOnAtIndex;  // binary 0x27
+constexpr MessageCode GroupTurnOffAtIndex = MessageCode::TLightGroupTurnOffAtIndex;  // binary 0x28
+constexpr MessageCode GroupGetOnCount = MessageCode::TLightGroupGetOnCount;  // binary 0x29
+constexpr MessageCode GroupGetLightCount = MessageCode::TLightGroupGetLightCount;  // binary 0x2a
+constexpr MessageCode GroupTurnOnNext = MessageCode::TLightGroupResetAndTurnOn;  // binary 0x2d
+constexpr MessageCode GroupRestartNotifyTimer = MessageCode::TLightGroupRestartNotifyTimer;  // binary 0x2f
+constexpr MessageCode GroupToggleSplitIndex = MessageCode::TLightGroupToggleSplitIndex;  // binary 0x31
 
 // Sinks (delta +9).
-constexpr MessageCode SinkResetTimer = Msg(0x41);
+constexpr MessageCode SinkResetTimer = MessageCode::TSinkResetTimer;  // binary 0x41
 
 // Timer control. mode_timer is a type-1032 TTimer; 0x45 arms it with a float
 // number of seconds (-1.0 cancels) and 0x48 reads the remaining time back in
@@ -193,13 +211,13 @@ constexpr MessageCode SinkResetTimer = Msg(0x41);
 // The names stay FT-only (upstream's TTimer has only TTimerResetTimer), but
 // the semantics are no longer inferred from the ~30 call sites; they are read
 // out of the engine.
-constexpr MessageCode TimerSet = Msg(0x45);
+constexpr MessageCode TimerSet = MessageCode::TTimerResetTimer;  // binary 0x45
 constexpr MessageCode TimerGetRemaining = Msg(0x48);
 
 // Control* block (delta +10, ControlCollision +11, mission codes +13).
-constexpr MessageCode TimerExpired = Msg(0x46);
-constexpr MessageCode NotifyTimerExpired = Msg(0x47);
-constexpr MessageCode Collision = Msg(0x4a);
+constexpr MessageCode TimerExpired = MessageCode::ControlTimerExpired;  // binary 0x46
+constexpr MessageCode NotifyTimerExpired = MessageCode::ControlNotifyTimerExpired;  // binary 0x47
+constexpr MessageCode Collision = MessageCode::ControlCollision;  // binary 0x4a
 constexpr MessageCode MissionComplete = Msg(0x4f);  // "mode changed / mode start"
 constexpr MessageCode MissionStarted = Msg(0x50);   // "mode tick"
 
@@ -249,7 +267,7 @@ constexpr MessageCode BlockerSetPosition = Msg(0x39);
 // Public codes (1000+). 0x400 is sent to the table itself by the game-over
 // controller; the rest of the table-level block belongs to the ball/serve
 // slice and is not used here.
-constexpr MessageCode TableGameOver = Msg(0x400);
+constexpr MessageCode TableGameOver = MessageCode::GameOver;  // binary 0x400
 }  // namespace ft
 
 // Component *type* ids, from vtable slot 0. A distinct namespace from the
