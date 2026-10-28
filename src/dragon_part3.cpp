@@ -988,13 +988,10 @@ void DragonMouthSinkControl(MessageCode code, TPinballComponent* caller)
 		info_text_box->Display(Buffer, 2.0);
 	}
 
-	// The shared tail. "!" is the literal one-character token at .data:0x439a58 that the
-	// text box expands itself (see part1's note on the sword targets); the original also
-	// passes lowPriority = 1 for it and 0 everywhere else, which the port's
-	// TTextBox::Display cannot express. That it really is a one-character string is
-	// settled -- 0x439a58 holds `21 00 00 00` with '"' four bytes later -- but what the
-	// symbol font renders for it still needs DRAGON.DAT.
-	info_text_box->Display("!", 3.5);
+	// The shared tail. "!" is the one-character symbol token at .data:0x439a58 -- see
+	// part1's note on the sword targets -- and the fourth Display argument the original
+	// passes for it is the glyph-font selector, so it goes through DisplayGlyph.
+	info_text_box->DisplayGlyph("!", 3.5);
 
 	snprintf(Buffer, sizeof Buffer, pb::get_rc_string(DragonMsg(Str_HitsLeft)),
 		lite114->MessageField);

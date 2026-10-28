@@ -748,16 +748,17 @@ void QuestSelectTargetControl(MessageCode code, TPinballComponent* caller)
 // stages' lights are steady-on and their targets disabled, so only the live stage can be
 // hit at all.
 //
-// The announcement is literally the one-character string "!" at .data:0x439a58, one of a
-// family ("!", "\"", "#".."####", "%".."(") that the box expands itself; the original
-// also passes a fourth Display argument of 1 here where resource strings pass 0, which
-// is presumably what marks a string as such a token. The port's TTextBox::Display has no
-// such parameter.
+// The announcement is the one-character token "!" at .data:0x439a58, one of a family
+// ("!", "\"", "#".."####", "%".."(") drawn in the table's *symbol* font rather than its
+// text font. The original marks it by passing a fourth Display argument of 1 where
+// resource strings pass 0, and that argument is now expressible: TTextBox::DisplayGlyph
+// queues the message against score::glyph_fontp, which is DRAGON.DAT's "font2" group.
+// Glyph 1 there is a 220x153 bitmap -- the sword -- so drawing it through the text path
+// put a literal exclamation mark on the playfield, which is what a player noticed.
 //
-// Narrowed, not settled: the bytes at 0x439a58 are `21 00 00 00 22 00 00 00`, so these
-// really are one-character NUL-terminated strings on a four-byte stride -- "!" at
-// 0x439a58, '"' (GlyphJackpot) at 0x439a5c -- and not an array of pointers or a
-// misdecoded struct. What "!" renders as still needs DRAGON.DAT's symbol font.
+// Settled: the bytes at 0x439a58 are `21 00 00 00 22 00 00 00`, so these really are
+// one-character NUL-terminated strings on a four-byte stride -- "!" at 0x439a58, '"'
+// (GlyphJackpot) at 0x439a5c -- and not an array of pointers or a misdecoded struct.
 
 // 0x00425750 -- a_spot19 (skeleton: a_spot19Control)
 void SwordTargetControl1(MessageCode code, TPinballComponent* caller)
@@ -767,7 +768,7 @@ void SwordTargetControl1(MessageCode code, TPinballComponent* caller)
 	if (!lite16->light_on())
 		return;
 
-	info_text_box->Display("!", 2.0f);
+	info_text_box->DisplayGlyph("!", 2.0f);
 	SetSwordStage(2);
 	dragon_fire_lights->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
 	AddScoreFor(caller, 0); // 20000
@@ -781,7 +782,7 @@ void SwordTargetControl2(MessageCode code, TPinballComponent* caller)
 	if (!lite17->light_on())
 		return;
 
-	info_text_box->Display("!", 2.0f);
+	info_text_box->DisplayGlyph("!", 2.0f);
 	SetSwordStage(1);
 	dragon_fire_lights->Message(MessageCode::TLightFlasherStartTimed, 2.0f);
 	AddScoreFor(caller, 0); // 50000
@@ -797,7 +798,7 @@ void SwordTargetControl3(MessageCode code, TPinballComponent* caller)
 
 	// Stage -1 retires all three targets; the third hit pays nothing but starts Slay
 	// Dragon, which is why a_spot28 has no scoring table.
-	info_text_box->Display("!", 2.0f);
+	info_text_box->DisplayGlyph("!", 2.0f);
 	SetSwordStage(-1);
 	UnlightSelectedQuest();
 	lite76->Message(MessageCode::TLightFlasherStartTimed, -1.0f);

@@ -241,6 +241,18 @@ null, and `FontFor` falls back to the text font -- which is also the behaviour i
 future DAT has the group but no bitmaps in it, guarded on `Height > 0` so the layout
 loop cannot spin.
 
+**One thing this first pass missed.** The rules reach the symbol font through the named
+token arrays -- `GlyphSpell`, `GlyphWeapon`, `GlyphArmor`, `GlyphJackpot`,
+`GlyphDragonDeath`, `EggGlyphs` -- and all of those were rewired. Four call sites in
+Dragon predate those arrays and pass the token as a bare literal: the three sword targets
+(`src/dragon_part1.cpp`, handlers 0x425750 / 0x4257c0 / 0x425830) and the Slay Dragon tail
+(`src/dragon_part3.cpp`). They still went through `Display`, so glyph 1 -- a 220x153
+bitmap of the sword -- came out as a literal `!` on the playfield, which is exactly what a
+player reported seeing on some hits. The comment at the first of those sites had said the
+original "passes a fourth Display argument of 1 here where resource strings pass 0, which
+is presumably what marks a string as such a token"; it did, and that argument is this
+font selector.
+
 ## 11. TRamp and THole, measured against the originals
 
 Two divergences found by reading `DRAGON.EXE`'s own `TRamp::Collision` (0x4177d0) and
