@@ -19,19 +19,21 @@ You need your own copy of Full Tilt! Pinball (1996). The game data is copyrighte
 is not in this repository; the build produces an engine that reads the original
 `.DAT` files.
 
-**1. Get the engine source and apply the patch.** The engine is upstream
-SpaceCadetPinball at a pinned commit, plus `engine/fulltilt-engine.patch`. It lives in
-`reference/`, which is not tracked:
+**1. Clone, with the submodule.** The engine is a fork of upstream
+[SpaceCadetPinball](https://github.com/k4zmu2a/SpaceCadetPinball), linked in as the
+`reference/` submodule: the `fulltilt` branch of
+[UberM1/SpaceCadetPinball](https://github.com/UberM1/SpaceCadetPinball/tree/fulltilt),
+which is upstream plus the Full Tilt changes as ordinary commits.
 
 ```sh
-git clone https://github.com/UberM1/fulltilt-re
+git clone --recursive https://github.com/UberM1/fulltilt-re
 cd fulltilt-re
-git clone https://github.com/k4zmu2a/SpaceCadetPinball reference
-git -C reference checkout cb9b7b886244a27773f66b0b19fdc2998392565e
-git -C reference apply ../engine/fulltilt-engine.patch
+# already cloned without --recursive?  git submodule update --init
 ```
 
-**2. Build.** With Nix (the tested path):
+`git -C reference diff cb9b7b8` is every change made to upstream.
+
+**2. Build.** Everything runs natively; no Wine. With Nix (the tested path):
 
 ```sh
 nix-build build.nix --no-out-link
@@ -329,9 +331,9 @@ game/       playable 32-bit install from the CD
 docs/       FULLTILT.HLP (the CD's manual) and a rules spec drawn from it
 src/        the reconstructed rules -- ~18,300 hand-written lines plus three generated
             files (the two control tables and the component glue); tracked
-reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
-            (untracked; re-clone with
-            `git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`)
+reference/  the engine, as a git submodule: our fork of upstream SpaceCadetPinball
+            (branch `fulltilt`, based on upstream cb9b7b8),
+            plus the Full Tilt changes; also the oracle for every CADET claim
 ```
 
 ## Acknowledgements
@@ -339,6 +341,10 @@ reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
 The decompilation was driven by [REA](https://github.com/morluto/rea) by morluto. Its
 seeded, headless `decompile-all` over Ghidra produced the pseudocode and listings for
 every rule handler in both tables, which is what everything in `src/` was rebuilt from.
+
+The code was written together with Claude (Anthropic): the reverse engineering, the
+rule reconstruction, the engine changes and the review were done in Claude Code
+sessions, and many of the commits carry its co-author trailer.
 
 ## License
 

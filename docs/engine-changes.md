@@ -8,7 +8,8 @@ nix-build build.nix                       # engine, patched, with the rules link
 test/run_tables.sh                        # Space Cadet, Dragon's Keep, Skulduggery
 ```
 
-The patch is `engine/fulltilt-engine.patch`. Space Cadet's registry rows carry
+The patch is `git -C reference diff cb9b7b8`: `reference/` is a submodule on the
+`fulltilt` branch of our fork of upstream, and every commit after `cb9b7b8` is ours. Space Cadet's registry rows carry
 `ModeBeforeComponent = false` and `MultiplierIsValue = false`, which reduce
 `control::handler` and `TPinballTable::AddScore` to exactly what upstream did, and leave
 `TableControl` and `KeyHandler` null, which keeps its table-level handler and its cheats

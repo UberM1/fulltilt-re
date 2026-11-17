@@ -1,0 +1,4 @@
+[submodule "reference"]
+	path = reference
+	url = https://github.com/UberM1/SpaceCadetPinball
+	branch = fulltilt

@@ -275,7 +275,8 @@ of it does, because the publisher only decompiled what their data exercised.
 
 Scripts live in `analysis/`; each carries a docstring stating why it exists. Everything
 except the hand-written rules regenerates from `binaries/` plus these scripts, which is
-why `decomp/` and the generated skeletons are untracked.
+why `decomp/` is untracked. The generated `src/control_<table>.cpp` and
+`src/<table>_components.cpp` are tracked anyway, so a clone without the binaries builds.
 
 ```
 compare.py           locate the rules region by 16-byte block divergence vs CADET
@@ -429,7 +430,8 @@ proof of behaviour, and §5.7 records a time it was not even a definition.
 
 ### 3.4 The engine patch, and how its contents were decided
 
-`engine/fulltilt-engine.patch` applies to a shallow clone of upstream in `reference/`;
+The engine is the `reference/` submodule, a fork of upstream on its `fulltilt` branch, and
+`git -C reference diff cb9b7b8` is the whole patch;
 `nix-build build.nix` builds it via nixpkgs' own `space-cadet-pinball` derivation (upstream's
 vendored `FindSDL2.cmake` does not cope with a `/nix/store` SDL2).
 
@@ -880,9 +882,8 @@ nix-build build.nix
 test/run_tables.sh
 ```
 
-`reference/` is a shallow clone of upstream
-(`git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`) with
-`engine/fulltilt-engine.patch` applied. The binaries and `.DAT` files are still under
+`reference/` is a submodule: our fork of upstream SpaceCadetPinball with the Full Tilt
+changes on top (`git -C reference diff cb9b7b8`). The binaries and `.DAT` files are still under
 copyright and stay local; `.gitignore` keeps them out of any published history.
 
 ---
