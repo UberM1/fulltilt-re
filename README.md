@@ -11,7 +11,68 @@ of work to decompile FT tables without any symbols... Current state of decompila
 - done, FT Cadet – partially done, FT others – not started."*
 
 # Disclaimer 
-The tables may not be fully functional yet. I haven't had much time to playtest, so there may be bugs or drifts from the original game that I haven't found. If you play it and something looks wrong, please fell free to open an issue with screenshots and logs. You're more than welcome!
+The tables may not be fully functional yet. I haven't had much time to playtest, so there may be bugs or drifts from the original game that I haven't found. If you play it and something looks wrong, please feel free to open an issue with screenshots and logs. You're more than welcome!
+
+## Building and playing
+
+You need your own copy of Full Tilt! Pinball (1996). The game data is copyrighted and
+is not in this repository; the build produces an engine that reads the original
+`.DAT` files.
+
+**1. Get the engine source and apply the patch.** The engine is upstream
+SpaceCadetPinball at a pinned commit, plus `engine/fulltilt-engine.patch`. It lives in
+`reference/`, which is not tracked:
+
+```sh
+git clone https://github.com/UberM1/fulltilt-re
+cd fulltilt-re
+git clone https://github.com/k4zmu2a/SpaceCadetPinball reference
+git -C reference checkout cb9b7b886244a27773f66b0b19fdc2998392565e
+git -C reference apply ../engine/fulltilt-engine.patch
+```
+
+**2. Build.** With Nix (the tested path):
+
+```sh
+nix-build build.nix --no-out-link
+# -> /nix/store/...-space-cadet-pinball-fulltilt-dev/bin/SpaceCadetPinball
+```
+
+Without Nix, build `reference/` the way upstream does: CMake plus SDL2 and SDL2_mixer
+development packages, e.g. `cmake -S reference -B build && cmake --build build`. The
+patched `CMakeLists.txt` compiles `../src/*.cpp`, so keep `reference/` inside this
+checkout. This path has not been tested.
+
+**3. Lay out the game data.** Copy the Windows 95 install from the CD so it looks like
+this:
+
+```
+game/WIN95/FULLTILT/
+  CADET/    CADET.DAT   SOUND/
+  DRAGON/   DRAGON.DAT  SOUND/
+  PIRATE/   PIRATES.DAT SOUND/
+```
+
+**4. Play.**
+
+```sh
+test/play.sh dragon     # Dragon's Keep
+test/play.sh pirate     # Skulduggery
+test/play.sh cadet      # Full Tilt! Space Cadet
+```
+
+`play.sh` builds with Nix, stages each table in its own directory under `.play/` (the
+engine picks the first DAT it finds, so tables must not share a directory), and keeps a
+session log at `.play/<TABLE>/session.log`. Attach that log to any issue you open.
+
+To run the binary by hand instead, start it from a directory that holds only one
+table's `.DAT` and its `SOUND/` folder.
+
+Controls are upstream's defaults: `Z` / `/` flippers, `Space` plunger, `X` / `.` / `↑`
+nudge, `F2` new game, `F3` pause. They can be changed from the game's menu.
+
+`test/run_tables.sh` is the automated check: it builds the engine and loads all three
+tables headless.
 
 ## Why this is tractable
 
