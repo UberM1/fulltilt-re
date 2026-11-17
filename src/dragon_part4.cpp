@@ -796,8 +796,8 @@ void TableControl(MessageCode code)
 		shoot_again_flag = 3; // 0x434d2c
 		lite40->Message(MessageCode::TLightResetAndTurnOn, 0.0); // 0x13
 
-		// [TableG+0x172] / [TableG+0x17a]. This runs after the engine's own NewGame body
-		// has set JackpotScore = 500,000, so the table's values win, as in the original.
+		// [TableG+0x172] / [TableG+0x17a], over the 20,000 the table's Reset arm
+		// (0x419e14) left in both.
 		TableG->JackpotScore = 1000000;
 		TableG->SuperJackpotScore = 2500000;
 		info_text_box->MessageField = ModeNone; // [0x439d1c]+6 = 1, between balls

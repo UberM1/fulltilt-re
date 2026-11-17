@@ -1116,3 +1116,64 @@ Found by checking `SDL_GetError` after each stage of the frame: only
 `ImGui_ImplSDL2_NewFrame` set it. The backend now calls `SDL_CaptureMouse` only when the
 wanted state changes, and clears the error when the call is refused. The same 40 s run logs
 one line, raised once during start-up by a call that has not been identified.
+
+## 32. `TLight`: the `ActiveFlag` gate, and `Reset` re-arms it
+
+`TLight::Message` (0x40a490, the same bytes at the same address in `CADET.EXE`,
+`DRAGON.EXE` and `PIRATES.EXE`) opens with
+`cmp byte [ecx+5],0 / jne dispatch; cmp eax,0x402 / je; cmp eax,0x3fe / je; xor eax,eax; ret 8`:
+a light whose `ActiveFlag` is clear ignores every message, and answers 0, except Reset
+(0x402) and PlayerChanged (0x3fe). The virtual `Reset` (0x40a310, vtable +0x18), which the
+constructor (0x40a21f) and both of those arms call, starts with `mov byte [esi+5],1`
+(0x40a31c). Upstream had neither: every light dumped `ActiveFlag` 0, and the lights Dragon's
+Keep switches off between dragon fights (v_lite113..115, cleared in the table's NewGame and
+GameOver arms and by the disarm at 0x424050, set again by the arm at 0x424130) still answered the rules and the
+light-group animations. Both are now in `TLight.cpp`, ungated: Space Cadet has the same code,
+and nothing on 3D Pinball clears a light's `ActiveFlag`, so it never takes the early return
+there.
+
+## 33. `MultiballFlag` and the 500,000 jackpot are Space Cadet's rules, not the engine's
+
+Upstream's `TPinballTable::Message` set `MultiballFlag = true; JackpotScore = 500000` in its
+StartGamePlayer1 arm for every Full Tilt table. The writers of table +0x19a in the
+originals are: the table constructor (0x41a316, 0) and the table's Reset arm (0x419e5e, 0)
+in all three executables, plus `CADET.EXE`'s table-level rule handler 0x422c10, whose 0x3f6
+(NewGame) arm at 0x422c4d stores 500,000 into +0x172 and 1 into +0x19a. `DRAGON.EXE` and
+`PIRATES.EXE` have no third writer and no reader, so on the bonus tables the flag stays 0
+(confirmed against both under Wine by `test/restdump`). The readers are Space Cadet's
+rules only (`CADET.EXE` 0x42433d and 0x424637, `control.cpp`'s hyperspace and sink
+handlers). The two stores moved to `control::table_control_handler`, on NewGame, behind the
+same Space Cadet check as the rest of that body and `pb::FullTiltMode` (3D Pinball has no
+multiball). A rest dump of Full Tilt Space Cadet still shows `multiball_flag` 1 and
+`jackpot_score` 500,000.
+
+## 34. The table's Reset arm sets `SuperJackpotScore` to 20,000
+
+The table's Reset arm (0x419d82, identical in all three executables) loads
+`mov ecx,0x4e20` at 0x419e14 and stores it into both +0x172 (`JackpotScore`) and +0x17a
+(`SuperJackpotScore`, 0x419e3a), with 0 into their flags +0x176/+0x17e. Upstream set only
+`JackpotScore`. Dragon's Keep overwrites both in its own NewGame arm; Skulduggery left the
+port's super jackpot at 0 where the original has 20,000. Nothing on Space Cadet reads it,
+so the store is ungated.
+
+### Not changed: two component groups the originals have and the port does not
+
+The originals' component list starts with two unnamed `TComponentGroup`s more than the
+port's. They are made by the table constructor (`new(0x4e)` + 0x413670 with group 0, at
+0x41a366 and 0x41a38c, in all three executables) and stored at table +0x42 and +0x46. The
+object loader appends every type-1003 flipper to +0x42's list (0x41a5a1) and every 1004 to
++0x46's (0x41a5f8), and the table's flipper-input arms (0x419638..0x4196a7) send extend /
+retract to the group instead of to a flipper. The port reaches the same flippers through
+`TPinballTable::MessageFlippers`, which walks `FlipperList` by type code under the same
+`TiltLockFlag` test, so the two groups would add list entries and nothing else.
+
+### Not changed: v_lite114's `ToggledOffFlag`
+
+After 32 the inactive v_lite113..115 freeze whatever state the new-game light show left
+them in: the table's NewGame arm starts `TLightGroupLightShowAnimation` on the all-lights
+group (`start_animation` puts every light in `TurnOffTimed`, then about 30% get a random
+`TurnOnTimed`) and only then does Dragon's NewGame arm clear their `ActiveFlag`, so the
+light show's own cleanup later cannot reach them. Which of the three got a `TurnOnTimed`
+depends on the `rand()` stream (the originals' TLightGroup animations call the MSVC `rand`
+at 0x42c4cb; the port uses the C library's), so v_lite114 differs only through the random
+number generator, which is handled separately.
