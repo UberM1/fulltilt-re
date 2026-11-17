@@ -271,3 +271,10 @@ reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
             (untracked; re-clone with
             `git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`)
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). The engine patch builds on
+[SpaceCadetPinball](https://github.com/k4zmu2a/SpaceCadetPinball), also MIT.
+The license covers this repository's code and notes only: the Full Tilt! game
+data and executables are copyrighted and are not included or redistributed.
