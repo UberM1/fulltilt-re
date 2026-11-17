@@ -14,11 +14,11 @@ concrete types (TLight, TSound, TLightGroup) for the shared components come from
 """
 
 import sys,re,pathlib
-sys.path.insert(0,'analysis')
+ROOT=pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0,str(ROOT/'analysis'))
 from dump_simple import simple_components
 import gen_control as g
 
-ROOT=pathlib.Path("/home/ubr/fulltilt-re")
 src=ROOT/"src"
 # Both spellings: a slice that has not been retyped yet says `extern T* x;`, and
 # one that has says `extern T*& x;`. Matching only the first made this generator
