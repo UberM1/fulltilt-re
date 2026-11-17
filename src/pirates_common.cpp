@@ -242,13 +242,12 @@ bool AnyHighScore()
 	return pb::chk_highscore();
 }
 
-// 0x42dd0b -- the 15-bit LCG and the open-coded `(rand() * n) >> 15`. MSVC's rand()
-// constants, reproduced rather than deferring to the host's so a seed replays.
+// 0x42dd0b -- the C runtime's rand() and the open-coded `(rand() * n) >> 15`. The
+// draw comes from the process-wide EngineRand() (pch.h) the engine's random calls also
+// use, as in PIRATES.EXE where both call 0x42dd0b on one seed.
 int Rnd(int n)
 {
-	static unsigned int seed = 1;
-	seed = seed * 214013u + 2531011u;
-	const int r = static_cast<int>((seed >> 16) & 0x7fff);
+	const int r = EngineRand();
 	return n > 0 ? (r * n) >> 15 : 0;
 }
 

@@ -7,6 +7,11 @@
 # runs the engine headless with FT_RESTDUMP set, and waits for the hook in
 # reference/SpaceCadetPinball/FtRestDump.cpp to write OUT.jsonl and exit.
 #
+# -noaudio: the originals run under Wine with no sound device, and without one Full
+# Tilt loads no wave and every sound duration is 0 -- which times the new-game light
+# show and so how many rand() draws precede the first pick. The port does the same
+# when no mixer is open (docs/engine-changes.md section 32).
+#
 # Environment: FULLTILT_SCP_BIN (skip the build), FULLTILT_GAME_DIR,
 # FT_RESTDUMP_DELAY (seconds the ball sits in the plunger lane first; default 2),
 # FULLTILT_DUMP_TIMEOUT (default 60 s).
@@ -48,7 +53,7 @@ rm -f -- "$out"
 		XDG_CONFIG_HOME="$rundir/home/.config" \
 		SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
 		FT_RESTDUMP="$out" \
-		timeout "${FULLTILT_DUMP_TIMEOUT:-60}" "$bin"
+		timeout "${FULLTILT_DUMP_TIMEOUT:-60}" "$bin" -noaudio
 ) >"$rundir/stdout.log" 2>"$rundir/stderr.log" || {
 	status=$?
 	echo "engine exited with $status before dumping; logs in $rundir" >&2

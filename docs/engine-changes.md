@@ -1177,3 +1177,50 @@ light show's own cleanup later cannot reach them. Which of the three got a `Turn
 depends on the `rand()` stream (the originals' TLightGroup animations call the MSVC `rand`
 at 0x42c4cb; the port uses the C library's), so v_lite114 differs only through the random
 number generator, which is handled separately.
+
+## 35. One rand() for engine and rules; the light show's short loop; no-audio durations
+
+Three things decide what the first random pick of a game gets, and the port had all
+three differently from the originals. All are gated on `pb::FullTiltMode`; `CADET.EXE`
+has the same code at the same addresses, so Full Tilt Space Cadet changes with the bonus
+tables and only `PINBALL.DAT` keeps upstream's behaviour.
+
+**One generator.** Each Full Tilt EXE links the C runtime's `rand()` statically
+(`DRAGON.EXE` 0x42c4cb, `PIRATES.EXE` 0x42dd0b, `CADET.EXE` 0x42acdb): MSVC's LCG
+(`seed = seed * 0x343fd + 0x269ec3; return (seed >> 16) & 0x7fff`) on one seed
+(0x43bc74 / 0x43d23c / 0x439b1c) that is 1 in the file's `.data` and that nothing but
+`rand()` writes -- no `srand` call exists. The engine's 17 call sites are at the same
+addresses in all three EXEs: `TBall` throw (0x402a0b, 0x402a45), `TLightGroup::Message`
+(0x40b412, 0x40b440, 0x40b4f3, 0x40b582, 0x40b646), `TDemo` (0x417d71 ... 0x418237),
+`TPlunger` collision (0x418eb2, 0x418f14) and the table layer's field effect (0x4193bb).
+The rules call the same function: Dragon 15 more sites (0x42351b ... 0x4280e2), Skulduggery
+9 (0x4236b6 ... 0x42b576). Upstream used the host `rand()` and `RandFloat()`, and the rules
+each kept a private copy of the LCG, so the rules' first draw was always the sequence's
+first value. Now `EngineRand()` / `RandFloat()` (pch.h, defined in pb.cpp) are that one
+generator on Full Tilt data, with `RandFloat` dividing by 0x7fff as the EXEs do (they
+multiply by 3.051851e-05), and `DragonRand15` / pirates' `Rnd` call it.
+
+**The light show and game-over animations skip the last light.** `TLightGroup::Message`
+iterates `for (i = 0; i < count - 1; i++)` in both (0x40b407..0x40b483 and
+0x40b4cc..0x40b52c, identical in all three EXEs); upstream iterates every light. The
+table's light group is every `TLight` (110 on Dragon, 149 on Skulduggery), so the new-game
+light show draws for 109 / 148 lights.
+
+**Durations without a wave are 0.** Full Tilt's sound loader zeroes a sound's duration
+(0x40ccd1) and writes it from the wave only after the wave loads (0x40cd4c, after
+0x41e710, which returns 0 at once when the WaveMix session at 0x4396dc is not open).
+`play_sound` returns that duration, and the new-game arm uses it unchecked as the
+light-show timer (0x419a47..0x419a5c). Upstream computes the duration from the WAV header
+whether or not the wave loaded. Now on Full Tilt data a sound whose wave did not load has
+duration 0. With sound working nothing changes.
+
+**Measured.** Under Wine without a sound device (the rest-dump harness), polling
+`DRAGON.EXE`'s seed shows: seed 1 until the new game; 134 draws (the light show over 109
+lights) while `LightShowTimer` is set; the timer fires on the next tick; one draw, the
+quest pick, `(r * 5) >> 15` with r = 13966 = slot 2 (quest 6); nothing more until the ball
+is fed 0.96 s later. `PIRATES.EXE` shows 185 draws (148 lights) before its timer clears.
+The port run with `-noaudio` (`test/restdump/native_dump.sh` now passes it, to match) makes
+the same pick, and `a_kout2` / `a_rockb` `MessageField` and the flashing quest light
+(v_lite73, not v_lite71) agree with the originals. With audio the light show runs for its
+sound's length on both sides, so the first pick comes later in the sequence. Once the ball
+moves, physics draws diverge and later picks are not expected to match.

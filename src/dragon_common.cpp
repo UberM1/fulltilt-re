@@ -168,14 +168,13 @@ void FormatWithValue(char* out, size_t size, const char* labelOrFormat, int valu
 	std::snprintf(out, size, labelOrFormat, static_cast<long>(value));
 }
 
-// 0x42c4cb -- the 15-bit LCG the table's "random in [0,n)" is built on. The 1996
-// build links MSVC's rand(), whose constants these are; reproduced rather than
-// calling the host rand() so a seed replays the same game.
+// 0x42c4cb -- the C runtime's rand(), which the engine's own random calls share.
+// It is the one process-wide EngineRand() (pch.h): a private seed here would hand the
+// first quest pick the sequence's first value, where the original's pick sees
+// whatever the engine drew before it.
 int DragonRand15()
 {
-	static unsigned int seed = 1;
-	seed = seed * 214013u + 2531011u;
-	return static_cast<int>((seed >> 16) & 0x7fff);
+	return EngineRand();
 }
 
 // 0x423870 -- the super jackpot's accrual, with the clamp its sibling AddToJackpot

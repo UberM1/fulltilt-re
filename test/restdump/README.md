@@ -21,7 +21,11 @@ env -u LD_LIBRARY_PATH test/restdump/native_dump.sh pirate OUT/native-pirate.jso
 ```
 
 The script builds with Nix (or takes `FULLTILT_SCP_BIN`), stages the table in its own
-directory and runs the engine headless with `FT_RESTDUMP=<out>`. The hook
+directory and runs the engine headless with `FT_RESTDUMP=<out>` and `-noaudio`. The
+originals run without a sound device (section 2), and without one Full Tilt loads no
+wave, so every sound duration is 0, including the new-game light show's. That sets how
+many `rand()` draws come before the first pick (docs/engine-changes.md section 35), so
+the port has to run without audio as well. The hook
 (`reference/SpaceCadetPinball/FtRestDump.cpp`, called from `pb::frame`, inert without the
 variable) waits until exactly one ball is in play, still, in the plunger-lane strip, for
 `FT_RESTDUMP_DELAY` seconds of game time (default 2), writes the file and exits. Two runs
