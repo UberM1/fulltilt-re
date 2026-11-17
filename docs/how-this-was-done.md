@@ -821,8 +821,7 @@ Skulduggery counts and pays even its explicitly lost mode, so this reads as the 
   `pb::AlternateBallSkin` and nothing reads it, because `GroupData` discards each ball
   state's second bitmap (§5.5) and `TBall` does not consult the flag.
 - The quote scroll is queued as one pass; the original loops until a key stops it.
-- `TDrain`'s tilt arm (0x418792, which kills its timer) and `TPinballTable`'s own
-  `PlayerChanged` arm (0x419abb) are not ported.
+- `TPinballTable`'s own `PlayerChanged` arm (0x419abb) is not ported.
 - `TDiverter`'s back-face sprite kick (0x41bc50) is not reproduced.
 - The Full Tilt engine's announcement dispatcher is stood in for by the engine's identical
   Space Cadet strings, minus its Music/Sound On/Off pause texts.

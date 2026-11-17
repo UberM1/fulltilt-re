@@ -435,7 +435,7 @@ void AwardExtraBall(float t);       // 0x004239d0
 void LightShipwreckMystery(float t); // 0x00423a30, lights v_lite529
 float BrigCaptureBall(float t);     // 0x00424210
 float CheckWindsComplete(float t);          // 0x00424290, non-zero once W-I-N-D-S completed
-float BumpMultiplier(float t);      // 0x00424350, ScoreMultiplier = fathoms + 1
+float BumpMultiplier(float t);      // 0x00424350, all six fathoms: ScoreMultiplier = 7
 void RaiseShipDropBank();            // 0x00424440
 void DropAndDisableShipTargets();   // 0x004244a0
 int ArmNextTreasureX();             // 0x00424580
@@ -1525,10 +1525,11 @@ void CannonRampControl(MessageCode code, TPinballComponent* caller)
 //
 // The ship wire ramp. Outside Attack Ship it is a plain 100,000; inside, it captures the
 // ship: the five drop targets go back up, the scratch counter advances, "Ship Captured"
-// shows, and the multiplier gains a fathom.
+// shows, and the multiplier is maxed.
 //
-// Against the manual: the multiplier is *incremented*, not maxed -- FUN_00424350 sets
-// ScoreMultiplier to fathoms + 1 after lighting one more fathom light. The Attack Ship arm
+// As the manual says, the capture maxes the multiplier: FUN_00424350 sends 0xf to the
+// whole fathom_light_group, which lights all six fathoms, and sets ScoreMultiplier to
+// fathoms + 1 = 7 (see BumpMultiplier in pirates_awards.cpp). The Attack Ship arm
 // also pays no score at all, which is why the component's single 100,000 entry is only ever
 // reachable outside the mode.
 void ShipWireRampControl(MessageCode code, TPinballComponent* caller)

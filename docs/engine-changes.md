@@ -1011,8 +1011,8 @@ behaviour beyond the swap (`TGate`, `TWall`, `TTimer`, `TFlagSpinner`, `THole`) 
 additionally gated on it. `PINBALL.DAT` is unchanged. `CADET.DAT` gets the same per-player
 fields `CADET.EXE` has.
 
-Not ported: `TPinballTable`'s own `PlayerChanged` arm (0x419abb), and `TDrain`'s tilt arm
-(0x418792, which kills the drain's timer).
+Not ported: `TPinballTable`'s own `PlayerChanged` arm (0x419abb). (`TDrain`'s tilt arm,
+0x418792, is section 45.)
 
 ## 25. Per-table high-score keys
 
@@ -1258,3 +1258,49 @@ DirectSound, so the original skipped its light show and took a plunger pull 1.4 
 Ours, with the dummy driver, waited out the light-show WAV (about 4 s on Space Cadet) and
 ignored that pull, because the plunger ignores presses until a ball is in play
 (0x41898a: `[table+0x192]`). Run ours with `-noaudio` to compare against silent Wine.
+
+## 44. Full Tilt's text-box queue: an untimed message clears it
+
+Upstream's `TTextBox::Display` appends an untimed (`-1`) message behind whatever timed
+messages are queued, so it waits for them, and its timer callback tells the rules
+(`ControlTimerExpired`) on every expiry. The Full Tilt engine does neither. Display 0x41de40:
+
+- same text and font as the last queued message (0x41de55..0x41dea5): both untimed, nothing
+  happens; new one timed, the last message takes the new time and the queue is rescheduled
+  without a redraw (0x41dee3..0x41df06);
+- an untimed head is dropped by any new message (0x41df19..0x41df33), and an untimed new
+  message drops the whole queue (0x41df38..0x41df4c, `call 0x41d8e0`), so it shows at once;
+- the message is appended, the queue rescheduled (0x41dd30) and the head drawn (0x41db00).
+
+The scheduler 0x41dd30 kills and re-arms the timer each time; an untimed head gets no timer
+at all; heads more than 2 s past their end are dropped; the timer is the head's remaining
+time but at least 0.25 s; and only an empty queue sends control code 0x46 (ControlTimerExpired)
+with the box as caller (0x41dddb), after which the box is erased if the rules queued nothing
+(0x41d930). The timer callback 0x41dce0 drops the head and reschedules.
+
+`TTextBox::FtDisplay` / `FtSchedule` / `FtTimerExpired` / `FtClearQueue` port these four, and
+upstream's `Draw` is split into its scheduling half and `Render` (the drawing half) so both
+paths share the drawing. The rules' `AnnouncementPending` guard on the text box's
+`ControlTimerExpired` (dragon_missions.cpp, pirates_modes.cpp) is now always true when it is
+tested, as it was in the originals, which test +0x5e the same way. `Clear(true)` (the
+port's one-pass quote scroll) reschedules through `FtSchedule` on Full Tilt data.
+
+Gating: CADET.EXE has the same code at the same addresses (0x41d800..0x41e160 differ only in
+data and call targets), so this is the Full Tilt engine's behaviour; it is gated on
+`pb::FullTiltMode` and 3D Pinball data keeps upstream's queue. The rest-state comparison is
+unchanged (0 differences on both tables), and the start-of-game text sequence on both bonus
+tables is the same as before (the opening texts are all untimed or a single timed run).
+
+## 45. TDrain's SetTiltLock arm
+
+TDrain 0x418770 has a third arm the port lacked: 0x3f3 (SetTiltLock, 0x418777) jumps to
+0x418792..0x4187a9, which kills the end-of-ball timer and returns -- no per-player reset and
+BallInDrainFlag untouched, unlike Reset (0x4187be..0x4187dc). Dragon's Keep's ball save sends
+exactly this to its drain (0x424973 `push 0x3f3`) before relaunching the saved ball itself;
+src/dragon_part4.cpp sent Reset instead, which also ran 0x413550 on the drain and wiped the
+bonus the Resistance-to-Fire spell keeps in the drain's MessageField, for every player. With
+SetTiltLock and no engine arm the drain's timer would survive and serve a second ball.
+
+Gated on `pb::FullTiltMode`; CADET.EXE has the same arm at the same address. A run of the
+`FT_AUTODRAIN` harness on Dragon's Keep with a sentinel in the drain's MessageField shows one
+relaunch either way and the sentinel kept (it was zeroed before).

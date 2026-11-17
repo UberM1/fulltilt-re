@@ -2142,10 +2142,12 @@ void WizardsFuryController(MessageCode code, TPinballComponent* caller)
 	// re-rolled by Dragon_a_sink4_Control):
 	//   0 extra ball | 1 max weapons (all 4 lights, multiplier 5) |
 	//   2 max armor  | 3 jackpot     | 4 1,000,000
-	// CONFIRMED disagreement with the manual: the award is re-rolled uniformly
-	// by the well itself. The spell-target handler (0x424d20) has no mode == 8
-	// case at all, so "hitting a spell target sets the mystery award" is simply
-	// not implemented and the manual's fixed per-target mapping does not exist.
+	// The well re-rolls the award after paying it, and in Wizard's Fury each spell
+	// target sets it: the shared tail 0x424d20 has no mode 8 case, but every
+	// target's own handler does (0x424e6c `cmp [info_text_box+0x6],0x8`) and writes
+	// its fixed ordinal into a_sink4->MessageField -- a_spot4/5/6/7/22 = 0..4
+	// (SpellTargetControl4.. in dragon_part1.cpp). So the manual's per-target mapping
+	// is implemented.
 }
 
 // ---------------------------------------------------------------------------

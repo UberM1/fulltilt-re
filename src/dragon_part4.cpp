@@ -457,11 +457,12 @@ void BallDrainControl(MessageCode code, TPinballComponent* caller)
 	{
 		drain_phase = 3;
 
-		// Reset, not SetTiltLock: Skulduggery's drain sends 0x402 to its own drain at
-		// the equivalent point, and 0x402 is upstream's Reset under the public-code
-		// shift. That kills the drain's pending timer and clears BallInDrainFlag, which
-		// is exactly what this path needs -- the drained ball must not count.
-		drain->Message(MessageCode::Reset, 0.0);
+		// SetTiltLock, not Reset: 0x424973 `push 0x3f3` to the drain. TDrain's 0x3f3 arm
+		// (0x418792) only kills the end-of-ball timer the drained ball armed, so the
+		// saved ball is relaunched once, by the drain_phase switch below. Reset (0x402)
+		// would also run 0x413550 on the drain and zero its MessageField and per-player
+		// slots -- the bonus the Resistance-to-Fire spell holds there for every player.
+		drain->Message(MessageCode::SetTiltLock, 0.0);
 
 		// TPinballTable+0x6a is BallInDrainFlag, confirmed from the engine: 0x41a230 is
 		// TPinballTable::tilt, and its guard `if ([this+0x1b2] == 0 && [this+0x6a] == 0)`

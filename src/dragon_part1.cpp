@@ -400,8 +400,9 @@ void SpellTargetControl4(MessageCode code, TPinballComponent* caller)
 	if (info_text_box->MessageField == ModeWizardsFury)
 	{
 		// Wizard's Fury re-arms the Well Sink's mystery award instead of scoring: the
-		// ordinal picked here is what a_sink4 pays out later (0 = 1,000,000,
-		// 1 = jackpot, 2 = max weapons, 3 = max armor, 4 = extra ball).
+		// ordinal picked here is what a_sink4 pays out later (0 = extra ball,
+		// 1 = max weapons, 2 = max armor, 3 = jackpot, 4 = 1,000,000 -- the well's
+		// switch in dragon_part3.cpp, and strings 3039..3043 in the same order).
 		well_sink->MessageField = 0;
 		tabc05wave->Play(caller, "SpellTargetControl");
 		info_text_box->Display(pb::get_rc_string(DragonMsg(Str_MysteryAward0 + 0)), 2.0f);
@@ -739,14 +740,12 @@ void QuestSelectTargetControl(MessageCode code, TPinballComponent* caller)
 //
 // so both outcomes of the second compare return and the body runs iff +0x46 != 0. The
 // Fire Ridge handler (0x426964) inlines light_on() as the OR of +0x42, +0x4e and +0x46,
-// which places +0x46 among its three fields but does not name it -- that still needs
-// the Full Tilt TLight layout, since the 1996 build's flags are ints four bytes apart
-// where upstream's are bools.
-//
-// light_on() is kept here because it is a superset of the real test and the two agree in
-// practice: SetSwordStage flashes the live stage's light indefinitely while completed
-// stages' lights are steady-on and their targets disabled, so only the live stage can be
-// hit at all.
+// which places +0x46 among its three fields. The Full Tilt TLight layout names it:
+// TLight::Message case 3 returns +0x46, case 2 returns +0x42, and light_on() is
+// +0x42 | +0x4e | +0x46 = LightOnFlag | ToggledOnFlag | FlasherOnFlag
+// (test/restdump/wine_probe.py's LIGHT_FIELDS, checked against the live originals). So
+// the test is FlasherOnFlag alone: a stage light that is steady-on but not flashing
+// does not arm its target.
 //
 // The announcement is the one-character token "!" at .data:0x439a58, one of a family
 // ("!", "\"", "#".."####", "%".."(") drawn in the table's *symbol* font rather than its
@@ -765,7 +764,7 @@ void SwordTargetControl1(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::ControlCollision || info_text_box->MessageField != ModeNormal)
 		return;
-	if (!lite16->light_on())
+	if (!lite16->FlasherOnFlag) // 0x425767 [lite16+0x46]
 		return;
 
 	info_text_box->DisplayGlyph("!", 2.0f);
@@ -779,7 +778,7 @@ void SwordTargetControl2(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::ControlCollision || info_text_box->MessageField != ModeNormal)
 		return;
-	if (!lite17->light_on())
+	if (!lite17->FlasherOnFlag) // 0x4257d7 [lite17+0x46]
 		return;
 
 	info_text_box->DisplayGlyph("!", 2.0f);
@@ -793,7 +792,7 @@ void SwordTargetControl3(MessageCode code, TPinballComponent* caller)
 {
 	if (code != MessageCode::ControlCollision || info_text_box->MessageField != ModeNormal)
 		return;
-	if (!lite18->light_on())
+	if (!lite18->FlasherOnFlag) // 0x425847 [lite18+0x46]
 		return;
 
 	// Stage -1 retires all three targets; the third hit pays nothing but starts Slay

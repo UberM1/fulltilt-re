@@ -623,10 +623,10 @@ Hint 3060. Start 200,000. `FUN_00424440()` re-raises the five ship drop targets;
   "Ship Captured", `FUN_00424350()`. ✓ manual.
 * `0x47` on `fathom_light_group` prints string **3017** (`0xbc9`) "Ship Sunk".
 
-> **Disagreement [C].** The manual says the ship wire ramp **maxes** the table multiplier.
-> `FUN_00424350` lights **one more** fathom light and sets `ScoreMultiplier =
-> fathom_on_count + 1`. It is an *increment*, not a max. (The anchor-chain fathom lights
-> are the multiplier track — §4.)
+> **Agrees with the manual.** The ship wire ramp **maxes** the table multiplier:
+> `FUN_00424350` sends `0xf` to the whole `fathom_light_group` (0x42435d), which forwards it
+> to all six fathom lights and turns each on, then sets `ScoreMultiplier =
+> fathom_on_count + 1` = 7. (The anchor-chain fathom lights are the multiplier track — §4.)
 
 > **Not found [U].** The manual's "+25,000 jackpot per ship target".
 
@@ -773,7 +773,7 @@ light is lit, or from the skill shot's selection path. A stepped payout driven b
 |---|---|
 | 1 | cancel `mode_timer`, play `tabb28` |
 | 1…8 | display glyph `DAT_0043ab16 + 2i` (the bytes are `'L'`,`'M'`,…,`'S'`), 0.25 s each |
-| 9 | **`coins×500,000 + treasures×500,000 + map_pieces×1,000,000 + modes_completed×1,000,000`**, plus `FUN_00424350()` (another fathom/multiplier), `FUN_00425000(-1)` (**Max Crew**: `a_bump2->MessageField = 6`), `FUN_00424700(0)` (the **jackpot**) |
+| 9 | **`coins×500,000 + treasures×500,000 + map_pieces×1,000,000 + modes_completed×1,000,000`**, plus `FUN_00424350()` (max multiplier), `FUN_00425000(-1)` (**Max Crew**: `a_bump2->MessageField = 6`), `FUN_00424700(0)` (the **jackpot**) |
 | ≥10 | `0x52`, eject, re-select |
 
 ✓✓ **exactly** the manual's four payout terms, and ✓ "bumpers and the table multiplier are
@@ -1035,13 +1035,12 @@ skill-shot slot 0. Picks **uniformly at random from six**:
 | 0 | Special treasure | `FUN_00424930` |
 | 1 | **Extra ball** (`TableG+0x18e = 1`, string 3014) | `FUN_004239d0` |
 | 2 | **Max Crew** (`a_bump2->MessageField = 6`, string 3044) | `FUN_00425000` |
-| 3 | Multiplier up one fathom | `FUN_00424350` |
+| 3 | **Max multiplier** (all six fathoms) | `FUN_00424350` |
 | 4 | **Map piece** | `FUN_00423aa0` |
 | 5 | **Buried Treasure** payout | `FUN_00425ab0` |
 
 ✓✓ manual's six exactly (Special Treasure / Max Crew / Max Multiplier / Map Piece /
-Buried Treasure / Extra Ball), with the one correction that roll 3 **increments** rather
-than maxes the multiplier.
+Buried Treasure / Extra Ball).
 
 ### 5.2 Buried Treasure — `FUN_00424b00` (bury) / `FUN_00425ab0` (dig) **[C]**
 
@@ -1286,7 +1285,7 @@ Its first three lines also contain a mode-register read: in state 0x10 with
 | # | Manual | Binary | Conf |
 |---|---|---|---|
 | 1 | "Starting a mode is worth 200,000" | Varies per mode: 100,000 (Mutiny) / 200,000 (Attack, Bermuda, Tavern) / 250,000 (Sword Fight) / 300,000 (Treasure Hunt, Storm) / 1,000,000 (Peg Leg's Loot) | [C] |
-| 2 | Ship wire ramp "maxes" the multiplier; shipwreck mystery gives "Max Multiplier" | Both **increment** it by one fathom light (`ScoreMultiplier = fathoms + 1`) | [C] |
+| 2 | ~~Ship wire ramp "maxes" the multiplier; shipwreck mystery gives "Max Multiplier"~~ | **Withdrawn.** Both run `FUN_00424350`, which sends `0xf` to the whole `fathom_light_group` and so lights all six: the multiplier is maxed (7). Manual correct | [C] |
 | 3 | Treasure Hunt: "5th X = jackpot" | The jackpot depends on **which** sink the X is on (`a_sink17` only); there is no 5-counter | [P] |
 | 4 | Sword Fight group clear "awards one of" four things | **Cyclic in a fixed order** (treasure → coin → map piece → extra ball → extra ball …), not a choice | [C] |
 | 5 | ~~Jail Break needs "3 hits with ≥1 ball in the brig"~~ | **Withdrawn.** The check exists, one level up: `Pirates_a_spot6_Control` does not test the brig, but `FUN_0042d590`'s `0x4f` aborts straight back to state 2 if `BallsInBrig == 0`. Manual correct | [C] |
