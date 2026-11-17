@@ -8,10 +8,18 @@ nix-build build.nix                       # engine, patched, with the rules link
 test/run_tables.sh                        # Space Cadet, Dragon's Keep, Skulduggery
 ```
 
-The patch is `engine/fulltilt-engine.patch`. Nothing in it changes Space Cadet's
-behaviour: its registry rows carry `ModeBeforeComponent = false` and
-`MultiplierIsValue = false`, which reduce `control::handler` and
-`TPinballTable::AddScore` to exactly what upstream did.
+The patch is `engine/fulltilt-engine.patch`. Space Cadet's registry rows carry
+`ModeBeforeComponent = false` and `MultiplierIsValue = false`, which reduce
+`control::handler` and `TPinballTable::AddScore` to exactly what upstream did, and leave
+`TableControl` and `KeyHandler` null, which keeps its table-level handler and its cheats
+upstream's. Two qualifications. Sections 14 and 15 are corrections to upstream code on
+every table. And the corrections from section 16 on that are gated on Full Tilt data
+(`pb::FullTiltMode`, i.e. `TableRules::FullTiltData`) apply to `CADET.DAT` as well as to
+the bonus tables, because `CADET.EXE` is the same engine and does the same thing; only
+`PINBALL.DAT` (3D Pinball) is guaranteed upstream's behaviour by those gates. One rendering
+change is not gated at all: `zdrv::paint` skips source pixels whose z is the 0xFFFF
+"no pixel" marker on every table, which is probably invisible on Space Cadet but has not
+been checked pixel for pixel.
 
 How the list was arrived at, rather than guessed: the rules were written first, against
 the originals, and then compiled against unmodified upstream headers. Every error was a
@@ -134,7 +142,8 @@ the index path also gained a clamp that cannot trigger for a table staying in 0.
 It dereferenced the `plunger` tag, which is Space Cadet's group name and null on both
 bonus tables -- Skulduggery died there as soon as a ball sat still for twenty frames.
 It goes through `TPinballTable::Plunger` instead, which every table has because the
-loader builds it from the DAT's own plunger object.
+loader builds it from the DAT's own plunger object. The flippers it also has to protect
+are a per-table list since section 21.
 
 ## 9. Per-table string tables
 
@@ -173,7 +182,10 @@ and the multiplier are now done; the rest stand.
 - **Seven object types the loader skipped**: 1034 launcher, 1035 ramp exits, 1036
   accelerators, 1037, 1038 light sweeps, 1042 magnets, 1043 diverters. Dragon's Keep uses
   1035/1036/1038/1043; Skulduggery adds 1034/1037/1042. *Done* -- the classes are in the
-  patch, the magnets and diverters as approximations.
+  patch. `TRampExit` (ctor 0x41b4f0, Collision 0x41b6b0), `TAccelerator` (0x41b7d0,
+  0x41b8f0/0x41b9f0) and `TMagnet` (0x416560..0x4166c0) have since been compared against
+  their listings and match. `TDiverter` builds its walls from attribute 604 since section
+  20; its back-face sprite kick (timer callback 0x41bc50) is still not reproduced.
 - **`loader::sound_list` holds 64**; `PIRATES.DAT` has 67 sound groups. *Done.*
 - **Kicker attribute 410** was unknown to `loader::kicker`, so `query_visual` returned
   early and `TKickout` dereferenced a null `FloatArr`. 18 kickers in `DRAGON.DAT` use it.
@@ -252,6 +264,14 @@ player reported seeing on some hits. The comment at the first of those sites had
 original "passes a fourth Display argument of 1 here where resource strings pass 0, which
 is presumably what marks a string as such a token"; it did, and that argument is this
 font selector.
+
+**And a second.** Skulduggery's own `DisplayGlyph` wrapper (`src/pirates_common.cpp`)
+still called the text `Display`, and four of its lane handlers (`src/pirates_part1.cpp`:
+`a_roll3`, `a_roll5`, `a_roll1`, `a_roll2`) called `info_text_box->Display` directly,
+although every one of those sites in `PIRATES.EXE` pushes the fourth argument 1 (a_roll3
+at 0x42975e: `push 0x1; push 0x40000000; push 0x43aad0`). They now go through
+`TTextBox::DisplayGlyph`. Which artwork font2 holds at the slots for '3'..'9' is still
+unverified.
 
 ## 11. TRamp and THole, measured against the originals
 
@@ -522,9 +542,7 @@ which under upstream's class zeroed it out from under them.
 `MessageCode` gained five entries. 57 and 58 keep the originals' 0x39 and 0x3a because
 `src/pirates_*.cpp` and `src/dragon_missions.cpp` already cast those raw numbers; they
 collide with `ControlBallCaptured` / `ControlBallReleased`, which is harmless because
-those two only ever travel to `control::handler`. 61 likewise keeps 0x3d, colliding with
-`ControlNotifyTimerExpired` -- a collision `src/dragon_part2.cpp` documents and switches
-on deliberately.
+those two only ever travel to `control::handler`.
 
 | name | value | original |
 |---|---|---|
@@ -532,9 +550,18 @@ on deliberately.
 | `TBlockerMoveToPosition` | 58 | 0x3a |
 | `TBlockerSnapOpen` | **70** | 0x3b |
 | `TBlockerSnapClosed` | **71** | 0x3c |
-| `ControlBlockerMotionDone` | 61 | 0x3d |
+| `ControlBlockerMotionDone` | **87** | 0x3d |
 
-0x3b and 0x3c are **renumbered**, the only two that are. The originals' 0x3b is numerically
+`ControlBlockerMotionDone` first kept the original's 0x3d = 61, and an earlier revision of
+this table said so. It is 87 in the code now (`TPinballComponent.h`): Full Tilt's 0x3d and
+its 0x47 are different codes, the port already spends 61 on the second
+(`ControlNotifyTimerExpired`, raised by `TLightGroup`), and once the rules named both by
+symbol rather than raw cast a switch had two identical labels and would not compile.
+Nothing outside the port reads these numbers, so the port's one moved. The rules use the
+symbol (`src/dragon_part2.cpp`'s `BlockerMotionDone`, `src/dragon_missions.cpp`'s
+`JawOpened`).
+
+0x3b and 0x3c are **renumbered** as well. The originals' 0x3b is numerically
 59, which is already `TBlockerRestartTimeout` here -- upstream's own value for a different
 message, and the one both Space Cadet's `control.cpp` and Dragon's three armour handlers
 send. Nothing in either table's rules sends 0x3b or 0x3c (checked across `src/`), so no
@@ -542,19 +569,18 @@ call site depends on their original numbers.
 
 ### Still open
 
-* `src/dragon_common.cpp`'s `BlockerUnknownP7e` stands in for the position index with
-  `blocker->ActiveFlag ? 0 : -1`. Under the moving class `ActiveFlag` is always 1, so the
-  stand-in now always answers "extended" and the two gargoyle rock handlers' `!= -1` guard
-  is dead in the other direction. It wants to be
-  `static_cast<TBlocker*>(blocker)->CurrentPosition`, which is the real field. Owned by
-  whoever owns `src/`.
-* `src/dragon_part2.cpp` claims Full Tilt treats a negative `TBlockerRestartTimeout` as
-  *cancel*. The binary disagrees: 0x45's `fcom`/`fxch` pair at 0x4152b5..0x4152d9 computes
-  `max(value, 0.0)` and arms the timer either way, so `MoatBlockerControl`'s
-  `TBlockerRestartTimeout(-1.0f)` fires `ControlTimerExpired` on the next frame rather
-  than cancelling. It is harmless there -- the handler has already set `MessageField = 0`,
-  so the expiry takes the idle branch and does not re-arm -- but the comment is wrong and
-  the engine now matches the binary rather than the comment.
+* ~~`src/dragon_common.cpp`'s `BlockerUnknownP7e` stands in for the position index with
+  `blocker->ActiveFlag ? 0 : -1`~~ -- **closed**. It now returns the blocker's
+  `CurrentPosition` (-1 when the component is not a `TBlocker`), so the two gargoyle rock
+  handlers' `!= -1` guard reads the real field.
+* ~~`src/dragon_part2.cpp` claims Full Tilt treats a negative `TBlockerRestartTimeout` as
+  *cancel*~~ -- **closed**; the comment now says what the binary does. 0x45's
+  `fcom`/`fxch` pair at 0x4152b5..0x4152d9 computes `max(value, 0.0)` and arms the timer
+  either way, so `MoatBlockerControl`'s `TBlockerRestartTimeout(-1.0f)` fires
+  `ControlTimerExpired` on the next frame rather than cancelling. It is harmless there --
+  the handler has already set `MessageField = 0`, so the expiry takes the idle branch and
+  does not re-arm. On a `TTimer` the same code with a negative value does cancel
+  (0x41b3d9 returns without arming), and the comment now distinguishes the two.
 * The port's `SpriteSet(index)` returns without clearing when `index` is past the end of
   `ListBitmap`; the original blanks the sprite (0x4151db). `TBlocker` compensates by
   calling `SpriteSet(-1)` itself in that case, so the difference is contained here.
@@ -571,7 +597,7 @@ soak on each bonus table showing the parts actually stepping -- `a_cannon` walki
 2 -> 3 and back, `a_bloce` 0 <-> 1, `a_rocka`/`a_rockb`/`a_sword`/`a_jaw` reaching their home
 positions -- with no stuck ball and no crash.
 
-## 13. The spliced-bitmap decoder wrote past its buffer
+## 14. The spliced-bitmap decoder wrote past its buffer
 
 This one is upstream's, not the port's, and it aborted a real game of Dragon's Keep:
 
@@ -627,7 +653,7 @@ dummy renderer lays the heap out differently and the stray write lands in paddin
 `MALLOC_CHECK_=3` sees nothing. ASAN is the deterministic test; the abort in a real window
 was luck.
 
-## 14. `TKickback` replayed its clip ten times a second
+## 15. `TKickback` replayed its clip ten times a second
 
 Reported twice by a player on Dragon's Keep, the second time precisely: entering the left
 drain channel, the ball is rescued, and the audio becomes deafening.
@@ -671,3 +697,421 @@ the guard still runs -- it simply never arms and never kicks. Skulduggery's rule
 (`src/pirates_part3.cpp`), where it was a no-op. `Message` also retracted with
 `SpriteSet(-1)` where the original uses sprite 0 (0x415e0f reads the bitmap list's entry
 0, not a hide).
+
+## 16. `TableRules::TableControl` -- each table's own table-level handler
+
+`TPinballTable` calls `control::table_control_handler` at the tail of its `Message`
+(`TPinballTable.cpp:731`) and from `tilt()` (`:413`). Upstream's body is Space Cadet's:
+on `SetTiltLock` it clears `table_unlimited_balls` and sends a message to `lite77`. On
+either bonus table `lite77` is a Space Cadet tag that `make_links` never binds (it walks
+only `CurrentTable`'s arrays), so it was null, and **the first tilt dereferenced it**.
+
+The bonus tables have their own handler at the same call sites. `DRAGON.EXE`'s
+TPinballTable calls 0x424260 at 0x419e87 (`push esi; call 0x424260`, the tail of
+`Message`) and once from its constructor with 0x3f7 (0x41ab2f); `PIRATES.EXE` calls
+0x4230c0 from the same places. Neither is bound in `score_components[]` or
+`simple_components[]`, which is how both went unported while every component handler was
+done.
+
+Dragon's 0x424260 is a jump table on `code - 0x3f3` (targets at 0x42446c, index bytes at
+0x424480):
+
+| code | arm | what it does |
+|---|---|---|
+| 0x3f3 `SetTiltLock` | 0x424282 | zero 0x439b04; `ClearSpells` (0x423780); `a_kick1->ActiveFlag = 0`, so a tilted ball cannot be kicked back |
+| 0x3f6 `NewGame` | 0x42429b | `game_over_phase = 0`; v_lite113..115 `ActiveFlag = 0`; `SetSwordStage(3)`; idle music (tabc7) unless already playing; ball-save phase 0x434d2c = 3; `v_lite40` 0x13; `[TableG+0x172]` (`JackpotScore`) = 1,000,000; `[TableG+0x17a]` (`SuperJackpotScore`) = 2,500,000; mode register = 1 |
+| 0x3f7 table load | 0x424326 | loads the music handles by name (see section 23); clears v_lite113..115 `ActiveFlag` |
+| 0x400 `GameOver` | 0x424433 | ball-save phase = 0; `v_lite40` 0x14; v_lite113..115 `ActiveFlag = 0` |
+
+Skulduggery's 0x4230c0 is a compare chain with three arms and no game-over arm. 0x3f3
+(0x4230e2) sets the mode register to 0x11 (Lockdown) and broadcasts 0x4f through the
+dispatcher 0x42d850, which disarms the magnets and kickouts and drops the running mode
+without a teardown, so a tilted mode pays no completion bonus. 0x3f6 (0x4230fb..0x4231d4)
+is the per-game reset: `JackpotScore` = 1,000,000, the shoot-again phase, `s_oneway12`
+off, `game_over_phase`, the collection-cycle flag 0x43abb0, the whole buried-treasure pouch
+(cursor 0, slots -1, coin count 1, snapshots 0), `ClearTreasureXLights` (0x424500) and
+`RestoreTreasureBoard` (0x424560), idle music (tabb1), the brig count and last scorer,
+`a_kick2` and `s_bwal610` off, 0x4c to `a_kick1`/`a_kout1`/`a_kout2`, then
+`EnterSkillShotAward` (0x423440: state 3 and its 0x4f) and the register zeroed by hand.
+0x3f7 (0x4231d7) loads tabb1..tabb6.
+
+What upstream did: nothing per table. What the port does now: `TableRules` gained
+`void (*TableControl)(MessageCode)`. `control::table_control_handler` calls it when it is
+set and returns; it runs Space Cadet's body only when the current table's
+`ScoreComponents` are Space Cadet's, so a bonus table built with its rules switched off
+cannot reach `lite77` either. `dragon::TableControl` (`src/dragon_part4.cpp`) and
+`pirates::TableControl` (`src/pirates_modes.cpp`) port the arms above. FT 0x3f3/0x3f6
+arrive as the engine's `SetTiltLock`/`NewGame` and Dragon's 0x400 as `GameOver` (the
+public-code bands of section 5.1 of `docs/how-this-was-done.md`). The 0x3f7 load arms have
+nothing to do in the port: the engine never sends that code to the table, the music
+handles are fixed track constants in `src/`, and the `ActiveFlag` clears are repeated by
+the new-game arm.
+
+The order matters and is the original's: the call is at the end of `TPinballTable::Message`,
+after the engine's own `NewGame` body has set `JackpotScore = 500000`, so the table's
+1,000,000 wins. Before this, every bonus-table game started with a 500,000 jackpot and
+Dragon's super jackpot started at 0 and carried over between games.
+
+Gated by construction: the field is null on all three Space Cadet rows.
+
+## 17. `TableRules::KeyHandler` -- table cheat codes and the bonus-count skip
+
+The Full Tilt keydown calls the table's key handler first (0x412154, `push esi; call`),
+after its game-mode gate and before the engine's own "hidden test" matcher (0x411f50)
+and the flipper dispatch. Dragon's is 0x4282c0, Skulduggery's 0x42a830. Both have two
+jobs.
+
+* **The bonus fast-forward.** 0x4282c1..0x4282f2: if the mode register is 0xb (the
+  end-of-ball count-up), `game_over_phase` is non-zero, and the key is one of the two
+  flipper keys (compared against 0x434f74/0x434f78, the cells keydown itself tests at
+  0x412183/0x4121a5), send the dispatcher message 1, which the drain-bonus controller
+  answers by going quiet and running the remaining steps. Skulduggery's is the same with
+  state 0x10. The port's controllers already handled code 1; nothing sent it.
+* **The table's own codes**, matched one key at a time through a jump table on
+  `key - 0x31` (bounds 0x27; Dragon's index bytes at 0x42854c, targets at 0x428514;
+  Skulduggery's at 0x42aaa4 / 0x42aa70). Dragon: `1MAX` extra ball and `CheatsUsed`;
+  `NMAX` in Idle starts the selected quest (0x424210); `PB` toggles the alternate ball
+  skin (0x438140); `QUOTE` starts the quote scroll; `FMAX` is accepted all the way and does
+  nothing. Skulduggery: `1MAX` through its own cheat-only extra ball 0x42a7d0; `NMAX`
+  starts the selected mode (0x425a50); `GMAX` toggles the skin (0x439140); `QUOTE`; `FMAX`
+  as Dragon.
+
+What upstream did: every key went to `control::pbctrl_bdoor_controller`, Space Cadet's
+backdoor, whose `1max`, `gmax`, `rmax`, `bmax` and `easy mode` go through Space Cadet tags
+(`soundwave28`, `GravityWellKickoutControl`'s lights, `middle_circle`, `block1`, `gate1`)
+that the bonus tables never bind. So the Cheats menu, or typing a code, **crashed either
+bonus table**, as did `hidden test`'s `r` key (`cheat_bump_rank`).
+
+What the port does now:
+
+* `TableRules` gained `void (*KeyHandler)(int key, bool flipper)`. `pb::InputDown` calls
+  it ahead of the backdoor, with SDL's lower-case letter keycodes upper-cased to the
+  virtual-key codes the originals saw, and `flipper` set from the engine's bindings so a
+  remapped or gamepad flipper counts; a non-keyboard flipper arrives as key 0.
+* `pb::PushCheat` (the Cheats menu) types into the table's handler first, never as a
+  flipper.
+* On a table with a key handler the backdoor keeps only `hidden test` and the idle
+  credits, which the Full Tilt engine has for every table; Space Cadet's `gmax`, `1max`,
+  `bmax`, `rmax`, `quote` and `easy mode` arms, and the `r` key, are skipped. The Cheats
+  menu hides the items with no counterpart and adds `nmax`, and `pb` on Dragon's Keep.
+* The 60 s idle credits now feed the backdoor directly instead of going through
+  `PushCheat`, so the engine's own scroll does not reach a table's matcher and reset a
+  half-typed code.
+* `pb::AlternateBallSkin` is the toggled cell.
+
+Not reproduced, and stated in the code: **the skin toggle has no visible effect.** The
+original's only reader is the `TBall` constructor (0x4028bb), which selects each ball
+state's second bitmap; the port's `GroupData` keeps only the first (see the "bitmap
+override" note in `GroupData.cpp`) and its `TBall` does not read the flag. And **the quote
+scroll runs once**: the original loops in the text box's scroll slot (0x41e070) until a
+key stops it; the port queues the table's own quote list as one pass of low-priority
+messages, which a key clears with `TTextBox::Clear(true)` without touching anything the
+rules put up.
+
+Gated by construction: the field is null on all three Space Cadet rows, whose backdoor and
+menu are unchanged.
+
+## 18. `TTimer` answers 0x48, "time remaining"
+
+`DRAGON.EXE`'s `TTimer::Message` (0x41b380) tests `cmp eax,0x48 / je 0x41b3fb`. That arm
+returns 0 when no timer is armed; otherwise it calls 0x41f880 (walk the active list for the
+id, return `(TargetTime - now) / 1000.0`), clamps a negative result to 0.0, multiplies by
+the 1000.0 at 0x4377a0, floors and returns an int. The same bytes are in `PIRATES.EXE`.
+
+Upstream's `TTimer` has no such arm -- Space Cadet never asks -- and the engine had no
+"remaining" query at all, so every 0x48 answered 0. That blanked every quest's and every
+mode's countdown display on both tables, never opened the 0.5 s display tick chain, cut a
+Slay Dragon hit's re-arm to 15 s instead of remaining + 15 s, and killed Skulduggery's
+captive-ball +10 s, whose `> 0` guard could never pass.
+
+What the port does now: `MessageCode::TTimerGetRemaining = 72` (the original's own 0x48;
+72 was free), `timer::remaining(id)` mirroring 0x41f880, and the arm in `TTimer::Message`.
+While there, `TTimer` also gained Full Tilt's `PlayerChanged` arm (jump-table slot 0x3fe ->
+0x41b453): the per-player swap of section 24, then the same timer kill as tilt, game over
+and reset, so a clock started on one player's ball cannot expire during the next player's.
+
+Gating: no Space Cadet code sends 72; the `PlayerChanged` arm returns early unless
+`pb::FullTiltMode`.
+
+## 19. `TBall` does not reset a ball the table placed
+
+`CADET.EXE`'s `TBall::Message` (0x402a90) resets only when `+0x153` is 0:
+`402aa0 cmp DWORD PTR [esi+0x153],ebx / 402aa6 jne 0x402afe`. `+0x153` is `HasGroupFlag`,
+set on a ball built from its own DAT group -- a type-1037 object.
+
+Upstream has no such ball and no such test. `PIRATES.DAT` has exactly one: the captive ball
+at (4.65, -9.11) that `a_spot102` is hit through. `NewGame` broadcasts `Reset` to every
+component, so the captive ball was deactivated, moved to the origin and given mask 1 at the
+start of every game, and never came back -- which killed captive-ball mode selection, the
++10 s extension and its award.
+
+What the port does now: `if (code == MessageCode::Reset && !HasGroupFlag)`. Space Cadet's
+DATs have no type-1037 object, so the test cannot change them.
+
+## 20. `TDiverter` reads attribute 604 when 600 is not a single line
+
+The constructor (0x41bb70, the same bytes in all three executables) feeds its two-face
+builder 0x41ba30 from one of two places:
+
+```
+41bbc1:  cmp  [esp+0x14],2        ; does 600 describe one line?
+41bbc6:  jne  0x41bbeb
+41bbeb:  push 0x25c               ; attribute 604
+41bbfe:  fld  [edi] / fcomp 2.0   ; record tag == 2.0 (0x4377c0)?
+41bc23:  call 0x41ba30            ; build the doubled face from edi+4
+41bc1d:  add  edi,0x18            ; next 6-float record
+```
+
+So 604 is a list of `{2.0, x0, y0, x1, y1, z}` records ended by anything other than 2.0,
+each handed to the same builder. **All eight `a_dvtr*` objects in `DRAGON.DAT` carry only
+604**, with one to four segments each.
+
+The port had read 600 only, and returned when it was not a single line, under a comment
+that said "an earlier note here guessed attribute 604 and a segment list. It is 600, a
+single line". So every Dragon diverter built zero edges, both chutes of every pair were
+always open, and the rules' gate messages steered nothing. The note was right the first
+time; the gate on `FloatArrCount == 2` it cited is the first branch, not the only one.
+
+What the port does now: the 600 path as before, else the 604 walk, each segment through
+`InstallSegment` with the original's 0.8 back-face offset. Skulduggery has no diverters;
+Space Cadet's DATs have no type 1043, so nothing else reaches the class. The back-face
+sprite kick (0x41bc50) is still not reproduced.
+
+## 21. `UnstuckBall`'s bounds are a per-table list
+
+`control::UnstuckBall` skips a ball resting inside a control's bounds -- a cradled ball on a
+raised flipper, a ball on the plunger -- and otherwise jiggles it and, past 20 frames,
+destroys and re-serves it. Space Cadet checks `flip1`, `flip2` and the plunger. Those
+`flip1`/`flip2` tags are Space Cadet's and null on the bonus tables, and section 8's
+`TableRules::UnstuckBoundsExtra` named one extra component. So on Dragon's Keep `a_flip1`
+and `a_flip2`, and on Skulduggery every flipper, were unprotected: hold the ball on one for
+half a second and it was shoved off, and past 20 frames re-served from the plunger.
+
+The originals' lists, read off the calls to `CheckBallInControlBounds`:
+
+* `DRAGON.EXE` 0x42c320: four calls, on `a_flip1`, `a_flip3`, `a_flip2` and `s_plunger1`
+  (tags 0x43a714, 0x43a724, 0x43a734, 0x439d44). Three of its four flippers.
+* `PIRATES.EXE` 0x42db30: seven, on `a_flip1`, `a_flip3`, `a_flip2`, `a_flip4`,
+  `s_launcher1`, `s_oneway12` and `a_kick1`.
+
+What the port does now: `UnstuckBoundsExtra` is a comma-separated list
+(`"a_flip1,a_flip3,a_flip2"` and `"a_flip1,a_flip3,a_flip2,a_flip4,s_oneway12,a_kick1"`;
+the plunger/launcher is `TPinballTable::Plunger` as before), resolved once in the table
+constructor into `TPinballTable::UnstuckBounds` and tested after the Space Cadet clauses.
+Empty on Space Cadet.
+
+## 22. `TSink`'s eject height applies to Full Tilt data only
+
+Section 12 made the ejected ball take `601[3] + Radius` as its height, as `DRAGON.EXE` does
+at 0x4185fc. That was not gated, and `PINBALL.DAT`'s `v_sink1/2/3/7` carry **-1.0** in that
+slot where `CADET.DAT` has 0.0. pinball.exe never reads it, so on 3D Pinball every wormhole
+and hyperspace eject started the ball below the table (z = 0.3 - 1.0) until something
+rewrote z.
+
+What the port does now: the height is applied only under `pb::FullTiltMode`. The release
+layer (`ReleaseMask`) needs no gate: `PINBALL.DAT` has neither 1301 nor 602, so it stays 1.
+
+## 23. Table music: the Music option, pause, and each table's own first track
+
+Two defects, both upstream integration rather than a missing original routine.
+
+**The bonus tables' music ignored the Music option, pause and focus loss.**
+`midi::PlayMusic` called `Mix_PlayMusic` unconditionally, set `IsPlaying`, and never set
+`active_track`; `StopPlayback` halted only when `active_track` was set, so `music_stop()`
+-- which pause, focus loss and the menu toggle all call -- never stopped a table track, and
+with music off every mode change started music anyway.
+
+Now `PlayMusic` records `ActiveTableTrack` whether or not music is audible and starts it
+only when `IsPlaying`; `StopPlayback` also halts when `TableTrackAudible`; `music_play`
+resumes `ActiveTableTrack`; and `play_track` clears it.
+
+**The new-game track.** `TPinballTable::Message(NewGame)` played `Track1` on every table.
+Dragon's 0x424260 new-game arm plays its idle handle, which its 0x3f7 arm loads from
+`"tabc7"` (listing below), and Skulduggery's plays tabb1. With `TableControl` set, the
+engine now leaves the new-game track to the table (section 16).
+
+The same 0x3f7 arm settled Dragon's track map, which the rules had left open:
+
+```
+push 0x43bc00 ("tabc7"); call 0x40e9d0; mov ds:0x439af8,eax    ; idle
+push 0x43bc08 ("tabc1")                 -> 0x439ae0            ; Fire Lizards
+push 0x43bc10 ("tabc2")                 -> 0x439ae4            ; Dragon Hoard
+mov  eax,ds:0x439ae0; mov ds:0x439ae8,eax                      ; Gargoyle Gaggle = tabc1
+push 0x43bc18 ("tabc4")                 -> 0x439aec            ; Rescue Maiden
+push 0x43bc20 ("tabc5")                 -> 0x439af0            ; Dragon Pass
+push 0x43bc28 ("tabc6")                 -> 0x439af4            ; Wizard's Fury
+mov  eax,ds:0x439ae0; mov ds:0x439afc,eax                      ; game over = tabc1
+```
+
+TABC3 is never loaded. The port had idle on track 1, Fire Lizards on 3, Gargoyle Gaggle on
+7 and game over on 8 -- out of range for `MusicTrackCount = 7`, so game over was silent.
+Skulduggery's map checked out unchanged.
+
+Gating: Space Cadet never calls `PlayMusic`, and `TableControl` is null on its rows, so
+it still gets `Track1`.
+
+## 24. Per-player `MessageField`, as the Full Tilt base class keeps it
+
+The Full Tilt engine keeps `MessageField` per player on **every** component. The base class
+has two helpers, the same bytes at the same addresses in `CADET.EXE`, `DRAGON.EXE` and
+`PIRATES.EXE`:
+
+```
+0x413550   MessageField = 0; copies[0..3] (+0x1a..+0x26) = 0
+0x413570   copies[CurrentPlayer] = MessageField          ; 413589
+           MessageField = copies[floor(value)]           ; 41358d..41359e
+```
+
+and the base `Message` (0x4135b0) is those two tests and nothing else: `cmp esi,0x402`
+-> 0x413550, `cmp esi,0x3fe` -> 0x413570. It never writes the message code into
+`MessageField` the way upstream's base does. The overriding `Message()`s call the same
+helpers from their own `Reset` / `PlayerChanged` arms.
+
+Upstream keeps no such copy on the base; it gives one only to `TLight`, `TBumper`,
+`TLightGroup`, `TSink` and `TPopupTarget`, each its own. The port's own engine comments had
+recorded the gap (`TKickout`, `TMagnet`, `TLightSweep`). It matters because the rules park
+per-player state in `MessageField`s: Dragon's selected quest in `a_kout2` and its quest
+number in `info_text_box`, Skulduggery's mode selection in `mode_timer`, blocker armour
+stages. With two to four players one player's selection carried into the next player's
+ball.
+
+What the port does now: `TPinballComponent` gained `FtPlayerMessageField[4]`,
+`FtPlayerFieldsReset()` (0x413550) and `FtPlayerFieldsSwap(value)` (0x413570), both no-ops
+unless `pb::FullTiltMode`. The base `Message` under Full Tilt data is the two tests and
+returns, which is what `TOneway`, `TRamp`, `TSound`, `TRampExit` and `TAccelerator`
+inherit (vtables 0x4374c0, 0x437680, 0x437758, 0x4377e0, 0x437800). The overrides call
+the helpers where the original does, each cited at its call site:
+
+| class | Reset (0x413550 call) | PlayerChanged (0x413570 call), and what else the arm does |
+|---|---|---|
+| `TBlocker` | 0x415339 arm (section 13), then the shared tail | 0x4152e9 arm, then the shared tail |
+| `TComponentGroup` | -- | 0x413838; not forwarded to members |
+| `TDemo` | 0x41835d arm | 0x41830c, nothing else |
+| `TDiverter` | 0x41bf4c | 0x41befa, before the per-player flag swap |
+| `TDrain` | 0x4187d4 | 0x4187b3, nothing else |
+| `TFlagSpinner` | 0x41481f | 0x4148b1, after killing the spin timer |
+| `TGate` | 0x4154ca | 0x415493, then the disable arm (Full Tilt only) |
+| `THole` | 0x416e49 | 0x416e12; see section 26 |
+| `TKickout` | base reset | 0x416517, after the release |
+| `TLightBargraph` | 0x40c051 | 0x40bfc2, before the bargraph's own arm |
+| `TLightGroup` | 0x40bc4a | already per player upstream (0x40bbea) |
+| `TLightRollover` | 0x4159c0 | 0x415a06, nothing else |
+| `TLightSweep` | 0x40c9e7 | 0x40c9de; see section 27 |
+| `TMagnet` | 0x41671d | 0x416705, then the disarm |
+| `TPlunger` | 0x418c8c | 0x418c48, before clearing the pullback |
+| `TRollover` / `TTripwire` | 0x415770 | 0x4157b3, nothing else |
+| `TSoloTarget` | 0x414cc6 | 0x414cb8, nothing else |
+| `TTextBox` | 0x41e136 | 0x41e12c; the whole of 0x41e110 |
+| `TTimer` | 0x41b47c | 0x41b45a, then the timer kill (section 18) |
+| `TWall` | 0x413c67 | 0x413c97, after expiring a running timer |
+
+Gating: every helper call is a no-op unless `pb::FullTiltMode`, and the arms that add
+behaviour beyond the swap (`TGate`, `TWall`, `TTimer`, `TFlagSpinner`, `THole`) are
+additionally gated on it. `PINBALL.DAT` is unchanged. `CADET.DAT` gets the same per-player
+fields `CADET.EXE` has.
+
+Not ported: `TPinballTable`'s own `PlayerChanged` arm (0x419abb), and `TDrain`'s tilt arm
+(0x418792, which kills the drain's timer).
+
+## 25. Per-table high-score keys
+
+`TableRules::SettingsPrefix` was set ("DRAGON", "PIRATES") and read nowhere.
+`high_score.cpp` keyed its five entries and checksum as `"0.Name"`, `"0.Score"` ...
+`"Verification"` with no prefix, so in one install Space Cadet, Dragon's Keep and
+Skulduggery overwrote each other's table and checksum.
+
+What the port does now: every table except the three Space Cadet rows prefixes the keys
+with `"<SettingsPrefix>."` (e.g. `DRAGON.0.Score`). The Space Cadet rows keep the bare keys,
+because upstream wrote them for whichever of `PINBALL.DAT`/`CADET.DAT`/`DEMO.DAT` it found,
+and a player's existing scores should stay where they are. There is no original address:
+the 1996 tables were separate executables with separate settings.
+
+The rules' high-score check changed with it, on the rules side: both tables' `AnyHighScore`
+(the call to 0x410ff0 in their game-over sequences) is upstream's `pb::chk_highscore` line
+for line -- demo and cheats tests, then `get_score_position` for each player -- where the
+port had "is any entry in the table above zero".
+
+## 26. `THole`: tilt and player-change release, and attribute 1306's lift
+
+`DRAGON.EXE`'s `THole::Message` (0x416c70):
+
+* 0x3f3 (0x416cba) stores -1.0 over the value and falls into the 0x43 arm (0x416cc2),
+  whose `value <= 0` branch releases at once (0x416cdb call 0x416a90).
+* `Reset` (0x416e47) and `PlayerChanged` (0x416e0b) share a tail: clear or swap the
+  per-player fields (0x416e49 / 0x416e12), drop the release retry, and if a ball is held
+  kill the capture timer and release (0x416e30, 0x416e38).
+
+The port answered `Reset` alone. Now `SetTiltLock` becomes `THoleReleaseBall(-1)` and
+`PlayerChanged` takes the `Reset` path, both under `pb::FullTiltMode`; 3D Pinball's
+`THole` still answers `Reset` alone.
+
+**1306.** The constructor reads attribute 1306 (0x51a) at 0x4167c3 into `+0x92`, 0.0 when
+absent. On capture the ball's z speed starts at it (0x416a0e..0x416a14), and in
+`FieldEffect` (0x416acb) a positive value makes the ball **rise** at that constant speed
+until `z >= ZSetValue` (0x416ae3, 0x416b5b); otherwise gravity pulls it down until
+`z <= ZSetValue`. The port had only the second branch. Only Dragon's `s_hole118` carries
+1306 (1.0), and its `ZSetValue` is above the ball, so `z <= ZSetValue` held on the first
+frame and the ball snapped up instead of rising. Now `THole::LiftSpeed` carries 1306 and
+`FieldEffect` branches as the listing does. No 3D Pinball or Space Cadet hole has 1306, so
+they keep the fall.
+
+## 27. `TLightSweep` stops on a player change
+
+0x40c660's `PlayerChanged` arm (0x40c9d0) calls the virtual `Reset` (0x40c9d4, which stops
+a sweep in flight) and then swaps the per-player field (0x40c9de). The port's arm list was
+`GameOver`, `Reset`, `SetTiltLock`, so a sweep started on one player's ball stepped on into
+the next player's. Now `PlayerChanged` stops the sweep and swaps; `Reset` clears the fields
+then stops (0x40c9e7, 0x40c9f0). `GameOver` stopping the sweep is the port's own addition,
+kept because it is harmless. The class exists only on Full Tilt data.
+
+## 28. `TDemo` reads attributes 1405 and 1406
+
+Full Tilt's `TDemo` constructor (0x417a50; the code at 0x417bbc..0x417c2f) reads two
+optional attributes, each `{layer, wall...}`: the layer is truncated into a mask
+`1 << layer` (0x417bdc / 0x417c15), and the wall is installed on that layer with offset 0
+and the wall value of the trigger it duplicates -- 1405 as 1401 (flip left, 0x417be3
+`push 0x579`), 1406 as 1403 (flip right, 0x417c1c `push 0x57b`). That is what lets the
+attract-mode player work the upper flippers.
+
+In the data: `DRAGON.DAT` has 1406 on layer 0; `PIRATES.DAT` 1405 on layer 0 and 1406 on
+layer 2; `CADET.DAT` and `PINBALL.DAT` carry neither. The port read 1400..1404 only. Now
+both are installed when present, so no gate is needed. `TDemo` also gained Full Tilt's
+`Reset` and `PlayerChanged` field helpers (section 24).
+
+## 29. Kicker attribute 404 is normalised on Full Tilt data
+
+`DRAGON.EXE`'s loader handles kicker attribute 404 at 0x40d39b (jump table 0x40d4a0): it
+copies X/Y/Z and jumps to 0x40d471, `call 0x40cb40` -- the same 2D normalise the 410 arm
+ends with. The port's comment said Full Tilt's 404 had no normalise, which was inherited
+from upstream and is wrong for this engine.
+
+`CADET.DAT` has non-unit 404 vectors (|v| = 1.414 on several kickers), so on Full Tilt
+Space Cadet those kickers threw about 41% too hard. Now 404 is normalised over X/Y when
+`pb::FullTiltMode`. 3D Pinball's loader does not normalise, so `PINBALL.DAT` keeps the raw
+vector.
+
+## 30. Debug scaffolding: cached flags, emptied registries
+
+Not a fidelity change. `TPlunger::Message`, `TPlunger::BallFeedTimer` and
+`TBlocker::SetPosition` called `getenv` on every message or step; they now read
+`ft_autodrain_enabled()` / `ft_blockdbg_enabled()`, which cache the lookup as
+`FT_ACCELTEST` and `FT_AUTOPLAY` already did. The `FtAccelDebug.cpp` registries of holes,
+sinks, kickouts, accelerators and ramp exits held component pointers and names that died
+with the table and grew on every table load; `TPinballTable`'s constructor now empties
+them first (`ft_debug_clear_registries`). Normal play prints nothing new.
+
+## 31. The per-frame "That operation is not supported"
+
+Not a fidelity change, and not Full Tilt's: it is upstream's vendored ImGui backend.
+`ImGui_ImplSDL2_NewFrame` (`imgui_impl_sdl.cpp`) called `SDL_CaptureMouse` on every frame.
+Wayland and the dummy video driver have no mouse capture, so every call left "That
+operation is not supported" in SDL's error slot, and `winmain`'s main loop -- which prints
+whatever is in that slot -- printed it once per rendered frame. Its duplicate limiter did
+not help, because the loop iterates more often than it renders and the empty iterations in
+between reset it. A 40 s headless run logged 2,387 copies; `test/play.sh` grew an awk
+filter just to keep them out of the session log.
+
+Found by checking `SDL_GetError` after each stage of the frame: only
+`ImGui_ImplSDL2_NewFrame` set it. The backend now calls `SDL_CaptureMouse` only when the
+wanted state changes, and clears the error when the call is refused. The same 40 s run logs
+one line, raised once during start-up by a call that has not been identified.

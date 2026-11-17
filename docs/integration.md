@@ -104,9 +104,82 @@ named sink or hole and logs the swallow and the eject. On Dragon's Keep every si
 harness can reach gives the ball back -- 68 swallows, 68 ejects across seven sinks,
 including the two-hit fire-lizard path that starts a quest -- and all three holes release.
 See the appendix of `analysis/dragon-ball-handlers.md` and `analysis/dragon-holes-ramps.md`.
-That is still not "the rules are right"; it is "the ball comes back".
+`FT_AUTOPLAY` starts a game and plays it blind; after the review pass below, a 40 s run
+on each bonus table finished with no crash. That is still not "the rules are right"; it is
+"the ball comes back and nothing dereferences null".
 
-The open questions:
+**Nobody has played either table in a real window and compared it with the original.**
+Every claim about behaviour in these documents comes from listings, the decompiled corpus,
+the DATs, and headless runs that render nothing.
+
+### The review pass
+
+A later pass compared every handler, mode controller and helper of both tables against
+its listing, swept `simple_components[]`, censused every function in both rules regions
+(not just the ones bound in `score_components[]`) and reviewed the engine patch. It found
+crashes that the construction harness could not see, because each needs a particular
+action in play:
+
+- **Tilting either bonus table** ran Space Cadet's table-level handler and dereferenced
+  its unbound `lite77`. Each table now has its own (`DRAGON.EXE` 0x424260,
+  `PIRATES.EXE` 0x4230c0), which also carries the new-game, tilt and game-over resets that
+  had been missing: opening jackpots, Dragon's super jackpot, Skulduggery's
+  buried-treasure pouch and brig, the tilt lockdown. `docs/engine-changes.md` section 16.
+- **The Cheats menu or a typed code** on either bonus table ran Space Cadet's backdoor
+  into unbound tags. Each table now has its own key handler (0x4282c0 / 0x42a830), with its
+  own codes and the flipper skip of the bonus count. Section 17.
+- **Slay Dragon** crashed on the fire sweep's fourth light: five of the eight entries of
+  `DragonFireLights` were left null although `.data` at 0x43bb78 names them
+  (v_lite58..62). Filled in.
+
+and behaviour that was silently wrong: every countdown blank (no `TTimer` 0x48,
+section 18), Skulduggery's captive ball reset away at game start (section 19), all eight
+of Dragon's diverters without walls (section 20), cradled balls shoved off unprotected
+flippers (section 21), Dragon's music map and its silent game over (section 23),
+multiplayer state leaking between players (section 24), high scores shared between tables
+(section 25), Skulduggery's combos never breaking because the 0x4d notify went to the
+component's `Message` instead of through the dispatcher, Shoot Again serving a second ball
+because the drain reset was sent as the raw 0x402, raw light-group codes that landed on
+the wrong `TLightGroup` messages, and the `TableG+0x13e` sends -- `TPinballTable::LightGroup`
+-- that Skulduggery had left out. `docs/how-this-was-done.md` section 5.7 has the lessons.
+
+## Open questions
+
+- **Play.** See above; it is the largest open item and the only one that would catch a
+  rule that is faithfully transcribed and wrongly understood.
+- **The alternate ball skin.** Dragon's `PB` and Skulduggery's `GMAX` toggle
+  `pb::AlternateBallSkin` as the originals do, but `GroupData` keeps only the first bitmap
+  of each ball state and `TBall` does not read the flag, so nothing changes on screen.
+- **The quote scroll** is queued as one pass; the original loops until a key stops it.
+- **`TDrain`'s tilt arm** (0x418792, which kills the drain's timer) and **`TPinballTable`'s
+  own `PlayerChanged` arm** (0x419abb) are not ported.
+- **Which picture each Skulduggery glyph token draws.** The token bytes are confirmed
+  against `.data` and now draw through the `font2` symbol font, but which artwork sits at
+  font2's slots for '3'..'9' has not been rendered and checked
+  (`src/pirates_part1.cpp`, `src/pirates_part2.cpp`).
+- **Which physical component** several abstractly-identified ones are -- which outlane
+  `a_kick2` guards (Skulduggery's `src/pirates_part3.cpp` reads `a_kick1` as the outer
+  lane from two coordinates, which is not evidence), which tower each lock belongs to.
+  (Dragon's `unknown_a99c` is no longer one of them: 0x43a99c is `a_sink9`'s `Component`
+  field. The tags are `{const char* Name; TPinballComponent* Component;}` with the name
+  string inline just before, so 0x43a990 holds `"a_sink9"`, 0x43a998 the pointer to it,
+  and 0x43a99c the component -- which makes every unannotated `DAT_0043xxxx` the
+  decompiler left bare identifiable by reading the four bytes before it.)
+- **`FormatWithValue`** (Dragon's 0x42c76f) takes a value the decompile loses on the
+  x87 stack at every call site. It substitutes the last credited score where the string
+  has a specifier and copies the label where it does not. Skulduggery's Peg Leg payout and
+  drain-bonus total now format what `AddScore` returned, as the listings show
+  (0x42d27d, 0x42bbd4); Dragon's call sites have not been rechecked the same way.
+- **A few tags are typed generically** by the generated control tables (Dragon's
+  v_lite58..62 among them), so playing a sound or testing `light_on()` through them needs
+  a `static_cast` down. Safe, because the objects really are `TSound` / `TLight`, but
+  unchecked.
+- **Announcement nits.** The Full Tilt engine's announcement dispatcher (0x422b80 /
+  0x422b90) is stood in for by the engine's Space Cadet strings, which are identical text;
+  its Music/Sound On/Off pause texts are never shown, and its case 0x5f clears the box only
+  when no game-over sequence is running, which is not modelled.
+
+Settled, kept for the record:
 
 - ~~**Success versus timeout is undiscriminated**~~ -- **settled**, see
   `analysis/quest-outcome.md`. A discriminator does exist (`cmp esi,0x4a` at Dragon's
@@ -115,24 +188,11 @@ The open questions:
   was already correct and now has the addresses behind it. The design is deliberate: four
   of Dragon's five quests have no objective to meet at all, and Skulduggery counts and
   pays even its explicitly lost mode (string 3050 "Shipwrecked").
-- **Which physical component** several abstractly-identified ones are -- which outlane
-  `a_kick2` guards, which tower each lock belongs to. (Dragon's `unknown_a99c` is no
-  longer one of them: 0x43a99c is `a_sink9`'s `Component` field. The tags are
-  `{const char* Name; TPinballComponent* Component;}` with the name string inline just
-  before, so 0x43a990 holds `"a_sink9"`, 0x43a998 the pointer to it, and 0x43a99c the
-  component -- which makes every unannotated `DAT_0043xxxx` the decompiler left bare
-  identifiable by reading the four bytes before it. `src/` already had this right; it
-  was only this list that was stale.)
-- ~~**The glyph tokens render as ASCII.**~~ -- **done**. The symbol font is the `font2`
-  group of each bonus table's own DAT, 20 glyphs in `DRAGON.DAT` and 52 in `PIRATES.DAT`,
-  absent from `CADET.DAT`. See `docs/engine-changes.md` section 10 for the geometry that
-  confirms it.
-- **`FormatWithValue`** (Dragon's 0x42c76f) takes a value the decompile loses on the
-  x87 stack at every call site. It substitutes the last credited score where the string
-  has a specifier and copies the label where it does not.
-- **A few tags are typed generically** by the generated control tables, so playing a
-  sound or testing `light_on()` through them needs a `static_cast` down. Safe, because
-  the objects really are `TSound` / `TLight`, but unchecked.
+- ~~**The glyph tokens render as ASCII.**~~ -- **done** on both tables. The symbol font is
+  the `font2` group of each bonus table's own DAT, 20 glyphs in `DRAGON.DAT` and 52 in
+  `PIRATES.DAT`, absent from `CADET.DAT`; see `docs/engine-changes.md` section 10.
+  Skulduggery's `DisplayGlyph` wrapper and four lane handlers still called the text
+  `Display` until the review pass.
 - ~~**Dragon's `a_ramp5`**~~ -- **fixed**, and it was the port's fault. The ramp has no
   handler, which is faithful (it is in neither of `DRAGON.EXE`'s component tables), but it
   was also unreachable: `a_sink16` is its only feeder and the port's `TSink` never put the
@@ -143,3 +203,5 @@ The open questions:
   reading the wrong element of attribute 408. Fixed; see `docs/engine-changes.md`
   section 12. Whether anything still looks wrong needs eyes on a real window -- the
   headless harness renders nothing.
+- ~~**`s_hole118` pops the ball up**~~ -- **fixed**: `THole` ignored attribute 1306, the
+  constant-rate lift; `docs/engine-changes.md` section 26.

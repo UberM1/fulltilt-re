@@ -247,19 +247,24 @@ accelerators, `1037`, `1038` light sweeps, `1042` magnets, `1043` diverters.
 
 The classes for all seven are nevertheless **in CADET.EXE** — they are shared engine code,
 which is why the assertion string `"sweep == NULL"` sits in the Space Cadet binary even
-though Space Cadet never constructs a light sweep. Five were recovered by reading
-CADET.EXE's own `TPinballTable` constructor and are implemented in the patch
-(`TLightSweep`, `TMagnet`, `TDiverter`, plus `1034` as a `TPlunger` flag and `1037` as a
-`TBall`); two remain stand-ins, and the patch says which and why:
+though Space Cadet never constructs a light sweep. Five were recovered first, by reading
+CADET.EXE's own `TPinballTable` constructor (`TLightSweep`, `TMagnet`, `TDiverter`, plus
+`1034` as a `TPlunger` flag and `1037` as a `TBall`). `1035` and `1036` shipped for a while
+as stand-ins -- a `TRamp` and a `TKickout` -- and are now real classes, `TRampExit` and
+`TAccelerator`, built from their own constructors in the bonus binaries:
 
 ```
-case 1035:  // STAND-IN. The real class is a TCollisionComponent with no Message
-            //   override at all -- only Collision -- plus two collision-mask bit fields
-            //   built by shifting 1 left by attribute 1301's two values.
-case 1036:  // STAND-IN. The real class installs a field effect over its own AABB and
-            //   accelerates the ball through it; a kickout's field pulls toward a centre
-            //   instead of pushing along a direction.
+case 1035:
+    // s_rexit*: ramp exits, one ramp wall (1301) each.
+    new TRampExit(this, groupIndex);
+case 1036:
+    // a_accl*: accelerators, a wall plus a kicker.
+    new TAccelerator(this, groupIndex);
 ```
+
+A later review compared both against their listings (`TRampExit` 0x41b4f0 / 0x41b6b0,
+`TAccelerator` 0x41b7d0 / 0x41b8f0 / 0x41b9f0) and found them exact. No object type in
+either DAT now falls to the loader's `default:`.
 
 The lesson generalises: the oracle binary contains more than the published decompilation
 of it does, because the publisher only decompiled what their data exercised.
@@ -398,17 +403,29 @@ the corpus is trustworthy and only its argument values need treating as suspect.
 
 - **`coverage.py`** reports three numbers that are routinely conflated: *decompiled* (near
   total, not the bottleneck), *classified* (triage), *implemented* (the real one). It counts
-  bytes as well as handlers, because handlers vary by an order of magnitude in size.
+  bytes as well as handlers, because handlers vary by an order of magnitude in size. Its
+  "implemented" counts only the functions bound in `score_components[]`, and §5.7 is what
+  that blind spot cost; it now also prints a census of the whole rules region.
 
-At the time of writing:
+At the time of writing (abridged):
 
 ```
 $ python3 analysis/coverage.py
-DRAGON    decompiled 631 | classified 50/64 (78%) | implemented 64/64 (100%), 19584/19584 bytes
-PIRATES   decompiled 364 | classified 51/69 (74%) | implemented 68/69 (99%), 32384/32448 bytes
-          remaining: Pirates_a_flip2_Control
-hand-written C++: 16982 lines across 16 files
+DRAGON
+  classified     50/64  (78%)  have a Space Cadet template
+  implemented    64/64  (100%)  score_components[] handlers with a C++ body
+  rules region 0x422a80..0x42c290 (whole region, not just score_components[])
+  functions     124/124  (100%)  with a counterpart: 118 cited in src/, 0 inlined, 6 engine side
+PIRATES
+  classified     51/69  (74%)  have a Space Cadet template
+  implemented    69/69  (100%)  score_components[] handlers with a C++ body
+  rules region 0x422a80..0x42daa0 (whole region, not just score_components[])
+  functions     177/177  (100%)  with a counterpart: 170 cited in src/, 1 inlined, 6 engine side
+hand-written C++: 18301 lines across 16 files
 ```
+
+"Cited" is an address in a comment next to a reimplementation. It is a counterpart, not a
+proof of behaviour, and §5.7 records a time it was not even a definition.
 
 ### 3.4 The engine patch, and how its contents were decided
 
@@ -446,6 +463,12 @@ unusually honest about its own scope, which is worth repeating here:
 
 Its warning allowlist is a record of understood warnings, not a wishlist — anything not
 listed fails the table, so a new warning is a regression by default.
+
+Beyond it there is an env-gated debug harness in the engine (`FtAccelDebug.cpp`):
+`FT_AUTOPLAY` starts a game and plays it blind, and `FT_HOLETEST` / `FT_SINKTEST` drive the
+ball into a named hole or sink and log what happens. Those catch crashes and stuck balls.
+None of it renders, and no one has yet played either table in a real window against the
+original.
 
 ---
 
@@ -663,6 +686,85 @@ sequence; treat §5.5 as the weakest-sourced item in this document.*
   unknown binaries are oracles for each other, which is a resource that only exists once
   both are partly understood.
 
+### 5.7 What the review pass overturned
+
+With every handler written and both tables running, a review compared each handler, mode
+controller and helper against its listing, swept `simple_components[]`, censused every
+function in both rules regions, and reviewed the engine patch. The fixes are in
+`docs/engine-changes.md` sections 16-30 and in `src/`. Four lessons are worth more than the
+list.
+
+**The coverage figure measured the wrong set.** `coverage.py` said 64/64 and 69/69 from the
+seed files, i.e. from `score_components[]`. Four functions are bound in neither array and
+reached only from engine code: each table's table-level control handler (`DRAGON.EXE`
+0x424260, `PIRATES.EXE` 0x4230c0) and its key handler (0x4282c0, 0x42a830). The engine ran
+Space Cadet's in their place, so the first tilt on either table dereferenced Space Cadet's
+unbound `lite77`, and the Cheats menu reached several other unbound Space Cadet tags.
+With them went every per-game reset -- Dragon's super jackpot started at 0, Skulduggery's
+buried-treasure pouch and brig carried into the next game -- and the flipper skip of the
+bonus count. The census that found them takes every function between the first and last
+address with no CADET counterpart and gap-checks the bytes in between; it is now the
+second measure in `coverage.py`. A citation count would still not have caught them on its
+own, because 0x424260 and 0x42a830 were already *mentioned* in comments.
+
+**"Cannot be found in the binary" was three times a claim about where nobody had looked.**
+
+- *Dragon's music map.* Two files said which TABCn file each quest plays "is nowhere in
+  .text -- the globals hold loader handles, so it needs the track table out of DRAGON.DAT,
+  or a running table". True of every reader of the handles. But something writes them,
+  and it was the unported table-control handler: its 0x3f7 arm loads them **by name**
+  (`push 0x43bc00 ("tabc7"); call 0x40e9d0; mov ds:0x439af8,eax`, and so on). Four of
+  eight roles were wrong; game over asked for a track that does not exist and was silent.
+- *`TDiverter`'s 604.* A note in the engine read "an earlier note here guessed attribute 604
+  and a segment list. It is 600, a single line". The earlier note was right. 0x41bb70 tests
+  whether 600 is a single line and, when it is not, jumps to 0x41bbeb and walks 604's
+  `{2.0, x0, y0, x1, y1, z}` records. Every diverter in `DRAGON.DAT` carries only 604, so
+  all eight had no walls. The correction had found the first branch and stopped.
+- *`TableG+0x13e`.* Skulduggery's game-over flash and drain-bonus blackout were left as
+  `GAP` comments because "0x13e is not a `TPinballTable` field this corpus names anywhere
+  else" -- and the comment itself said reading the table's field layout out of CADET.EXE
+  would settle it. The constructor does: `0x41a3dc call 0x40aca0` (`new TLightGroup(this,
+  0)`), `0x41a3e1 mov [esi+0x13e],eax`. It is `TPinballTable::LightGroup`, and Dragon's
+  slice had already used it.
+
+The same review settled two `UNVERIFIED` markers that said the binary had nothing more to
+say and only play would decide: the brig counter (`ResetBrigLights` zeroes it at 0x425dd4,
+so a fourth Tavern hit is a first hit) and Skulduggery's shared wheel cursor (every mode's
+0x4f calls `StartOfEveryMode` first, which zeroes it at 0x42aada). In each case the answer
+was in a callee or a sibling, not in the function under study. "The rules corpus does not
+contain it" is a statement about the corpus; the engine corpus, the other table and the
+callees are part of the binary too.
+
+**A raw Full Tilt code where the port's enum value was needed.** The port numbers messages
+its own way (§5.1), so a message sent with `static_cast<MessageCode>(0x..)` is right only
+if the receiver's class happens to use the raw number. Four did not:
+
+- Skulduggery's `DrainReset` was the raw 0x402 (1026). The comment above it explained that
+  FT 0x402 is the port's `Reset` (1024); the code sent 1026, `TDrain` ignored it, its timer
+  survived, and every Shoot Again served a second ball.
+- `TimerSet` was the raw 0x45 (69) in two Skulduggery files, where the port's
+  `TTimerResetTimer` is 59. The mode-timer re-arms -- the captive ball's +10 s, the drain
+  bonus's 30 s backstop, the `Forever` cancel -- were ignored.
+- Three light-group codes (0x29, 0x2a, 0x2d) were sent raw. In the port's numbering they
+  are `TLightGroupResetAndTurnOn`, `ResetAndTurnOff` and `ToggleSplitIndex`, so "how many
+  are on?" switched the group on and returned garbage.
+
+Each one compiles, links and runs, because an unknown code falls into the receiving
+class's `default:` and does nothing. The earlier light-override bug (`docs/integration.md`,
+"Inert light overrides") was the same class. A cast of a bare number to `MessageCode` is
+now worth treating as a defect until the receiver's class is checked. A fifth case had the
+right code and the wrong route: Skulduggery's 0x4d "you are no longer the last scorer" went
+to the component's own `Message`, where the originals push it through the dispatcher
+(`push 0x4d; call 0x423080`), so the four lane handlers that break combos on it never saw
+it.
+
+**A fix applied to one table is a question for the other.** Dragon's glyph tokens were
+rewired to the symbol font (`docs/engine-changes.md` section 10); Skulduggery's
+`DisplayGlyph` wrapper and four of its lane handlers still called the text `Display`, so the
+player saw "9" and "KKKK" for the artwork. Dragon had pinned `TableG+0x13e`; Skulduggery's
+`LightGroup` sends stayed out. The two slices were written in parallel, and a correction to one
+was not propagated to its twin.
+
 ---
 
 ## 6. What is still unknown
@@ -670,61 +772,77 @@ sequence; treat §5.5 as the weakest-sourced item in this document.*
 Stated plainly, because the failure mode of a project like this is a confident port that is
 quietly wrong.
 
-**Compiling and running prove neither correctness nor fidelity.** `test/run_tables.sh`
-green means both tables construct, bind and enter the main loop. It does not launch a ball.
-Read it as "still boots", not "still right" (§3.5).
+**Nobody has played either table in a real window and compared it with the original.**
+That is the largest open item and it is not close. `test/run_tables.sh` green means all
+three tables construct, bind and enter the main loop; a 40 s `FT_AUTOPLAY` run on each
+bonus table finishing without a crash means a game started and a ball played blind without
+a null dereference. Neither renders anything, reads a score or completes a quest. Read them
+as "still boots, still does not crash", not "still right" (§3.5). §5.7 is the evidence that
+a whole class of bug -- crashes that need a particular action in play, rules that do
+nothing because a code went to the wrong place -- survives both.
 
-**79 `UNVERIFIED` markers across 13 files in `src/`**
-(`grep -o UNVERIFIED src/*.cpp | wc -l`; most are `// UNVERIFIED:` on their own line, a few
-qualify a specific aspect, e.g. `// UNVERIFIED rendering`, `// UNVERIFIED value`). They are not a backlog of unwritten code — each is a
-written implementation with its uncertainty stated at the site. Representative kinds:
+**4 `UNVERIFIED` markers in 3 files in `src/`** (`grep -rn UNVERIFIED src/`), down from 79
+in 13 files at the first writing of this section. They are not a backlog of unwritten code;
+each is a written implementation with its remaining uncertainty stated at the site, and
+each says what would settle it:
 
-- *Message code `0x4d`*: sent by `AddScoreFor`/`AddScoreAt` to the previously-scoring
-  component. By the `+11` offset it would be upstream's `ControlMissionComplete`, which
-  makes no sense for the recipient. No Dragon handler has a `0x4d` case and no
-  `TLight`/`TBumper`/`TSoloTarget` `Message()` can accept it, so it looks like a no-op
-  everywhere it lands — but the tracker it reads is real and is cleared on ball launch.
-- *`TPinballTable + 0x18e`*, set to 1 by the extra-ball award. String 3011 makes the
-  *meaning* certain; the offset is past the last anchored field (`JackpotScoreFlag` at
-  `+0x176`), so the name is a best fit, not a match.
-- *Diverter polarity*: `0x3e`/`0x3f` are `TGateDisable`/`TGateEnable` by position in the FT
-  code block, and the diverters are FT class 1043 rather than `TGate`. Which of a pair is
-  "open" is not pinned.
-- *`TBlocker` `+0x7e`*: Dragon's fire-lizard sinks read it as a float through `fld`; its
-  gargoyle rocks compare the same offset against `-1` as an int. Both readings reconcile if
-  it is a float whose `-1.0` means "no duration". Shipped as `UnknownP7e`, and no rule
-  depends on the answer.
-- *Glyph tokens*: several displays pass one-character strings (`"!"`, `"#"`, `"##"`, …)
-  with a fourth `Display` argument of 1. They are glyph tokens in a symbol font, not text.
-  Rendering them as ASCII puts `#` and `!` on the playfield.
+- *Which picture each Skulduggery glyph token draws* (`src/pirates_part1.cpp`,
+  `src/pirates_part2.cpp`, two markers). The token bytes are confirmed against `.data` and
+  now draw through the `font2` symbol font (`docs/engine-changes.md` section 10), but
+  nobody has rendered font2's slots for '3'..'9' to see the artwork. The rules do not
+  depend on the pictures.
+- *Whether the 1996 source meant to feed a jackpot helper's dwell into a notify timer*
+  (`src/pirates_part2.cpp`). The behaviour is exact and a second site does the same; only
+  intent is open, and object code cannot show intent.
+- *Which of Skulduggery's two left-side lanes the manual calls the outlane*
+  (`src/pirates_part3.cpp`). A `.DAT` geometry question; nothing in the rules branches on it.
 
-**Success versus timeout is undiscriminated on both tables.** This is the largest open
-question and it is the same on each: the binaries call the same teardown path whether a
-mode is won or runs out, so a timed-out quest still lights its light and still counts
-toward the drain bonus. `analysis/pirates-rules.md`'s closing open item 5 marks the *mechanism* `[C]` — there
-is no discriminator anywhere in the dispatcher or the eight controllers — and the *intent*
-`[U]`. It is written as the binary behaves. Watching a real game is the only thing that
-settles whether that is the design or a bug faithfully reproduced.
+Items this section used to list that are now settled: the 0x4d notify is real and goes
+through the dispatcher, where Skulduggery's lane handlers break their combos on it (§5.7);
+`TPinballTable+0x18e` is `ExtraBalls`, pinned through CADET.EXE's `table_add_extra_ball`;
+`TBlocker`'s `+0x7e` is the moving part's integer position index, and the float reading
+belongs to `TSink`, a different class at the same offset (`docs/engine-changes.md`
+section 5); diverter polarity follows from the recovered `TDiverter`; the glyph tokens draw
+in the symbol font on both tables.
 
-**Two of the seven object classes are still stand-ins** (§2.4): `1035` ramp exits as
-`TRamp`, `1036` accelerators as `TKickout`. Both behave approximately — a ramp exit's
-collision-mask bits are wrong, and an accelerator's field pulls toward a centre instead of
-pushing along a direction. The real constructors are in `DRAGON.EXE` and `PIRATES.EXE`.
+**Success versus timeout is settled**, not open: `analysis/quest-outcome.md`. A
+discriminator exists (`cmp esi,0x4a` at Dragon's 0x429a18), but it only chooses which mode
+the teardown returns to; the quest is booked either way, and the reconstruction already did
+exactly that. Four of Dragon's five quests have no objective to meet at all, and
+Skulduggery counts and pays even its explicitly lost mode, so this reads as the design.
+
+**All seven new object classes are real** (§2.4); none is a stand-in any more.
+
+**Known gaps in the port**, each stated where it lives:
+
+- The alternate ball skin cheat (Dragon's `PB`, Skulduggery's `GMAX`) toggles
+  `pb::AlternateBallSkin` and nothing reads it, because `GroupData` discards each ball
+  state's second bitmap (§5.5) and `TBall` does not consult the flag.
+- The quote scroll is queued as one pass; the original loops until a key stops it.
+- `TDrain`'s tilt arm (0x418792, which kills its timer) and `TPinballTable`'s own
+  `PlayerChanged` arm (0x419abb) are not ported.
+- `TDiverter`'s back-face sprite kick (0x41bc50) is not reproduced.
+- The Full Tilt engine's announcement dispatcher is stood in for by the engine's identical
+  Space Cadet strings, minus its Music/Sound On/Off pause texts.
 
 **Component identity is partly abstract.** Which outlane `a_kick2` guards, which tower each
-lock belongs to, whether `a_kout3` or `a_blocf` is the thing the manual calls the magnet —
-these are `.DAT` geometry questions, answerable by locating the components in
-`DRAGON.DAT`, and not yet answered.
+lock belongs to, whether `a_kout3` or `a_blocf` is the thing the manual calls the magnet --
+these are `.DAT` geometry questions, answerable by locating the components in the DATs, and
+not yet answered. `docs/integration.md` keeps the list.
 
 **Some questions are outside the corpus by construction.** `analysis/pirates-rules.md`'s
-open item 3 notes that one open item lives inside a component class — *"that is engine code and is not
+open item 3 notes that one open item lives inside a component class -- *"that is engine code and is not
 in this corpus at all, so no amount of reading the table rules will settle it"*. Knowing
-which questions the available evidence *cannot* answer is part of the result.
+which questions the available evidence *cannot* answer is part of the result -- with the
+caution from §5.7 that "not in this corpus" has more than once meant "in a corpus nobody
+opened".
 
-**`simple_components[]` has not been swept.** 192 entries for Skulduggery against the score
-table's 74, so ~118 components are bound with no handler of their own. It was consulted
-once, to resolve `v_lite527`. A full sweep against the lights these documents reference is
-the cheapest remaining way to find a "who writes this light" gap.
+**`simple_components[]` has been swept.** Both binding arrays in `src/control_dragon.cpp`
+and `src/control_pirates.cpp` list exactly the binaries' tags (150 and 192), in the same
+order, with nothing missing or extra, and every name was cross-checked against the
+original rules' uses and the port's. The one gap was Dragon's v_lite58..62, which the
+original writes through the fire-sweep table at 0x43bb78 and the port had left null --
+a crash in Slay Dragon, now fixed.
 
 ---
 
@@ -783,11 +901,13 @@ The four things most worth attacking, in order:
 3. **`[P]` and `[S]` claims in the analysis documents.** §5.4 is the measured base rate:
    when Skulduggery's dispatcher was finally read, every `[C]` claim held and three of four
    `[P]` claims needed correcting.
-4. **Anything a running table cannot settle.** §6 is the list. In particular, no amount of
-   play discriminates success from timeout, because the binaries do not.
+4. **Anything a running table cannot settle.** §6 is the list -- and, the other way
+   round, everything that only play would catch, since no one has played these tables in
+   a real window yet.
 
 The strongest evidence that the method works is not that both tables reach 100% handler
-coverage — a generator can produce that. It is that three unrelated measurements agreed on
+coverage — a generator can produce that, and §5.7 shows the figure reading 100% while two
+functions per table were missing. It is that three unrelated measurements agreed on
 where the rules live, that the component table reproduced a published decompilation's
 declaration order entry for entry before being trusted on an unknown binary, and that the
 tag counts reconcile exactly against the two binding arrays in all three images. The

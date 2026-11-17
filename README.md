@@ -142,15 +142,38 @@ they were how the rules region was first located, and their 10 named exports
 
 ## Status
 
-Both tables' rules are written and every one of the twelve files compiles against the
-patched engine with zero errors. What is left is linking them in and playing a ball --
-`docs/integration.md` is that step, and `docs/engine-changes.md` is the patch that got
-here.
+Both tables' rules are written, linked into one engine binary with Space Cadet, and bound
+per table: `nix-build build.nix` builds it and each table loads its own DAT, its own
+component tables, its own mode machine, its own table-level and key handlers.
+`docs/integration.md` is the linking, `docs/engine-changes.md` the engine patch.
 
-| | components | handlers | implemented |
-|---|---|---|---|
-| Dragon's Keep | 75 | 64 | **64 (100%)** |
-| Skulduggery | 74 | 69 | **69 (100%)** |
+**Nobody has yet played either table in a real window and checked it against the
+original.** Everything below is reading, listings, and a headless harness.
+
+### Coverage, two ways
+
+`python3 analysis/coverage.py` prints both. They answer different questions and only the
+second one is "the whole rules region":
+
+| | `score_components[]` handlers with a C++ body | rules-region functions with a counterpart |
+|---|---|---|
+| Dragon's Keep | 64/64 | 124/124 (118 in `src/`, 6 generic engine code) |
+| Skulduggery | 69/69 | 177/177 (170 in `src/`, 1 inlined, 6 generic engine code) |
+
+The first column counts only the functions bound in the binary's component table. It read
+100% for a long time while two functions per table that are bound in neither array --
+the table-level control handler (`DRAGON.EXE` 0x424260, `PIRATES.EXE` 0x4230c0) and the
+key handler (0x4282c0 / 0x42a830) -- were missing. The engine ran Space Cadet's versions in
+their place, which dereferenced a Space Cadet light on the first tilt and Space Cadet tags
+from the Cheats menu.
+The second column is the census of every function Ghidra finds between 0x422a80 and the
+end of each table's region (0x42c290 / 0x42daa0), checked for functions Ghidra missed. The
+six engine-side ones are `make_links`, `make_component_link`, the component dispatcher,
+the credits scroller, its stop, and the announcement dispatcher. "Counterpart" means the
+address is cited in `src/` next to a reimplementation; it does not mean the
+reimplementation is behaviourally right.
+
+### What has been done
 
 - [x] Locate the rules region (rva `0x023000`-`0x02d000`, ~40 KB), three ways
 - [x] Validate every extraction method against `control.cpp` before using it
@@ -160,19 +183,47 @@ here.
 - [x] Disassemble every handler with objdump, as an independent check on the decompiler
 - [x] Resolve every `DAT_<addr>` to its component name (4,240 references annotated)
 - [x] Recover Full Tilt's `MessageCode` numbering (piecewise)
-- [x] Dragon's Keep: all 64 handlers and the quest state machine
-- [x] Skulduggery: the mode state machine and 63 of 69 handlers
-- [x] Build upstream from source (`nix-build build.nix`)
-- [x] Skulduggery: all 69 handlers
-- [x] The engine changes in `docs/engine-changes.md` -- every rule file compiles
-- [x] Point the component tables at the real handlers rather than generated stubs
-- [ ] Wire `reference/SpaceCadetPinball/table_rules.h` into the engine and actually play a ball
+- [x] Dragon's Keep: all 64 handlers, the quest state machine, the table-level and key
+      handlers
+- [x] Skulduggery: all 69 handlers, the mode state machine, the table-level and key
+      handlers
+- [x] The engine changes in `docs/engine-changes.md`, gated so `PINBALL.DAT` (3D Pinball)
+      runs as upstream did; `CADET.DAT` shares the Full Tilt engine corrections, since
+      `CADET.EXE` is the same engine
+- [x] Link everything into one binary; per-table dispatch through `TableRules`
+- [x] A review pass comparing every handler, controller and helper against its listing,
+      and a census of the whole rules region (findings fixed; see
+      `docs/how-this-was-done.md` section 5.7)
 
-### What the compiler says
+### What the harness proves
 
-Five of nine rule files compile against **unmodified** upstream headers. The split is
-itself a finding: per-component rules need nothing Space Cadet did not already need, and
-every outstanding error comes from running more than one table.
+`test/run_tables.sh` builds the engine and runs Space Cadet, Dragon's Keep and Skulduggery
+headlessly: each table's DAT parses, every component is constructed and bound, and the
+main loop runs until told to quit. The review pass was also smoke-tested with a 40 s
+`FT_AUTOPLAY` run per bonus table (it starts a game, launches the ball and plays it
+blind), with no crash. The env-gated debug harness (`FtAccelDebug.cpp`) has driven balls
+into every reachable sink and hole on Dragon's Keep and seen each one give the ball back.
+None of this reads a score, completes a quest, or looks at the screen.
+
+### What is still open
+
+- **Play in a real window.** No rule has been checked by a person against the original
+  game. The headless runs render nothing and prove "constructs and does not crash".
+- **The alternate ball skin cheat does nothing visible.** Dragon's `PB` and Skulduggery's
+  `GMAX` toggle `pb::AlternateBallSkin` as the originals do, but `GroupData` keeps only
+  the first bitmap of each ball state and `TBall` does not read the flag, so the smiley /
+  brass ball never appears.
+- **The quote scroll runs once.** The original loops in the text box's scroll slot until a
+  key stops it; the port queues one pass.
+- **`TDrain`'s tilt arm** (0x418792, which kills the drain's timer) is not ported.
+- **`TPinballTable`'s own `PlayerChanged` arm** (0x419abb) is not ported; the components'
+  per-player swaps are.
+- **Which picture each Skulduggery glyph token draws** is unverified: the token bytes are
+  confirmed against `.data`, the `font2` artwork at those slots has not been rendered.
+- **Component identity** questions listed in `docs/integration.md`.
+- The announcement nits: the Full Tilt engine's Music/Sound On/Off pause texts are never
+  shown, and its "clear the box only when no game-over sequence is running" case is not
+  modelled.
 
 ## Pipeline
 
@@ -214,7 +265,7 @@ analysis/   the scripts above, and their output
 binaries/   win95/ (PE32 i386, the real targets) and win31/ (NE 16-bit)
 game/       playable 32-bit install from the CD
 docs/       FULLTILT.HLP (the CD's manual) and a rules spec drawn from it
-src/        the reconstructed rules -- ~17,000 hand-written lines plus three generated
+src/        the reconstructed rules -- ~18,300 hand-written lines plus three generated
             files (the two control tables and the component glue); tracked
 reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
             (untracked; re-clone with
