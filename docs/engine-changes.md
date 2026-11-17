@@ -1258,3 +1258,84 @@ DirectSound, so the original skipped its light show and took a plunger pull 1.4 
 Ours, with the dummy driver, waited out the light-show WAV (about 4 s on Space Cadet) and
 ignored that pull, because the plunger ignores presses until a ball is in play
 (0x41898a: `[table+0x192]`). Run ours with `-noaudio` to compare against silent Wine.
+
+## 38. The tilt timeout is 15 s on Full Tilt data
+
+`TPinballTable::tilt` armed `tilt_timeout` for 30 s, 3D Pinball's value. Full Tilt arms it
+for 15 s (0x41a25b `push 0x41a1b0` / 0x41a261 `push 0x41700000` / 0x41a266 call
+timer::set). The bytes are the same in CADET.EXE, DRAGON.EXE and PIRATES.EXE, so it is
+gated on `pb::FullTiltMode`; PINBALL.DAT keeps 30 s. Run: `FT_TABLETEST=tilt` (see
+section 39) on Skulduggery reports the timer gone after 15.000 s of game time (30.000 s
+before the change).
+
+## 39. The tilt timeout leaves table-placed balls alone
+
+`tilt_timeout` called `Drain->Collision` for every ball in `BallList`. Full Tilt skips the
+balls the table placed itself (0x41a1f4 `mov eax,[esi]` / 0x41a1f6 `cmp [eax+0x153],ebp` /
+0x41a1fc `jne 0x41a216`, past the call at 0x41a213); +0x153 is our `TBall::HasGroupFlag`.
+Without the skip, every tilt drained Skulduggery's captive ball: `TDrain::Collision`
+disabled it and took one more off `MultiballCount`, Reset never re-enables a placed ball,
+and `AddBall` then reused it as the next fed ball. Same bytes in all three EXEs; gated on
+`pb::FullTiltMode` (3D Pinball places no ball, so the gate changes nothing there).
+
+`FT_TABLETEST=tilt` (FtAccelDebug.cpp, inert without the variable) starts a game, tilts
+with the fed ball pinned in the lane so only the timeout can end the tilt, and logs the
+placed balls before and after. Skulduggery: before the change the captive ball was
+`active=0` after the timeout and 6 s later sat at the plunger as the fed ball; now it stays
+`active=1` at (4.573,-8.777) throughout.
+
+## 40. The super jackpot is kept per player
+
+The table saved and restored `JackpotScore` on a player change but not
+`SuperJackpotScore`. Full Tilt keeps both in the 32-byte player record: the super jackpot
+at +0x92, seeded for players 2-4 at new game (0x41998c `mov ecx,[edi+0x17a]` / 0x419992),
+saved at 0x419b9b..0x419baa and restored at 0x419bf4..0x419bfa. `score_struct_super` gains
+the slot; the three copies are gated on `pb::FullTiltMode` (same bytes in CADET.EXE, and
+Space Cadet never reads the value). As in the original, the seeding happens before the
+table handler's new-game arm, so on Dragon's Keep player 1 starts at 2,500,000 and the
+other players at the Reset arm's 20,000.
+
+`FT_TABLETEST=players` runs a two-player game, stamps each player's value and drains.
+Dragon's Keep: player 1 2500000 -> set 1111111; player 2 20000 -> set 2222222; player 1
+back with 1111111; player 2 back with 2222222. Skulduggery gives the same round trip.
+
+## 41. StartGamePlayer1 sends the master light group only the reset
+
+On StartGamePlayer1 the table sent its light group `TLightGroupReset` and then
+`TLightResetAndTurnOff`. Full Tilt sends one message, 0x4197c9 `push 0` / 0x4197cb
+`push 0x26` (Full Tilt's TLightGroupReset, engine 34) / 0x4197cf call, then goes straight
+to the plunger (0x4197d8). Same bytes in CADET.EXE; the second message is skipped on
+`pb::FullTiltMode`. The rest-state comparison is unchanged (0 differences on both tables).
+
+The "Player N" text that follows (and the one at SwitchToNextPlayer) was untimed on every
+table. Each Full Tilt executable shows it through its own text-event function, codes
+0x60..0x67 (demo / normal text for players 1-4), and each passes its own time to
+TTextBox::Display: CADET.EXE 0x42a750 6.0 s (`push 0x40c00000` in all eight arms,
+0x42a895..0x42a991), PIRATES.EXE 0x422b90 1.0 s (`push 0x3f800000`, 0x422ccc..0x422dc8),
+DRAGON.EXE 0x422b80 untimed (`push 0xbf800000`, 0x422cbc..0x422db8). The time is now
+`TableRules::PlayerTextTime` (0 = untimed, so PINBALL.DAT, DEMO.DAT and Dragon's Keep
+keep -1; DEMO.DAT's executable was not available to check). At StartGamePlayer1 Full
+Tilt also shows the text only when the table has a demo part (0x4197e7 `mov eax,[edi+0x112]`
+/ 0x4197ef `je 0x419802`), gated on `pb::FullTiltMode`. The player-change arms read the
+demo part null-safely (0x419ca1..0x419ca9) and now do the same.
+
+## 42. Nudging needs a ball in play; the tilt needs no ball draining and no demo
+
+Full Tilt's keydown (0x41221a..0x412294) returns from each bump key unless
+`[table+0x192] >= 1` (`MultiballCount`) as well as `[table+0x1b2] == 0` (`TiltLockFlag`).
+Its frame (0x411b03..0x411b6d) shows the nudge warning only with `TiltLockFlag` and
+`[table+0x6a]` (`BallInDrainFlag`) both clear, and tilts only if, in addition, the demo part
+`[table+0x112]` is absent or its byte +5 (`ActiveFlag`) is 0. Ours tested `TiltLockFlag`
+alone in both places. The extra conditions are gated on `pb::FullTiltMode`; the three EXEs
+differ in these ranges only in global addresses.
+
+## 43. The 2 s start-up wait
+
+Full Tilt's WinMain waits 2000 ms before the first game or demo (0x4221b0..0x4221f2: a
+timeGetTime loop, `cmp eax,0x7d0 / jae`, around `PeekMessage(..., PM_REMOVE)` with no
+dispatch, so input typed during it is dropped). winmain now does the same on
+`pb::FullTiltMode`: it pumps SDL events for 2 s, flushing input events
+(SDL_KEYDOWN..SDL_MULTIGESTURE) and leaving window and quit events queued. No `pb::frame`
+runs, so game time does not move and the headless harnesses (test/run_tables.sh,
+test/restdump) are unaffected apart from 2 s of wall clock. Only global addresses differ
+in this range across the three EXEs.
