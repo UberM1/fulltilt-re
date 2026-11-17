@@ -1385,3 +1385,91 @@ SetTiltLock and no engine arm the drain's timer would survive and serve a second
 Gated on `pb::FullTiltMode`; CADET.EXE has the same arm at the same address. A run of the
 `FT_AUTODRAIN` harness on Dragon's Keep with a sentinel in the drain's MessageField shows one
 relaunch either way and the sentinel kept (it was zeroed before).
+
+## 48. A light group resumes the incoming player's animation from its animation code
+
+`TLightGroup`'s `PlayerChanged` arm restores the incoming player's animation code and
+interval and then, in upstream, calls `TimerExpired` if `MessageField` is non-zero. The
+Full Tilt engine tests the animation code it has just restored instead:
+`0x40bc26 mov ecx,[esi+ecx*4+0x62]` / `0x40bc2a mov [esi+0x52],ecx` / `0x40bc2d test ecx,ecx`
+/ `0x40bc35 je` / `0x40bc3a call 0x40ada0` (TimerExpired). +0x52 is `MessageField2`. So in
+a multiplayer game a chase or blink running for the incoming player was not restarted
+unless the group's `MessageField` happened to be non-zero, and groups with a non-zero
+`MessageField` and no animation got a spurious `TimerExpired`. The whole of
+`TLightGroup::Message` (0x40af80..0x40bc7f) is byte-identical in DRAGON.EXE and CADET.EXE
+apart from CRT call targets; gated on `pb::FullTiltMode`. `PlayerChanged` is sent only by
+the player switch, so single-player games and the new-game rand draws are unaffected.
+
+## 49. Light-group steps do not copy the lights' MessageField
+
+`TLightGroupStepBackward` / `StepForward` shift each light's on/off state to its
+neighbour and, in upstream, its `MessageField` with it. The Full Tilt arms (0x40b00f
+backward, 0x40b0fc forward) read only each light's `LightOnFlag` (+0x42) and send
+`TurnOn`/`TurnOff`; nothing in them stores to a light's +0x6. (The wave-3 cross-check
+cited 0x40b20d / 0x40b2e2; those are the `AnimationBackward` / `Forward` arms, which do
+not copy it in upstream either.) Identical in CADET.EXE (same range as section 48);
+the copies are skipped on Full Tilt data.
+
+## 50. A bumper's lamp flash ends at a player change
+
+`TBumper`'s `PlayerChanged` arm in the Full Tilt engine (`TBumper::Message` 0x414160,
+arm at 0x4142ed) first kills a running lamp timer and runs its expiry:
+`0x4142f9 mov eax,[esi+0x7a]` / `0x4142fe je` / `0x414301 call 0x41f900` /
+`0x41430b call 0x414020`, then swaps `BmpIndex` per player. Upstream left the timer
+running, so a bumper lit by the outgoing player's last hit stayed lit into the next
+player's ball and its collision threshold stayed raised until the timer fired. Same bytes
+at the same addresses in CADET.EXE; gated on `pb::FullTiltMode`.
+
+## 51. A sink tells the rules when it has ejected
+
+The sink's eject timer (0x418500) ends, after the throw and the eject sound, with
+`0x418640 push esi` / `0x418641 push 0x46` / `0x418643 call control::handler`, i.e.
+`ControlTimerExpired` from the sink. Only the eject path sends it: the "lane occupied,
+retry in 0.5 s" path returns at 0x4185b0 first. Same bytes at the same addresses in
+CADET.EXE (calling 0x422bc0 there); upstream's `TSink` never sent it. Now sent on Full
+Tilt data.
+
+What it reaches (`control::handler` calls the sink's own handler and the table's mode
+handler):
+
+- **Sink handlers.** Every Dragon sink handler returns at once unless the code is 0x4a
+  (`cmp [esp+..],0x4a / jne` at the top of 0x425ea0, 0x426000, 0x426140, 0x426f90,
+  0x427100, 0x427290, 0x4273d0, 0x4274d0, 0x427680, 0x427f10). On Skulduggery the nine
+  at 0x427b90, 0x427e50, 0x428120, 0x4283f0, 0x428700, 0x428800, 0x428a20, 0x428a90,
+  0x428b00 do the same. The one exception is the lava sink a_sink8 (0x42a3d0): on 0x46
+  it plays its sound (`[0x43c45c]`, vtable +0x18) unless the mode register is 0xc
+  (Lava-Ball). Our `pirates::LavaSinkControl` already had that arm; until now nothing
+  reached it.
+- **Dragon's mode handler (0x42c020).** Its jackpot accrual does not look at the code:
+  a call from a_sink4 or a_sink1 adds 75,000 (`0x42c0c4..0x42c0d9`, `push 0x124f8`,
+  `call 0x4238a0`), so each eject from those two sinks pays the jackpot a second time.
+  Our `dragon::MissionHandler` already accrues regardless of the code. Every mode
+  controller's 0x46 arm checks the caller's type (Timer 0x408 or LightSweeps 0x40e) or
+  that it is mode_timer (0x428870, 0x428a80, 0x4291c0, 0x429510, 0x429b10, 0x429ec0,
+  0x42a150, 0x42b7c0), and the others have no 0x46 arm, so a sink's notification goes no
+  further. Ours checks the same way.
+- **Skulduggery's mode handler (0x42d850).** Any call from a sink adds 40,000 to the
+  jackpot (`0x42d882 cmp eax,0x3f9` / `0x42d89a push 0x9c40` / `call 0x423650`), whatever
+  the code, so each eject pays it again. Our `pirates::Handler` already does this. The
+  mode controllers' 0x46 arms check the caller's type (0x42ad70, 0x42c070, 0x42b090,
+  0x42c430, 0x42ca00, 0x42cc10, 0x42cfc0, 0x42b420) or mode_timer (0x42b820); the rest
+  have none.
+- **Space Cadet (`CADET.DAT`).** `WormHoleControl` and `EscapeChuteSinkControl` act only on
+  `ControlCollision`, and `MissionControl`'s `ControlTimerExpired` arm acts only for
+  `fuel_bargraph` or `mission_text_box`; no mission controller has a
+  `ControlTimerExpired` arm. So there it changes nothing.
+
+So the visible effects are the extra jackpot accrual per eject (Dragon a_sink1/a_sink4:
++75,000; Skulduggery, every sink: +40,000) and the lava sink's eject sound outside
+Lava-Ball. No rule arm was missing.
+
+Run: `FT_AUTOPLAY=1 FT_SINKTEST=<n> FT_SINKREPEAT=1`, 90 s headless per sink, each eject
+followed by its `DBG-sink  NOTIFY` line and no ball left in a sink (swallows = ejects =
+notifications): Dragon a_sink4 14/14/14, jackpot +75,000 per notification; driving
+a_sink1 makes its handler eject from a_sink2, 13/13/13, jackpot unchanged as it should be;
+Skulduggery a_sink8 12/12/12, +40,000 each. A plain `FT_AUTOPLAY=1` run of 90 s on each
+table reached no sink (blind flipping), so it shows nothing either way. `FtAccelDebug`'s
+autoplay now re-pulls the plunger when the ball has not moved for 3 s (the first pull lands
+in the light show and was lost, leaving the ball in the lane for the whole run) and, with
+`FT_AUTOPLAY_KEEP`, starts a new game only after game over, so a multiplayer game reaches
+its player changes.
