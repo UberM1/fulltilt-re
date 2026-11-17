@@ -1224,3 +1224,37 @@ the same pick, and `a_kout2` / `a_rockb` `MessageField` and the flashing quest l
 (v_lite73, not v_lite71) agree with the originals. With audio the light show runs for its
 sound's length on both sides, so the first pick comes later in the sequence. Once the ball
 moves, physics draws diverge and later picks are not expected to match.
+
+## 36. The plunger's release window and pullback step on Full Tilt data
+
+`TPlunger` used 3D Pinball's timings on every table. CADET.EXE's TPlunger has two others:
+
+- On release (0x418aa0) it arms `ReleasedTimer` (0x418930) for 0.2 s (`push 0x3e4ccccd`),
+  not for `PullbackDelay`. The boost is live only until that timer fires, and a ball
+  resting on the plunger collides with it about every 33-42 ms, so the 25 ms window often
+  held no collision at all and the press was lost. Skulduggery's launcher, whose press
+  is the release, lost most first presses ("launched only on the second or third pull").
+- The pullback steps every 0.05 s (`[+0x82] = 0x3ccccccd` at 0x4188e3, read by
+  `PullbackTimer` at 0x418dbe/0x418dd2), not every 0.025 s.
+
+The same instructions are at the same addresses in DRAGON.EXE and PIRATES.EXE. Both values are gated on `pb::FullTiltMode`; 3D Pinball
+data keeps upstream's 0.025 s for both.
+
+## 37. A sound that did not load lasts 0 s
+
+`loader::get_sound_id` read a sound's duration from its WAV header whether or not the wave
+loaded. CADET.EXE zeroes the duration (0x40ccd1) and writes it only after the wave loads
+(0x40cd28 skips the store when 0x41e710 returns null, and 0x41e710 returns null when there
+is no DirectSound object, 0x41e768). With no sound device every duration is therefore 0,
+and so is the new-game light show, which waits `play_sound`'s return (0x419a47..0x419a61):
+the ball is served 0.96 s after F2. Now the duration is kept only when `WavePtr` is
+non-null, which is the case whenever the mixer is open, the SDL dummy driver included, so
+normal play is unchanged. It is gated on `pb::FullTiltMode` (the same change as the
+last part of section 35, found twice independently): 3D Pinball data keeps upstream's
+header duration.
+
+This matters for comparisons. The silent Wine setup (`Audio=""`) gives the original no
+DirectSound, so the original skipped its light show and took a plunger pull 1.4 s after F2.
+Ours, with the dummy driver, waited out the light-show WAV (about 4 s on Space Cadet) and
+ignored that pull, because the plunger ignores presses until a ball is in play
+(0x41898a: `[table+0x192]`). Run ours with `-noaudio` to compare against silent Wine.
