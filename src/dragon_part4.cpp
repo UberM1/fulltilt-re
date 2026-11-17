@@ -31,12 +31,18 @@
 #include "pch.h"
 #include "control.h"
 
+#include "midi.h"
 #include "pb.h"
 #include "TLight.h"
 #include "TLightGroup.h"
 #include "TPinballTable.h"
 #include "TSound.h"
 #include "TTextBox.h"
+
+// The idle-music role (handle 0x439af8, loaded from "tabc7" by 0x424260's 0x3f7 arm).
+// Restated from dragon_missions.cpp, whose constant has internal linkage; the same value
+// and the same derivation, as dragon_helpers.cpp does for its two tracks.
+constexpr music_track idle_music = 7;
 
 namespace dragon {
 
@@ -740,6 +746,74 @@ void QuestHoleControl(MessageCode code, TPinballComponent* caller)
 	// holding on its own clock (1) or one parked by a mode (2) is that owner's business.
 	if (mode == ModeNormal && caller->MessageField == 0)
 		tabc34wave->Play(nullptr, "QuestHoleControl");
+}
+
+// ---------------------------------------------------------------------------
+// The table-level handler
+// ---------------------------------------------------------------------------
+
+// The three Slay Dragon lights whose ActiveFlag is the dragon's armed state (0x43a274 /
+// 0x43a28c / 0x43a2a4); dragon_missions.cpp owns the tags.
+extern component_tag<TLight> tag_v_lite113;
+extern component_tag<TLight> tag_v_lite114;
+extern component_tag<TLight> tag_v_lite115;
+
+// 0x424260 -- the table's own control handler, Dragon's control::table_control_handler.
+// TPinballTable calls it at the tail of its Message (0x419e87, `push esi; call 0x424260`),
+// from tilt, and once from the constructor with 0x3f7 (0x41ab2f). A jump table on
+// code - 0x3f3 (targets at 0x42446c, index bytes at 0x424480 = 0,4,4,1,2,4,...,3) picks
+// four arms; FT 0x3f3/0x3f6/0x400 arrive here as the engine's SetTiltLock / NewGame /
+// GameOver (0x3f6 is below the +1 band, 0x400 is in the +2 band).
+//
+// The 0x3f7 table-load arm (0x424326) loads the seven music handles by name (tabc7, tabc1,
+// tabc2, tabc4, tabc5, tabc6, and tabc1 again for game over) and clears the three v_lite113..115
+// ActiveFlags. The port's music handles are the fixed track constants in dragon_missions.cpp
+// and dragon_helpers.cpp, and the engine never sends that code to the table, so the arm
+// has nothing left to do here.
+void TableControl(MessageCode code)
+{
+	switch (code)
+	{
+	case MessageCode::SetTiltLock: // 0x3f3, 0x424282
+		// The plunger's cell, never read (see unknown_439b04 above). Spells go, and the
+		// outlane kicker is disarmed so a tilted ball cannot be kicked back.
+		unknown_439b04 = 0;
+		ClearSpells();
+		a_kick1->ActiveFlag = 0; // [0x439b2c]+5
+		break;
+
+	case MessageCode::NewGame: // 0x3f6, 0x42429b
+		game_over_phase = 0; // 0x439b1c
+		tag_v_lite113.Component->ActiveFlag = 0;
+		tag_v_lite114.Component->ActiveFlag = 0;
+		tag_v_lite115.Component->ActiveFlag = 0;
+		SetSwordStage(3); // push 3; call 0x4238d0
+
+		// 0x40e9b0 / 0x40eb50: play the idle handle (0x439af8, tabc7) unless it is already on.
+		if (midi::CurrentMusic() != idle_music)
+			midi::PlayMusic(idle_music);
+
+		shoot_again_flag = 3; // 0x434d2c
+		lite40->Message(MessageCode::TLightResetAndTurnOn, 0.0); // 0x13
+
+		// [TableG+0x172] / [TableG+0x17a]. This runs after the engine's own NewGame body
+		// has set JackpotScore = 500,000, so the table's values win, as in the original.
+		TableG->JackpotScore = 1000000;
+		TableG->SuperJackpotScore = 2500000;
+		info_text_box->MessageField = ModeNone; // [0x439d1c]+6 = 1, between balls
+		break;
+
+	case MessageCode::GameOver: // 0x400, 0x424433
+		shoot_again_flag = 0;
+		lite40->Message(MessageCode::TLightResetAndTurnOff, 0.0); // 0x14
+		tag_v_lite113.Component->ActiveFlag = 0;
+		tag_v_lite114.Component->ActiveFlag = 0;
+		tag_v_lite115.Component->ActiveFlag = 0;
+		break;
+
+	default:
+		break;
+	}
 }
 
 } // namespace dragon

@@ -268,10 +268,11 @@ constexpr auto LightFlasherStartTimed = static_cast<MessageCode>(0x07);  // -1.0
 constexpr auto LightFlashTimedThenStayOn = static_cast<MessageCode>(0x0f);
 constexpr auto LightFlashTimedThenStayOff = static_cast<MessageCode>(0x10);
 
-// TLightGroup family (delta +4).
-constexpr auto GroupGetOnCount = static_cast<MessageCode>(0x29);
-constexpr auto GroupGetLightCount = static_cast<MessageCode>(0x2a);
-constexpr auto GroupTurnOnNext = static_cast<MessageCode>(0x2d);
+// TLightGroup family (delta +4): the port's enum, not the raw byte. Sent raw, 0x29
+// lands on TLightGroupResetAndTurnOn and 0x2a on ResetAndTurnOff.
+constexpr auto GroupGetOnCount = MessageCode::TLightGroupGetOnCount;        // binary 0x29
+constexpr auto GroupGetLightCount = MessageCode::TLightGroupGetLightCount;  // binary 0x2a
+constexpr auto GroupTurnOnNext = MessageCode::TLightGroupResetAndTurnOn;    // binary 0x2d
 
 // 0x4b, "arm the holding field", sent to the six s_magnet* and to the two kickouts.
 //

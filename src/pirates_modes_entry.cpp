@@ -92,7 +92,7 @@ namespace ft
 // Sent to mode_timer (a type-1032 TTimer). 0x45 arms it with a float number of
 // seconds, -1.0 cancels. Same two names pirates_part1.cpp and
 // pirates_modes.cpp reached independently.
-constexpr auto TimerSet = static_cast<MessageCode>(0x45);
+constexpr auto TimerSet = MessageCode::TTimerResetTimer; // binary 0x45
 
 // 0x4c -- disarm a magnet's holding field. Numerically equal to the port's
 // TMagnetFieldDisable (76), but spelled as pirates_part2/part3.cpp spell it,
@@ -411,7 +411,7 @@ void ArmModeInProgressLight()
 }
 
 // 0x423420 -- and put it out again. The preamble of EnterIdle and of
-// EnterSkillShotAward (0x423440, which belongs to the skill-shot slice).
+// EnterSkillShotAward (0x423440, below).
 void ClearModeInProgressLight()
 {
 	tag_v_lite606.Component->Message(MessageCode::TLightResetAndTurnOff, 0.0f);
@@ -564,6 +564,17 @@ void RestoreLettersAndBanks()
 // handler. Shape: touch v_lite606, maybe show a glyph, store the state,
 // broadcast 0x4f. The broadcast is what runs the new state's controller.
 // ===========================================================================
+
+// 0x00423440 -- enter the skill-shot award (state 3). Same shape as EnterIdle:
+// `call 0x423420; [info_text_box]+6 = 3; push 0; push 0x4f; call 0x42d850`. Its
+// only caller in the image is the table's new-game reset (0x4231c5); the serve path
+// writes state 3 by hand instead.
+void EnterSkillShotAward()
+{
+	ClearModeInProgressLight();
+	tag_info_text_box.Component->MessageField = ModeSkillShot;
+	Handler(ft::ModeStarted, nullptr);
+}
 
 // 0x00423460 -- enter Idle (state 2). Puts the mode-in-progress light out.
 void EnterIdle()
@@ -1125,14 +1136,12 @@ void EjectHideawayAtRandom()
 // discarded. So the hold is spend-once and is set by the ship sink during
 // Mutiny.
 //
-// GAP, deliberately left unimplemented rather than guessed: the final arm
-// sends `(0x14, 0)` and `(0x1a, 0)` to `*(TPinballComponent**)(TableG + 0x13e)`
-// -- "turn that light off" and "clear its override". 0x13e is not a
-// TPinballTable field this corpus names anywhere else, and
-// `GameOverController` in pirates_modes.cpp hit the same dereference and left
-// it out for the same reason. Reading TPinballTable's field layout out of
-// CADET.EXE is what settles it; until then the two sends are omitted here,
-// consistently with that file.
+// The final arm sends `(0x14, 0)` and `(0x1a, 0)` to `[TableG+0x13e]`. That field is
+// TPinballTable::LightGroup: the table constructor stores `new TLightGroup(this, 0)`
+// there (0x41a3dc call 0x40aca0; 0x41a3e1 mov [esi+0x13e],eax). So the game-over
+// path blacks out every lamp (0x42bd38, 0x14 = TLightResetAndTurnOff), and every
+// exit clears the lamps' temporary overrides after the 0x4f broadcast (0x42bdb8,
+// 0x1a = TLightFtResetOverride, which a group forwards to each member light).
 void DrainBonusController(MessageCode code, TPinballComponent* caller)
 {
 	// The original is a `goto`-driven loop over the dispatch head: codes 1 and
@@ -1237,8 +1246,10 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 			{
 				// Unmultiplied: the bonus lands at face value, which is the
 				// whole reason 0x423350 exists.
-				AddScoreUnmultiplied(caller, bonus_accumulator);
-				FormatWithValue(buffer, GetRcString(STR_TOTAL_BONUS), bonus_accumulator);
+				// 0x42bbcf call 0x423350; 0x42bbd4 push eax: the line shows what was
+				// credited, which differs from the sum by the table's ScoreAdded.
+				const int credited = AddScoreUnmultiplied(caller, bonus_accumulator);
+				FormatWithValue(buffer, GetRcString(STR_TOTAL_BONUS), credited);
 
 				if (bonus_skip_display == 0)
 				{
@@ -1267,10 +1278,10 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 				// 1 rather than to the skill shot.
 				if (TableG->CurrentPlayer - TableG->PlayerCount == -1 && TableG->BallCount == 0)
 				{
-					// GAP: (TableG+0x13e)->Message(0x14, 0.0) -- see the note above.
+					TableG->LightGroup->Message(MessageCode::TLightResetAndTurnOff, 0.0f); // 0x42bd38
 					tag_info_text_box.Component->MessageField = ModeGameOver;
 					Handler(ft::ModeStarted, nullptr);
-					// GAP: (TableG+0x13e)->Message(0x1a, 0.0)
+					TableG->LightGroup->Message(MessageCode::TLightFtResetOverride, 0.0f); // 0x42bdbf
 					return;
 				}
 
@@ -1297,7 +1308,7 @@ void DrainBonusController(MessageCode code, TPinballComponent* caller)
 
 			tag_info_text_box.Component->MessageField = ModeSkillShot;
 			Handler(ft::ModeStarted, nullptr);
-			// GAP: (TableG+0x13e)->Message(0x1a, 0.0)
+			TableG->LightGroup->Message(MessageCode::TLightFtResetOverride, 0.0f); // 0x42bdbf
 			return;
 		}
 

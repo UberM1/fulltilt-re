@@ -31,14 +31,10 @@
 #include "TSound.h"
 #include "TTextBox.h"
 
-// LEFT OPEN, exactly as in dragon_missions.cpp: the roles are pinned by the call
-// sites (DAT_00439ae8 is started by Gargoyle Gaggle-Ball, DAT_00439afc by the
-// game-over sequence), the TABCn file each maps to is not. The globals hold loader
-// handles, so the index is nowhere in .text -- it needs the track table out of
-// DRAGON.DAT, or a running table. The six quest/idle tracks are 1..6 in
-// dragon_missions.cpp, so these continue the run.
-constexpr music_track gargoyle_gaggle_music = 7;
-constexpr music_track game_over_music = 8;
+// 0x424260's load arm copies the tabc1 handle into both of these (DAT_00439ae8 for
+// Gargoyle Gaggle-Ball, DAT_00439afc for the game-over sequence), so both are track 1.
+constexpr music_track gargoyle_gaggle_music = 1;
+constexpr music_track game_over_music = 1;
 
 namespace dragon
 {
@@ -326,15 +322,12 @@ void PlayWave(TPinballComponent* wave)
 	Play(static_cast<TSound*>(wave));
 }
 
-// 0x410ff0 -- is there a high score at all? The game-over sequence checks it before
-// announcing one. dragon_common.cpp has no counterpart; pirates_common.cpp's is the
-// same routine behind the Skulduggery namespace.
+// 0x410ff0 -- did any player's score make the high-score table? It walks the
+// players and asks get_score_position of each, which is upstream's
+// pb::chk_highscore; the game-over sequence checks it before announcing one.
 bool AnyHighScore()
 {
-	for (auto& entry : high_score::highscore_table)
-		if (entry.Score > 0)
-			return true;
-	return false;
+	return pb::chk_highscore();
 }
 
 // ---------------------------------------------------------------------------

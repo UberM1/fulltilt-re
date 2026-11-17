@@ -162,7 +162,7 @@ int AddScoreFor(TPinballComponent* caller, int index); // 0x004230a0
 int AddScoreAt(TPinballComponent* caller, int score);  // 0x004230f0
 void AwardExtraBall(float time);                       // 0x004231e0
 
-void ApplyShield();                                // 0x00423240
+void ApplyShield(bool announce);                                // 0x00423240
 void CastRandomSpell();                                 // 0x004237f0
 void SuspendTowerLocks();                               // 0x00423b80
 void CheckTowerLocks();                                // 0x00423be0
@@ -497,7 +497,7 @@ void WellSinkControl(MessageCode code, TPinballComponent* caller)
 		// Max Armor is "all three armor awards at once", and the two blocker armors are
 		// granted by calling their own handlers directly -- the handler *is* the armor's
 		// state machine (see part2), so going through it is what starts their timers.
-		ApplyShield();
+		ApplyShield(false);
 		tabc24wave->Play(nullptr, "WellSinkMaxArmor");
 		CenterPostControl(MessageCode::TBlockerEnable, a_center_post);
 		RightOutlaneBlockerControl(MessageCode::TBlockerEnable, a_bloce);

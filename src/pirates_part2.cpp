@@ -366,7 +366,11 @@ constexpr auto TRampWall2Crossed = static_cast<MessageCode>(0x56);
 // component class in CADET.EXE tests 0x3f3 for SetTiltLock, 0x3fe for PlayerChanged and
 // 0x402 for Reset (TLight 0x0040a490, TBlocker 0x00414f80, TMagnet 0x004166c0,
 // TLightSweep 0x0040c660 all agree), so 0x402 cannot be SetTiltLock.
-constexpr auto DrainReset = static_cast<MessageCode>(0x402);
+//
+// The constant is therefore the port's Reset, not the raw 0x402: sent raw it is 1026,
+// which TDrain::Message does not answer, and the drain's pending timer survived to
+// serve a second ball.
+constexpr auto DrainReset = MessageCode::Reset;
 }
 
 // ---------------------------------------------------------------------------

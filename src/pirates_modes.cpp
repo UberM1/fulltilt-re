@@ -724,6 +724,8 @@ void RaiseShipDropBank();                  // 0x424440
 void RaiseTavernDropBank();                // 0x424f70
 void RaiseParrotDropBank();                // 0x4252d0
 void ResetBrigLights(int mode);        // 0x425d50
+void ResetGoldLights(int mode);        // 0x423870 -- pirates_modes_entry.cpp
+void ResetSkulduggeryLights(int mode); // 0x423b70 -- pirates_modes_entry.cpp
 void ClearKegMagnets();                // 0x424c70 -- 0x4c to all six, lights off
 void ClearTreasureXLights();           // 0x424500
 int ArmNextTreasureX();                // 0x424580 -- advances the X cursor, returns a sweep id
@@ -819,24 +821,19 @@ extern int mode_scratch_counter;
 // three aliased onto one int, and StartOfEveryMode zeroes it at every mode
 // start.
 //
-// UNVERIFIED whether that aliasing is a deliberate single "wheel position"
-// concept or a second bug of the v_lite551 kind. Still undecidable from the
-// code, and now for a stated reason. An objdump pass over all of PIRATES.EXE's
-// .text finds exactly nine references to 0x00435d04 and no others:
+// The aliasing is harmless, and the port matches the binary. An objdump pass
+// over all of PIRATES.EXE's .text finds exactly nine references to 0x00435d04:
 //
-//   0x00424597 read   0x0042459c add   0x004245c7 = 0   (the award slice)
-//   0x00425117 read   0x0042512f = 0   0x0042523c inc
-//   0x00425440 read   0x00425484 inc
+//   0x00424597 read   0x0042459c add   0x004245c7 = 0   (ArmNextTreasureX)
+//   0x00425117 read   0x0042512f = 0   0x0042523c inc   (the wind helpers)
+//   0x00425440 read   0x00425484 inc                    (the Sword Fight cycle)
 //   0x0042aada = 0                                      (StartOfEveryMode)
 //
-// There is no fourth writer, no per-mode save/restore pair and no read by the
-// dispatcher, so the binary contains nothing that distinguishes "one cursor on
-// purpose" from "three cursors that collided". The experiment that would:
-// start a Sword
-// Fight, clear exactly one award group so the cursor lands on 1, let it time
-// out, then start a Treasure Hunt without an intervening mode and watch which
-// "X" arms -- the first if the cell is reset somewhere outside this corpus,
-// the second if the aliasing is real. The same run also answers modes 1897.
+// Every user is gated on its own mode: ArmNextTreasureX's callers test state 8,
+// AwardIndicatedWind's (0x425230) state 5, and the cycle 0x425440 is reached only
+// via 0x425550 from the bank handlers in state 10. Every mode's 0x4f calls
+// StartOfEveryMode first (Treasure Hunt 0x42b14c, Bermuda 0x42c294, Sword Fight
+// 0x42cca1, ...), so each mode starts with the cursor at 0.
 int WheelCursor = 0;
 
 // 0x435d2c / 0x435d40 -- Storm's severity, computed once at mode start: the
@@ -908,10 +905,12 @@ const int BermudaSpokes[4][4] = {
 	{3, 7, 11, -1},
 };
 
-// 0x43abb0 -- set by Peg Leg's Loot's teardown; makes the next drain blank the
-// coin and special-treasure groups, i.e. a fresh collection cycle starts after
-// the finale.
-bool RestartCollectionCycle = false;
+// 0x43abb0 -- set by Peg Leg's Loot's teardown (0x42d3fa, ebx = 1 from 0x42d30a);
+// makes the next drain (0x426332 cmp ds:0x43abb0,0) blank the coin and
+// special-treasure groups, i.e. a fresh collection cycle starts after the finale.
+// One cell, owned by pirates_common.cpp; it used to be shadowed here by a bool
+// nothing read, so the drain never saw the finale.
+extern int collection_cycle_reset;
 
 // 0x43aba0 -- settled, negatively, and that is the complete answer: nothing
 // reads it. An objdump pass over all of PIRATES.EXE's .text
@@ -1182,8 +1181,10 @@ void StartOfEveryMode()
 {
 	mode_scratch_counter = 0;
 	WheelCursor = 0;
-	// ResetGoldLights(0) and ResetSkulduggeryLights(0) -- 0x423870 / 0x423b70,
-	// the collectible slice's business.
+	// 0x42aae5 push 0; call 0x423870 / 0x42aaec push 0; call 0x423b70: blank the four
+	// gold lights and all eleven SKULDUGGERY letters, so only the mode's own letters show.
+	ResetGoldLights(0);
+	ResetSkulduggeryLights(0);
 	tag_a_bloce.Component->Message(ft::BlockerSetPosition, 1.0f);
 	tag_v_lite504.Component->Message(ft::LightResetAndTurnOn, 0.0f);
 	tag_v_lite505.Component->Message(ft::LightResetAndTurnOff, 0.0f);
@@ -1256,14 +1257,11 @@ void GameOverController(MessageCode code)
 
 	Play(tag_tabb73wave.Component);
 
-	// GAP, deliberately left unimplemented rather than guessed: between the
-	// wave and the display the original dereferences `TableG+0x13e` as a
-	// component pointer and sends it (0x10, 3.0) -- a three-second
-	// flash-then-off, i.e. a victory flash on some light or group. 0x13e is
-	// not a TPinballTable field this corpus names anywhere else, so which
-	// component it is cannot be recovered from the rules code. Settled by
-	// reading TPinballTable's field layout out of CADET.EXE, where the same
-	// engine struct is used by a table whose handlers name more of it.
+	// 0x42c025..0x42c03a: `mov ecx,[TableG+0x13e]; push 3.0; push 0x10`. +0x13e is
+	// TPinballTable::LightGroup -- the constructor stores `new TLightGroup(this, 0)`
+	// there (0x41a3dc call 0x40aca0; 0x41a3e1 mov [esi+0x13e],eax) -- so this is a
+	// three-second flash of every lamp on the table.
+	pb::MainTable->LightGroup->Message(ft::LightFlashTimedThenStayOff, 3.0f);
 
 	Display(tag_info_text_box.Component, GetRcString(STR_HIGH_SCORE), Forever);
 }
@@ -2073,17 +2071,10 @@ void SwordFightController(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	// UNVERIFIED, and it is a real gap: nothing resets the shared WheelCursor
-	// for Sword Fight except StartOfEveryMode. So the award a Sword Fight
-	// hands out depends on what a *previous* mode left in that cell, since
-	// Treasure Hunt and Bermuda Triangle advance the same int.
-	//
-	// Confirmed as a gap in the binary rather than a gap in the reading: the
-	// nine references to 0x00435d04 listed on WheelCursor are the whole set,
-	// and the only zeroing writer among them is StartOfEveryMode's
-	// 0x0042aada. There is no Sword-Fight-specific reset to have missed. What
-	// the binary cannot say is whether that was the design; see WheelCursor
-	// for the one play session that would discriminate.
+	// The shared WheelCursor always starts a Sword Fight at 0: this mode's 0x4f
+	// calls StartOfEveryMode first (0x0042cca1), which zeroes the cell at
+	// 0x0042aada, so nothing a previous mode left there carries over. See
+	// WheelCursor.
 }
 
 // ---------------------------------------------------------------------------
@@ -2183,10 +2174,12 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 			CollectJackpot(0.0f);
 
 			int total = coins * 500000 + treasures * 500000 + maps * 1000000 + modes * 1000000;
-			AddScoreAt(nullptr, total);
+			// 0x42d278 call 0x423310; 0x42d27d push eax: the display formats what
+			// AddScore credited, i.e. the total after the just-bumped multiplier.
+			const int credited = AddScoreAt(nullptr, total);
 
 			char buffer[128];
-			FormatWithValue(buffer, GetRcString(STR_SCORE_AWARDED), total);
+			FormatWithValue(buffer, GetRcString(STR_SCORE_AWARDED), credited);
 			Display(tag_info_text_box.Component, buffer, 4.0f);
 			mode_scratch_counter++;
 			return;
@@ -2239,26 +2232,17 @@ void PegLegsLootController(MessageCode code, TPinballComponent* caller)
 		tag_map_piece_light_group.Component->Message(ft::LightFlashTimedThenStayOff, 1.0f);
 		// Clear the SIX mode wheel lights -- v_lite552..557 only. v_lite558
 		// (Sword Fight) and v_lite559 (Peg Leg's Loot itself) are left lit.
-		//
-		// UNVERIFIED whether that is deliberate, and the binary is exhausted on
-		// it. The teardown is a fully unrolled run of six identical
-		// `push 0x14` sends at 0x0042d3a1, 0x0042d3b0, 0x0042d3bf, 0x0042d3ce,
-		// 0x0042d3dd and 0x0042d3ec -- v_lite552 (0x0043c2dc) through
-		// v_lite557 (0x0043c354) -- with no loop, no index table and no
-		// seventh send following, so there is no dropped iteration or
-		// off-by-one artefact to appeal to: the source asked for six. What
-		// stays open is only the intent, and the consequence if it was an
-		// oversight: after the finale the random pool is six wide, not seven,
-		// so Sword Fight cannot be offered again until the next finale.
-		// Settled by playing past one finale and watching whether v_lite558
-		// ever goes out.
+		// The listing has exactly six unrolled `push 0x14` sends, 0x0042d3a1..
+		// 0x0042d3ec, to v_lite552 (0x0043c2dc) through v_lite557 (0x0043c354),
+		// with no loop and no seventh send: this is the original's behaviour, and
+		// the port matches it.
 		tag_v_lite552.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite553.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite554.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite555.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite556.Component->Message(ft::LightResetAndTurnOff, 0.0f);
 		tag_v_lite557.Component->Message(ft::LightResetAndTurnOff, 0.0f);
-		RestartCollectionCycle = true;
+		collection_cycle_reset = 1; // 0x42d3fa
 		return;
 
 	case ft::ModeAbort:
@@ -2614,6 +2598,269 @@ void Handler(MessageCode code, TPinballComponent* caller)
 		code = ft::MissionComplete;
 		SetMode(Mode::Idle);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The table-level handler
+// ---------------------------------------------------------------------------
+
+// Cells the new-game reset writes, owned by other files.
+extern int game_over_phase;                          // 0x43aba8, pirates_common.cpp
+extern TPinballComponent* last_scoring_component;    // 0x435d44, pirates_common.cpp
+extern int BuryCursor;                               // 0x435d10, pirates_awards.cpp
+extern int BuriedCoinCount;                          // 0x435d14
+extern int BuriedTreasureSlot1;                      // 0x435d18
+extern int BuriedTreasureSlot2;                      // 0x435d1c
+extern int BuriedFathomBonus;                        // 0x435d20
+extern int BuriedJackpot;                            // 0x435d24
+extern int BuriedExtraBall;                          // 0x435d28
+
+// 0x4230c0 -- the table's own control handler, Skulduggery's
+// control::table_control_handler. TPinballTable calls it at the tail of its Message
+// (0x419e87) and from tilt. Three arms, tested in a compare chain: 0x3f3 (tilt),
+// 0x3f6 (new game) and 0x3f7 (table load); there is no game-over arm. FT 0x3f3/0x3f6
+// are below the +1 band, so they arrive as the engine's SetTiltLock / NewGame.
+//
+// The 0x3f7 arm (0x4231d7) loads the music handles from "tabb1".."tabb6"; the port
+// models them as the track constants at the top of this file, and the engine never
+// sends that code to the table, so the arm has nothing left to do here.
+void TableControl(MessageCode code)
+{
+	if (code == MessageCode::SetTiltLock) // 0x3f3, 0x4230e2
+	{
+		// The end-of-game lockdown: magnets and kickouts disarm and the running mode
+		// is dropped without a teardown, so a tilted mode pays no completion bonus.
+		SetMode(Mode::Lockdown);
+		Handler(ft::MissionComplete, nullptr); // push 0; push 0x4f; call 0x42d850
+		return;
+	}
+
+	if (code != MessageCode::NewGame) // 0x3f6, 0x4230fb
+		return;
+
+	// Runs after the engine's own NewGame body (JackpotScore = 500,000), so the
+	// table's 1,000,000 wins, as it does in the original. [TableG+0x172].
+	pb::MainTable->JackpotScore = 1000000;
+	shoot_again_phase = 0;                            // 0x435d90
+	tag_s_oneway12.Component->ActiveFlag = 0;         // [0x43bc04]+5
+	game_over_phase = 0;                              // 0x43aba8
+	collection_cycle_reset = 0;                       // 0x43abb0
+
+	// The buried-treasure pouch (0x423112..0x42314e).
+	BuryCursor = 0;
+	BuriedTreasureSlot1 = -1;
+	BuriedTreasureSlot2 = -1;
+	BuriedFathomBonus = 0;
+	BuriedJackpot = 0;
+	BuriedExtraBall = 0;
+	BuriedCoinCount = 1;
+
+	ClearTreasureXLights();   // 0x424500
+	RestoreTreasureBoard();   // 0x424560
+
+	// 0x40e9b0 / 0x40eb50: the idle handle (0x43ab80, tabb1) unless it is already on.
+	if (midi::CurrentMusic() != idle_music)
+		midi::PlayMusic(idle_music);
+
+	BallsInBrig = 0;                                  // 0x435d3c
+	last_scoring_component = nullptr;                 // 0x435d44
+	tag_a_kick2.Component->ActiveFlag = 0;            // [0x43bba4]+5
+	tag_s_bwal610.Component->ActiveFlag = 0;          // [0x43c42c]+5
+	tag_a_kick1.Component->Message(ft::HoldFieldDisable, 0.0f);  // 0x4c, [0x43bbd4]
+	tag_a_kout1.Component->Message(ft::HoldFieldDisable, 0.0f);  // 0x4c, [0x43c3fc]
+	tag_a_kout2.Component->Message(ft::HoldFieldDisable, 0.0f);  // 0x4c, [0x43bc2c]
+
+	// State 3 and its 0x4f run first, then the register is zeroed by hand
+	// (0x4231ca), which leaves the table inert until the first ball is served.
+	EnterSkillShotAward();    // 0x423440
+	SetMode(Mode::Inert);
+}
+
+// ---------------------------------------------------------------------------
+// The key handler
+// ---------------------------------------------------------------------------
+
+// control_pirates.cpp binds the extra-ball voice untyped; it is a TSound.
+extern component_tag<TPinballComponent> tag_tabb00wave;  // DAT_0043c444
+
+// 0x43d110 / 0x43d114 -- the cheat matcher's two cells: the last key accepted into a
+// code (0 = none in progress) and which code its first key chose (1 = "1MAX",
+// 2 = "NMAX", 3 = "FMAX", 4 = "GMAX", 5 = "QUOTE"). Read and written only by 0x42a830.
+static int CheatLastKey = 0;
+static int CheatCode = 0;
+
+// 0x43cfe4 -- 1 while the scroller at 0x422a90 is playing the quotes rather than the
+// credits (set by the dispatcher 0x422b90's case 0x6a, cleared by case 0x68). 0x42a868
+// stops the scroller on every key while it is set.
+static bool QuoteScroll = false;
+
+// Skulduggery's own quote list, the '~'-separated string 0x422a90 walks one line per
+// 2.0 s tick. Not Dragon's Keep's and not Space Cadet's.
+static const char* const Quotes[] =
+{
+	"Hey, is that a screen saver?",
+	"Guess what I'm gonna do APS...",
+	"Noodle, Noodle, Noodle...",
+	"She may already be a glue bottle",
+	"Noodle...",
+	"Family Entertainmant",
+	"Nope. No Cows.",
+	"Oh I'm sorry.",
+	"Did I break your concentration?",
+};
+
+// 0x422b90 case 0x6a. One pass queued as low-priority messages rather than the
+// original's endless loop in the box's scroll slot; dragon_missions.cpp's
+// StartQuoteScroll says why, and why the times are cumulative.
+static void StartQuoteScroll()
+{
+	QuoteScroll = true;
+	auto* box = tag_info_text_box.Component;
+	if (!box)
+		return;
+	float time = 0.0f;
+	for (auto line : Quotes)
+		box->Display(line, time += 2.0f, true);
+}
+
+// 0x422b90 case 0x69 -> 0x422b60: stop the scroll and clear only what it showed.
+static void StopQuoteScroll()
+{
+	QuoteScroll = false;
+	if (auto* box = tag_info_text_box.Component)
+		box->Clear(true);
+}
+
+// 0x42a7d0 -- the extra ball as the 1MAX code gives it, a cheat-only twin of
+// AwardExtraBall (0x4239d0) with two differences in the listing: the announcement is
+// shown for exactly `time` rather than time + 2.0, and only when time > 0.0
+// (0x42a7ec fld; fcomp 0x4388f0 = 0.0f; test ah,0x41 skips it for <= 0).
+static void CheatExtraBall(float time)
+{
+	pb::MainTable->ExtraBalls = 1;                          // [TableG+0x18e] = 1
+	Play(static_cast<TSound*>(tag_tabb00wave.Component));   // [0x43c444] vtable +0x18
+	if (time > 0.0f)
+		Display(tag_info_text_box.Component, GetRcString(3014), time); // 0xbc6, 0x41de40
+}
+
+// 0x42a830 -- Skulduggery's key handler, called by the engine's keydown (0x412154).
+// The same machine as Dragon's Keep's 0x4282c0 (dragon_missions.cpp), with GMAX where
+// Dragon has PB and no B or P arm at all. Jump table on key - 0x31, bounds 0x27,
+// index bytes at 0x42aaa4, targets at 0x42aa70.
+//
+// First the bonus fast-forward (0x42a831..0x42a862): during the end-of-ball count-up
+// (state 0x10) once the game-over sequence has begun, a flipper sends the dispatcher
+// message 1, which DrainBonusController (pirates_modes_entry.cpp) answers by skipping
+// the display and running the remaining steps. Then any key stops the quote scroll.
+//
+//   1  M A X   extra ball (0x42a7d0 for 2.0 s), CheatsUsed
+//   N  M A X   in Idle (state 2): latch 0x435d30, start the selected mode, CheatsUsed
+//              -- unconditionally, unlike Dragon's, which checks the start succeeded
+//   G  M A X   toggle the alternate ball skin
+//   F  M A X   accepted all the way, and the X arm has no case for it: nothing
+//   Q U O T E  the quote scroll
+void KeyHandler(int key, bool flipper)
+{
+	// pb::PushCheat reaches this from the Cheats menu without keydown's game-mode
+	// gate, so guard the mode register before reading it.
+	if (!tag_info_text_box.Component)
+		return;
+
+	if (CurrentMode() == Mode::DrainBonus && game_over_phase != 0 && flipper)
+		Handler(ft::Msg(0x01), nullptr); // push 0; push 1; call 0x42d850
+
+	if (QuoteScroll) // 0x42a868
+		StopQuoteScroll(); // push 0x69; call 0x422b90
+
+	bool drop = true; // 0x42aa4e when true, straight to 0x42aa58 when false
+	switch (key)
+	{
+	case '1': // 0x42a893
+	case 'F': // 0x42a8e6
+	case 'G': // 0x42a908
+	case 'N': // 0x42a95d
+	case 'Q': // 0x42a997
+		// The first key of a code: only when none is in progress.
+		if (CheatLastKey == 0)
+		{
+			CheatCode = key == '1' ? 1 : key == 'N' ? 2 : key == 'F' ? 3 : key == 'G' ? 4 : 5;
+			CheatLastKey = key;
+			drop = false;
+		}
+		break;
+	case 'M': // 0x42a92a
+		if (CheatLastKey == '1' || CheatLastKey == 'F' || CheatLastKey == 'N' || CheatLastKey == 'G')
+		{
+			CheatLastKey = key;
+			drop = false;
+		}
+		break;
+	case 'A': // 0x42a8b5
+		drop = CheatLastKey != 'M';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'U': // 0x42a9d1
+		drop = CheatLastKey != 'Q';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'O': // 0x42a97f
+		drop = CheatLastKey != 'U';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'T': // 0x42a9b9
+		drop = CheatLastKey != 'O';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'E': // 0x42a8cd
+		if (CheatLastKey != 'T')
+		{
+			drop = false;
+			break;
+		}
+		StartQuoteScroll(); // push 0x6a; call 0x422b90
+		break;
+	case 'X': // 0x42a9e2
+		if (CheatLastKey != 'A')
+		{
+			drop = false;
+			break;
+		}
+		if (CheatCode == 1) // 0x42aa01
+		{
+			CheatExtraBall(2.0f); // push 0x40000000; call 0x42a7d0
+			pb::MainTable->CheatsUsed = 1; // [TableG+0x5a]
+		}
+		else if (CheatCode == 2) // 0x42aa19
+		{
+			if (CurrentMode() == Mode::Idle)
+			{
+				ModeStartedWithBallInPlay = true; // 0x435d30
+				StartSelectedMode();              // 0x425a50
+				pb::MainTable->CheatsUsed = 1;
+			}
+		}
+		else if (CheatCode == 4) // 0x42aa3e
+		{
+			pb::AlternateBallSkin = 1 - pb::AlternateBallSkin; // 0x439140
+		}
+		else
+		{
+			// FMAX: 0x42a9ff jumps to the tail with the code still standing.
+			drop = false;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if (drop)
+		CheatLastKey = 0; // 0x42aa4e
+	if (CheatLastKey == 0) // 0x42aa58
+		CheatCode = 0;
 }
 
 }  // namespace pirates

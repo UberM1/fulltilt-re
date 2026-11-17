@@ -49,13 +49,14 @@
 // the originals hold Mix_Music-like handles in globals, so these names are the
 // handles' roles rather than the handles themselves.
 //
-// LEFT OPEN: which TABCn file each role maps to. The roles are pinned by the
-// call sites, but the globals hold loader handles, not indices, so no listing
-// can say which file is which -- it needs the track table out of DRAGON.DAT, or
-// a running table.
-constexpr music_track idle_music = 1;
+// Which TABCn file each role maps to is in the table control handler's load arm
+// (0x424260, case 0x3f7), which loads them by name: idle = tabc7, Fire Lizards =
+// tabc1, Dragon Hoard = tabc2, Rescue Maiden = tabc4, Dragon Pass = tabc5, Wizard's
+// Fury = tabc6. Gargoyle Gaggle-Ball and game over reuse the tabc1 handle. tabc3 is
+// never loaded. The engine's tracks are 1-based on the same numbering.
+constexpr music_track idle_music = 7;
 constexpr music_track dragon_hoard_music = 2;
-constexpr music_track fire_lizards_music = 3;
+constexpr music_track fire_lizards_music = 1;
 constexpr music_track rescue_maiden_music = 4;
 constexpr music_track dragon_pass_music = 5;
 constexpr music_track wizards_fury_music = 6;
@@ -696,17 +697,24 @@ const ComponentTable<TLight, 5> QuestLights = {{
 	&tag_v_lite71, &tag_v_lite72, &tag_v_lite73, &tag_v_lite74, &tag_v_lite75,
 }};
 
-// PTR_PTR_0043bb78: the eight lights the dragon-fire sweep walks.
-const ComponentTable<TLight, 8> DragonFireLights = {{
+// PTR_PTR_0043bb78: the eight lights the dragon-fire sweep walks. Read straight out
+// of .data: the eight pointers are the tags of v_lite113, v_lite114, v_lite115,
+// v_lite58, v_lite59, v_lite60, v_lite61 and v_lite62, then a null terminator.
+//
+// The last five are bound by the generated control table as plain
+// TPinballComponent tags, so this table holds tag bases rather than
+// component_tag<TLight>; the sweep only ever sends them a message.
+extern component_tag<TPinballComponent> tag_v_lite58, tag_v_lite59, tag_v_lite60,
+	tag_v_lite61, tag_v_lite62;
+struct FireLightTable
+{
+	component_tag_base* const Tags[8];
+	TPinballComponent* operator[](int i) const { return Tags[i]->GetComponent(); }
+};
+const FireLightTable DragonFireLights = {{
 	&tag_v_lite113, &tag_v_lite114, &tag_v_lite115,
-	nullptr /* v_lite58 */, nullptr /* v_lite59 */, nullptr /* v_lite60 */,
-	nullptr /* v_lite61 */, nullptr /* v_lite62 */,
+	&tag_v_lite58, &tag_v_lite59, &tag_v_lite60, &tag_v_lite61, &tag_v_lite62,
 }};
-// The five missing names are confirmed straight out of .data: the eight pointers
-// at 0x43bb78 are the tags of v_lite113, v_lite114, v_lite115, v_lite58, v_lite59,
-// v_lite60, v_lite61 and v_lite62, followed by a null terminator. They are left
-// null here only because no other rule in this slice touches them; declare the
-// five tags when the sweep is wired up.
 
 // ---------------------------------------------------------------------------
 // Small shared predicates
@@ -766,14 +774,20 @@ void DisplayTimeRemaining(int nameStringId)
 
 // 0x423240 -- the Shield's effect, applied both when the armor is awarded and
 // again at the start of Slay Dragon (the shield is re-armed for the finale).
-void ApplyShield()
+//
+// One argument (`ret 0x4`): `cmp [esp+4],0; je 0x4232ac` skips the glyph and its
+// wave. Only AwardArmor announces; the well sink and both Slay Dragon sites pass 0.
+void ApplyShield(bool announce)
 {
 	tag_a_kick1.Component->ActiveFlag = 1;
 	tag_v_lite37.Component->MessageField = 0;
 	tag_v_lite37.Component->Message(ft::LightFlashTimedThenStayOn, 2.0f);
-	tag_outlane_kicker_light_group.Component->Message(ft::LightFlashTimedThenStayOn, 0.0f);
-	DisplayGlyph(tag_info_text_box.Component, GlyphArmor[0], 2.0f);
-	Play(tag_tabc41wave.Component);
+	tag_outlane_kicker_light_group.Component->Message(ft::LightFlashTimedThenStayOn, 1.0f);
+	if (announce)
+	{
+		DisplayGlyph(tag_info_text_box.Component, GlyphArmor[0], 2.0f);
+		Play(tag_tabc41wave.Component);
+	}
 }
 
 // 0x423330 -- AwardWeapon. Lights the first un-lit weapon light *in order*
@@ -819,7 +833,7 @@ void AwardArmor()
 	switch (candidates[RandBelow(count)])
 	{
 	case 0:  // Shield -- enable the kickback
-		ApplyShield();
+		ApplyShield(true);
 		AddScoreAt(nullptr, 25000);
 		break;
 	case 1:  // Helm of Terror -- raise the centre post
@@ -1341,8 +1355,14 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 	case ft::BallCaptured:
 		// The egg kickout swallowed the plunged ball: start the quest instead.
 		if (caller == tag_s_hole118.Component)
+		{
 			StartSelectedQuest();
-		return;
+			return;
+		}
+		// 0x42861a: `jne 0x428716` -- a capture by anything else is the consolation,
+		// and ends the skill shot like any other first touch.
+		consolation = true;
+		break;
 
 	case ft::MissionComplete:
 		KeepAnnouncement = true;
@@ -1389,7 +1409,8 @@ void SkillShotController(MessageCode code, TPinballComponent* caller)
 			MissionHandler(ft::MissionStarted, nullptr);
 			return;
 
-		case 1000: case type::PopupTarget: case 0x3f4: case 0x3f6: case 0x3f7:
+		// The byte table at 0x4287d4 sends 0x3ed (bumpers) to 0x428716 as well.
+		case 1000: case type::Bumper: case type::PopupTarget: case 0x3f4: case 0x3f6: case 0x3f7:
 		case type::Sink: case 0x3fa: case 0x3fc: case 0x3fd: case 0x400: case 0x406:
 			consolation = true;
 			break;
@@ -2193,8 +2214,8 @@ void SweepDragonFire()
 		cursor--;
 		if (cursor == -1)
 			FireSweepDirection = 1;  // bounce forward
-		else
-			DragonFireLights[cursor]->Message(ft::LightResetAndTurnOff, 0.0f);
+		else if (auto light = DragonFireLights[cursor])
+			light->Message(ft::LightResetAndTurnOff, 0.0f);
 	}
 	else
 	{
@@ -2202,7 +2223,10 @@ void SweepDragonFire()
 		if (cursor == 0)
 			Play(tag_tabc58wave.Component);
 		if (cursor >= 0 && cursor <= 7)
-			DragonFireLights[cursor]->Message(ft::LightResetAndTurnOn, 0.0f);
+		{
+			if (auto light = DragonFireLights[cursor])
+				light->Message(ft::LightResetAndTurnOn, 0.0f);
+		}
 		else if (cursor == 8)
 			FireSweepDirection = -1;  // bounce back
 	}
@@ -2247,7 +2271,7 @@ void AnimateDragonDeath(TPinballComponent* caller)
 	pb::MainTable->ScoreMultiplier = 5;
 
 	// All three armor effects.
-	ApplyShield();
+	ApplyShield(false);
 	CenterPostControl(ft::BlockerEnable, tag_a_center_post.Component);
 	RightOutlaneBlockerControl(ft::BlockerEnable, tag_a_bloce.Component);
 
@@ -2294,7 +2318,7 @@ void SlayDragonController(MessageCode code, TPinballComponent* caller)
 		if (Owned(tag_v_lite37.Component))
 		{
 			SlayDragonTimeLimit = 35;
-			ApplyShield();
+			ApplyShield(false);
 			Play(tag_tabc24wave.Component);
 		}
 		if (Owned(tag_v_lite38.Component))
@@ -2791,6 +2815,201 @@ void MissionHandler(MessageCode code, TPinballComponent* caller)
 		code = ft::MissionStarted;
 
 	MissionControl(CurrentMode(), code, caller);
+}
+
+// ---------------------------------------------------------------------------
+// The key handler
+// ---------------------------------------------------------------------------
+
+// dragon_part4.cpp -- DAT_00439b1c, non-zero once the last ball has drained.
+extern int game_over_phase;
+
+// 0x43bb70 / 0x43bb74 -- the cheat matcher's two cells: the last key accepted into a
+// code (0 = none in progress) and which code its first key chose (1 = "1MAX",
+// 2 = "NMAX", 3 = "FMAX", 4 = "PB", 5 = "QUOTE"). Read and written only by 0x4282c0.
+static int CheatLastKey = 0;
+static int CheatCode = 0;
+
+// 0x43ba9c -- 1 while the scroller at 0x422a80 is playing the quotes rather than the
+// credits: set by the dispatcher's case 0x6a (start the quotes), cleared by case 0x68
+// (start the credits), never by stopping. 0x4282f8 stops the scroller on every key
+// while it is set.
+static bool QuoteScroll = false;
+
+// 0x43baa0 -- the quotes the scroller walks, one '~'-separated line per 2.0 s timer
+// tick (0x422a80's `0x41f6c0(2.0, ...)`), typos and all. Dragon's Keep has its own
+// list, not Space Cadet's, which is why upstream's backdoor "quote" was wrong here even
+// before it crashed nothing.
+static const char* const Quotes[] =
+{
+	"Hey, is that a screen saver?",
+	"JOHN!!!",
+	"I wanna be a 500Lb. Bananna",
+	"Guess what I'm gonna do APS...",
+	"We could make fun paperclips.",
+	"I would like to read more than Post-Its",
+	"The real trick?",
+};
+
+// 0x422b80 case 0x6a: QuoteScroll = 1, then the scroller from the top. The original
+// scrolls in the text box's scroll slot (0x41e070) and loops until a key stops it; the
+// port queues one pass as low-priority messages, the way the engine's credits scroll
+// does, so that a key can drop exactly them (TTextBox::Clear(true)) and nothing the
+// rules put up. Times are cumulative because a queued message's clock starts when it
+// is queued.
+static void StartQuoteScroll()
+{
+	QuoteScroll = true;
+	auto* box = tag_info_text_box.Component;
+	if (!box)
+		return;
+	float time = 0.0f;
+	for (auto line : Quotes)
+		box->Display(line, time += 2.0f, true);
+}
+
+// 0x422b80 case 0x69 -> 0x422b50: kill the scroll timer and clear the scroll slot only.
+// The port's flag is dropped once the quotes are cleared, because the low-priority
+// clear also repaints the box; the original's stop was idempotent instead, so the
+// difference is not observable.
+static void StopQuoteScroll()
+{
+	QuoteScroll = false;
+	if (auto* box = tag_info_text_box.Component)
+		box->Clear(true);
+}
+
+// 0x4282c0 -- Dragon's Keep's key handler, called by the engine's keydown (0x412154)
+// with the virtual-key code. See TableRules::KeyHandler for what `key` and `flipper`
+// carry here.
+//
+// First the bonus fast-forward (0x4282c1..0x4282f2): during the end-of-ball count-up
+// (mode 0xb) after the last ball has drained, either flipper key sends the dispatcher
+// message 1, which DrainBonusController (dragon_helpers.cpp) answers by going quiet and
+// running the remaining steps at once. Then, if the quotes are scrolling, any key stops
+// them.
+//
+// Then a jump table on key - 0x31 (bounds 0x27, index bytes at 0x42854c, targets at
+// 0x428514) matches the codes one key at a time. Every arm either accepts the key
+// into the code in progress, or rejects it and drops the code (0x4284f0: last = 0),
+// or -- B, E and X when not preceded by their own predecessor -- leaves the state as
+// it was (0x4284fa). Keys outside '1'..'X' and letters no code uses drop it. The tail
+// clears the pending code whenever no key is held.
+//
+//   1  M A X   extra ball, CheatsUsed
+//   N  M A X   in Idle (mode 2): start the selected quest, CheatsUsed if one starts
+//   F  M A X   accepted all the way, and the X arm has no case for it: nothing
+//   P  B       toggle the alternate ball skin
+//   Q U O T E  the quote scroll
+void KeyHandler(int key, bool flipper)
+{
+	// pb::PushCheat reaches this from the Cheats menu without keydown's game-mode
+	// gate, so guard the mode register the way MissionHandler does.
+	if (!tag_info_text_box.Component)
+		return;
+
+	if (CurrentMode() == Mode::DrainBonus && game_over_phase != 0 && flipper)
+		MissionHandler(ft::FlipperPressed, nullptr); // push 0; push 1; call 0x42c020
+
+	if (QuoteScroll) // 0x4282f8
+		StopQuoteScroll(); // push 0x69; call 0x422b80
+
+	bool drop = true; // 0x4284f0 when true, straight to 0x4284fa when false
+	switch (key)
+	{
+	case '1': // 0x428323
+	case 'F': // 0x428398
+	case 'N': // 0x4283e4
+	case 'P': // 0x42841e
+	case 'Q': // 0x428440
+		// The first key of a code: only when none is in progress.
+		if (CheatLastKey == 0)
+		{
+			CheatCode = key == '1' ? 1 : key == 'N' ? 2 : key == 'F' ? 3 : key == 'P' ? 4 : 5;
+			CheatLastKey = key;
+			drop = false;
+		}
+		break;
+	case 'M': // 0x4283ba
+		if (CheatLastKey == '1' || CheatLastKey == 'F' || CheatLastKey == 'N')
+		{
+			CheatLastKey = key;
+			drop = false;
+		}
+		break;
+	case 'A': // 0x428345
+		drop = CheatLastKey != 'M';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'U': // 0x42847a
+		drop = CheatLastKey != 'Q';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'O': // 0x428406
+		drop = CheatLastKey != 'U';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'T': // 0x428462
+		drop = CheatLastKey != 'O';
+		if (!drop)
+			CheatLastKey = key;
+		break;
+	case 'B': // 0x42835d
+		if (CheatLastKey != 'P')
+		{
+			drop = false;
+			break;
+		}
+		pb::AlternateBallSkin = 1 - pb::AlternateBallSkin; // 0x438140
+		break;
+	case 'E': // 0x42837f
+		if (CheatLastKey != 'T')
+		{
+			drop = false;
+			break;
+		}
+		StartQuoteScroll(); // push 0x6a; call 0x422b80
+		break;
+	case 'X': // 0x42848b
+		if (CheatLastKey != 'A')
+		{
+			drop = false;
+			break;
+		}
+		if (CheatCode == 1) // 0x4284a5
+		{
+			AwardExtraBall(2.0f); // push 0x40000000; call 0x4231e0
+			pb::MainTable->CheatsUsed = 1; // [TableG+0x5a]
+		}
+		else if (CheatCode == 2) // 0x4284bd
+		{
+			if (CurrentMode() == Mode::Idle)
+			{
+				KeepAnnouncement = true; // 0x439b10
+				if (StartSelectedQuest()) // 0x424210
+					pb::MainTable->CheatsUsed = 1;
+				else
+					KeepAnnouncement = false;
+			}
+		}
+		else
+		{
+			// FMAX (and nothing else can get here): 0x4284a3 jumps to the tail with the
+			// code still standing.
+			drop = false;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if (drop)
+		CheatLastKey = 0; // 0x4284f0
+	if (CheatLastKey == 0) // 0x4284fa
+		CheatCode = 0;
 }
 
 }  // namespace dragon

@@ -279,7 +279,7 @@ namespace FtMessageCode {
 // TTimerResetTimer, so they are FT-only. Named from the captive ball's use, which divides
 // 0x48's answer by 1000.0 before feeding it back to 0x45; dragon_missions.cpp reached the
 // same two names independently from Dragon's mode timer.
-constexpr auto TimerSet = static_cast<MessageCode>(0x45);
+constexpr auto TimerSet = MessageCode::TTimerResetTimer; // binary 0x45
 constexpr auto TimerGetRemaining = static_cast<MessageCode>(0x48);
 
 // 0x39, sent to the four a_bloc* blockers: set the blocker's position index to
@@ -1272,18 +1272,9 @@ void BrigTargetControl(MessageCode code, TPinballComponent* caller)
 		return;
 	}
 
-	// Third tavern hit: Max Crew instead of Jail Break, and -- unlike the idle arm -- the
-	// counter is *not* reset, so every further hit during the same Tavern re-awards Max
-	// Crew. The listing has no write to a_spot6->MessageField on this path.
-	// UNVERIFIED, and the binary has nothing more to say: the absence of a write is not
-	// evidence of intent, and there is no second code path, no dead store and no
-	// alternative branch anywhere in this handler that would hint at a dropped reset. What
-	// would settle it is play, not disassembly -- start a Tavern, hit the brig target four
-	// times, and see whether the fourth hit announces Max Crew and pays 5,000 again. If it
-	// does, the binary is faithful here and the design simply repeats; if a real game stops
-	// after the third, something outside this handler is resetting the counter and that
-	// writer has not been found. Reproduced as-is either way: Max Crew is idempotent once
-	// a_bump2->MessageField is 6, so the only cost of being wrong is the repeat.
+	// Third tavern hit: Max Crew instead of Jail Break. This arm has no write to
+	// a_spot6->MessageField of its own, but ResetBrigLights (0x425d50) zeroes the
+	// counter at 0x425dcd/0x425dd4, so a fourth hit counts as a first again.
 	tabb61wave->Play(caller, "BrigTargetControl");
 	ResetBrigLights(1);
 	AwardMaxCrew(0.0f);
@@ -1367,7 +1358,7 @@ void RightOutlaneControl(MessageCode code, TPinballComponent* caller)
 		return;
 
 	tabb43wave->Play(caller, "RightOutlaneControl");
-	info_text_box->Display(Glyph_RightOutlane, 2.0f);
+	info_text_box->DisplayGlyph(Glyph_RightOutlane, 2.0f);
 	AddScoreFor(caller, 0); // 25000
 }
 
@@ -1391,7 +1382,7 @@ void ReturnLaneControl5(MessageCode code, TPinballComponent* caller)
 		lite534->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		windsAwarded = CheckWindsComplete(0.0f) != 0.0f;
 		if (!windsAwarded)
-			info_text_box->Display(Glyph_IslandLane, 2.0f);
+			info_text_box->DisplayGlyph(Glyph_IslandLane, 2.0f);
 	}
 	// The sound is suppressed only when WINDS just completed, which has its own fanfare.
 	if (!windsAwarded)
@@ -1415,7 +1406,7 @@ void ReturnLaneControl1(MessageCode code, TPinballComponent* caller)
 		lite535->Message(MessageCode::TLightFlasherStartTimedThenStayOn, 1.0f);
 		windsAwarded = CheckWindsComplete(0.0f) != 0.0f;
 		if (!windsAwarded)
-			info_text_box->Display(Glyph_ReturnLane, 2.0f);
+			info_text_box->DisplayGlyph(Glyph_ReturnLane, 2.0f);
 	}
 	if (!windsAwarded)
 		tabb44wave->Play(caller, "ReturnLaneControl");
@@ -1459,7 +1450,7 @@ void SouthWindLaneControl(MessageCode code, TPinballComponent* caller)
 		claimed = CheckWindsComplete(0.0f);
 		if (claimed == 0.0f)
 		{
-			info_text_box->Display(Glyph_SouthWind, 2.0f);
+			info_text_box->DisplayGlyph(Glyph_SouthWind, 2.0f);
 			tabb12wave->Play(caller, "SouthWindLaneControl");
 		}
 	}

@@ -25,7 +25,8 @@ namespace pirates
 {
 extern TPinballTable*& TableG;
 
-// 0x00435d2c -- the component that last scored.
+// 0x00435d44 -- the component that last scored (AddScore 0x423310 reads it at
+// 0x423311 and stores the caller at 0x42332a; 0x435d2c is Storm's target score).
 //
 // Skulduggery uses this for more than bookkeeping. When a different component
 // scores, the previous one is sent 0x4d, and the four lane handlers answer that by
@@ -51,12 +52,17 @@ int mode_scratch_counter = 0;
 namespace
 {
 // The 0x4d notify, factored out of all three wrappers.
+//
+// It goes through the rules dispatcher, not the component's own Message: all three
+// wrappers `push 0x4d; call 0x423080`, and 0x423080 is the mode machine followed by
+// the component's ControlFunc. That is the only thing that reaches the combo arms of
+// a_ramp8, a_ramp5, s_trip3 and s_trip8, which is how a combo breaks.
 void NoteScoringComponent(TPinballComponent* caller)
 {
 	if (last_scoring_component == caller)
 		return;
 	if (last_scoring_component)
-		last_scoring_component->Message(static_cast<MessageCode>(0x4d), 0.0);
+		control::handler(static_cast<MessageCode>(0x4d), last_scoring_component);
 	last_scoring_component = caller;
 }
 } // namespace
@@ -128,8 +134,8 @@ int collection_cycle_reset = 0;
 //
 // Read out of PIRATES.EXE's .rdata. Single characters in the table's symbol font,
 // stored as fixed-stride runs, which is where the odd strides in the comments at
-// the declaration sites come from. The port has no symbol font, so DisplayGlyph
-// renders them as ASCII -- see docs/engine-changes.md.
+// the declaration sites come from. They draw through TTextBox::DisplayGlyph, in
+// the DAT's own symbol font -- see docs/engine-changes.md section 10.
 // ---------------------------------------------------------------------------
 
 // 0x43ab28, stride 9: the run for the n-th bailed Storm target.
@@ -178,7 +184,7 @@ void Display(TTextBox* box, const char* text, float time)
 void DisplayGlyph(TTextBox* box, const char* glyph, float time)
 {
 	if (box && glyph)
-		box->Display(glyph, time);
+		box->DisplayGlyph(glyph, time);
 }
 
 // 0x41d930
@@ -228,14 +234,12 @@ void FormatWithValue(char* out, const char* format, int value)
 		std::snprintf(out, 64, "%s", format);
 }
 
-// 0x410ff0 -- is there a high score at all? Peg Leg's Loot's finale checks it
-// before offering to beat one.
+// 0x410ff0 -- did any player's score make the high-score table? It walks the
+// players and asks get_score_position of each, which is upstream's
+// pb::chk_highscore; the game-over sequence checks it before announcing one.
 bool AnyHighScore()
 {
-	for (auto& entry : high_score::highscore_table)
-		if (entry.Score > 0)
-			return true;
-	return false;
+	return pb::chk_highscore();
 }
 
 // 0x42dd0b -- the 15-bit LCG and the open-coded `(rand() * n) >> 15`. MSVC's rand()
