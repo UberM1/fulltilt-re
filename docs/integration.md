@@ -151,8 +151,7 @@ the wrong `TLightGroup` messages, and the `TableG+0x13e` sends -- `TPinballTable
   `pb::AlternateBallSkin` as the originals do, but `GroupData` keeps only the first bitmap
   of each ball state and `TBall` does not read the flag, so nothing changes on screen.
 - **The quote scroll** is queued as one pass; the original loops until a key stops it.
-- **`TDrain`'s tilt arm** (0x418792, which kills the drain's timer) and **`TPinballTable`'s
-  own `PlayerChanged` arm** (0x419abb) are not ported.
+- **`TPinballTable`'s own `PlayerChanged` arm** (0x419abb) is not ported.
 - **Which picture each Skulduggery glyph token draws.** The token bytes are confirmed
   against `.data` and now draw through the `font2` symbol font, but which artwork sits at
   font2's slots for '3'..'9' has not been rendered and checked

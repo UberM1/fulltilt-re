@@ -733,7 +733,7 @@ void RestoreTreasureBoard();           // 0x424560
 void BlankWindGroups();                // 0x425080
 void FlashIndicatedWind(bool on);      // 0x425110
 void LightShipwreckMystery(float t);   // 0x423a30
-float BumpMultiplier(float t);          // 0x424350 -- ScoreMultiplier = fathoms + 1
+float BumpMultiplier(float t);          // 0x424350 -- all six fathoms: ScoreMultiplier = 7
 float AwardMaxCrew(float t);                // 0x425000 -- a_bump2->MessageField = 6
 void AwardCoin();                      // 0x423720
 void AwardShipwreckMystery(float t);   // 0x425c50

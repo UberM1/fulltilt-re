@@ -23,8 +23,8 @@
 //   0x00424aa0  (local) the fathom bonus formula
 //   0x00424b00  BuryTreasureHuntAward      Treasure Hunt's east-wind-lane pouch
 //   0x00425ab0  (local) dig the pouch up and pay all of it
-//   0x00424350  BumpMultiplier             ScoreMultiplier = fathoms + 1 (flash in place)
-//   0x004243d0  AdvanceFathomMultiplier    the same, lighting one more fathom
+//   0x00424350  BumpMultiplier             light all six fathoms: ScoreMultiplier = 7
+//   0x004243d0  AdvanceFathomMultiplier    light one more fathom: ScoreMultiplier = fathoms + 1
 //   0x00424580  ArmNextTreasureX           advance the "X" cursor, return a sweep id
 //   0x00424700  CollectJackpot             adds the jackpot, never resets it
 //   0x00424d30  ArmRandomKegMagnet         Tavern's magnet arming
@@ -920,22 +920,23 @@ static float PayBuriedTreasure(float time)
 // The fathom multiplier
 // ===========================================================================
 
-// 0x00424350 -- bump the multiplier.
+// 0x00424350 -- max the multiplier.
 //
 // TPinballTable::ScoreMultiplier = fathoms_lit + 1. Full Tilt holds the multiplier VALUE
 // here, not an index into a table (see the comment in reference/.../table_rules.h), so 1
 // is neutral and the ceiling is 7 with all six fathom lights lit.
 //
-// This arm *flashes* the already-lit track rather than lighting one more
-// (LightFlashTimedThenStayOn, not GroupTurnOnNext) -- which is the only difference from
-// AdvanceFathomMultiplier below, and it is why the ship wire ramp and the shipwreck
-// mystery can be worth a multiplier step without adding a fathom.
+// Message 0xf (LightFlashTimedThenStayOn) goes to the whole fathom_light_group
+// (0x42435d push 0xf; 0x424361 call [esi+0x4]), not to one light. The group has no arm
+// of its own for it and forwards it to every member, and each member turns on at once
+// before flashing, so the on-count read straight after (0x42436c push 0x29) is 6 and the
+// multiplier becomes 7 whatever it was before. That is the difference from
+// AdvanceFathomMultiplier below, which lights one more (GroupTurnOnNext). So the ship
+// capture, the shipwreck mystery's roll 3 and Peg Leg's Loot all max the multiplier, as
+// the manual says.
 //
 // A negative dwell suppresses the announcement entirely; Peg Leg's Loot's payout calls it
 // with -1.0 for exactly that reason, since it is already printing its own lines.
-//
-// Disagreement with the manual [C]: the manual says the ship wire ramp *maxes* the
-// multiplier. It increments it.
 float BumpMultiplier(float t)
 {
 	fathom_light_group->Message(ft::LightFlashTimedThenStayOn, 1.0f);
@@ -1257,8 +1258,8 @@ float AwardSpecialTreasureOrNext(float time)
 
 // 0x00425c50 -- fire the Shipwreck Mystery.
 //
-// A uniform draw from six, exactly the manual's list, with the one correction that roll 3
-// increments the multiplier rather than maxing it. Reached from the right outlane when the
+// A uniform draw from six, exactly the manual's list; roll 3 maxes the multiplier
+// (BumpMultiplier lights all six fathoms). Reached from the right outlane when the
 // light is lit, and directly from skill-shot slot 0.
 static float AwardShipwreckMysteryAt(float time)
 {

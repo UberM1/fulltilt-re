@@ -293,7 +293,6 @@ None of this reads a score, completes a quest, or looks at the screen.
   brass ball never appears.
 - **The quote scroll runs once.** The original loops in the text box's scroll slot until a
   key stops it; the port queues one pass.
-- **`TDrain`'s tilt arm** (0x418792, which kills the drain's timer) is not ported.
 - **`TPinballTable`'s own `PlayerChanged` arm** (0x419abb) is not ported; the components'
   per-player swaps are.
 - **Which picture each Skulduggery glyph token draws** is unverified: the token bytes are
