@@ -10,6 +10,20 @@ Pirate"*, and the author's position in
 of work to decompile FT tables without any symbols... Current state of decompilation: 3DPB
 - done, FT Cadet – partially done, FT others – not started."*
 
+## Screenshots
+
+The three tables running natively on Linux from one binary, each with a ball in play:
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/dragons-keep.jpg" width="420" alt="Dragon's Keep running natively on Linux, ball in play"><br>Dragon's Keep</td>
+    <td align="center"><img src="docs/screenshots/skulduggery.jpg" width="420" alt="Skulduggery running natively on Linux, Bermuda Triangle mode counting down"><br>Skulduggery</td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/space-cadet.jpg" width="420" alt="Full Tilt! Space Cadet running natively on Linux, ball in play"><br>Full Tilt! Space Cadet</td>
+  </tr>
+</table>
+
 # Disclaimer 
 The tables may not be fully functional yet. I haven't had much time to playtest, so there may be bugs or drifts from the original game that I haven't found. If you play it and something looks wrong, please feel free to open an issue with screenshots and logs. You're more than welcome!
 
