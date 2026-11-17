@@ -10,6 +10,9 @@ Pirate"*, and the author's position in
 of work to decompile FT tables without any symbols... Current state of decompilation: 3DPB
 - done, FT Cadet – partially done, FT others – not started."*
 
+# Disclaimer 
+The tables may not be fully functional yet. I haven't had much time to playtest, so there may be bugs or drifts from the original game that I haven't found. If you play it and something looks wrong, please fell free to open an issue with screenshots and logs. You're more than welcome!
+
 ## Why this is tractable
 
 The engine is **not** the problem. `TPinballTable.cpp` builds the table from
@@ -207,8 +210,6 @@ None of this reads a score, completes a quest, or looks at the screen.
 
 ### What is still open
 
-- **Play in a real window.** No rule has been checked by a person against the original
-  game. The headless runs render nothing and prove "constructs and does not crash".
 - **The alternate ball skin cheat does nothing visible.** Dragon's `PB` and Skulduggery's
   `GMAX` toggle `pb::AlternateBallSkin` as the originals do, but `GroupData` keeps only
   the first bitmap of each ball state and `TBall` does not read the flag, so the smiley /
