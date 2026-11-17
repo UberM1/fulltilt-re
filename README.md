@@ -334,6 +334,12 @@ reference/  upstream SpaceCadetPinball clone, the oracle for every CADET claim
             `git clone --depth 1 https://github.com/k4zmu2a/SpaceCadetPinball reference`)
 ```
 
+## Acknowledgements
+
+The decompilation was driven by [REA](https://github.com/morluto/rea) by morluto. Its
+seeded, headless `decompile-all` over Ghidra produced the pseudocode and listings for
+every rule handler in both tables, which is what everything in `src/` was rebuilt from.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The engine patch builds on
